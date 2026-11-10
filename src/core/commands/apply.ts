@@ -184,6 +184,19 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
       case 'due': {const u=unit();if(a.dueAt===null){delete u.dueAt;delete u.posOverride;}else {u.dueAt=date(a.dueAt);u.pos.r=radiusForDate(u.dueAt,now,doc.settings.tz);delete u.posOverride;u.pos=resolvePlacement(doc,u.sectorId,u.pos,u.id);}changed(u);log=`${u.designation} DUE ${u.dueAt??'NONE'}`;break;}
       case 'note': {const u=unit();requireThat(typeof a.note==='string','Expected note');u.note=a.note;changed(u);log=`${u.designation} NOTE ${u.note}`;break;}
       case 'rate': {const u=unit();requireThat(typeof a.rating==='string'&&/^[A-F][1-6]$/i.test(a.rating),'Rating must be A–F followed by 1–6');u.rating=a.rating.toUpperCase();changed(u);log=`${u.designation} RATED ${u.rating}`;break;}
+      case 'halt': {
+        // Cancel the unit's own orders: one by id (the inspector's ✕), one kind, or all of them.
+        const u=unit();
+        const kinds=['advance','move','attack','axis','link'];
+        requireThat(a.kind===undefined||kinds.includes(String(a.kind)),'Expected advance, move, attack, axis or link');
+        const mine=doc.orders.filter(o=>o.from===u.id&&(a.order===undefined||o.id===a.order)&&(a.kind===undefined||o.type===a.kind));
+        requireThat(mine.length,a.order!==undefined?'Unknown order':`${u.designation} has no ${a.kind===undefined?'orders':`${a.kind} order`}`);
+        const ids=new Set(mine.map(o=>o.id));
+        doc.orders=doc.orders.filter(o=>!ids.has(o.id));
+        const named=(o:Order)=>o.to==='hq'?'HQ':o.to.startsWith('hq:')?`${doc.sectors.find(x=>x.id===o.to.slice(3))?.name.toUpperCase()??''} HQ`:doc.units.find(x=>x.id===o.to)?.designation??(()=>{const m=doc.measures.find(x=>x.id===o.to);return m?`${m.type.toUpperCase()} ${m.name}`:o.to;})();
+        changed(u);log=`${u.designation} HALTED: ${mine.map(o=>`${o.type.toUpperCase()} ON ${named(o)}`).join('; ')} CANCELLED`;
+        break;
+      }
       case 'cp': {
         const u=unit();
         if(a.cp===null){requireThat(u.cp,`${u.designation} is not a command post`);delete u.cp;log=`${u.designation} CP REMOVED`;}

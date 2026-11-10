@@ -33,6 +33,7 @@ export function suggest(input:string,cursor:number,doc:Doc):{items:Suggestion[];
  else if(verb==='size'&&previous.length===2)candidates=sizes();
  else if(verb==='id'&&previous.length===2)candidates=identities();
  else if(verb==='fn'&&previous.length===2)candidates=functions();
+ else if(verb==='halt'&&previous.length===2){const u=doc.units.find(x=>x.designation.toUpperCase()===previous[1].value.toUpperCase());candidates=[...new Set(doc.orders.filter(o=>o.from===u?.id).map(o=>o.type))].map(s=>keyword(s));}
  else if(verb==='cp'&&previous.length===2)candidates=['main','tac','alt','rear','none'].map(s=>keyword(s));
  else if(verb==='new'){
   let identity=false,size=false,fn=false,title=false,sector=false,ring=false,due=false,designation=false;

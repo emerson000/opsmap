@@ -302,6 +302,8 @@
         <div class="order">
           {#if line.otherId}<button class="link" onclick={() => select(line.otherId!)}>{line.text}</button>{:else}<span>{line.text}</span>{/if}
           {#if line.ratio}<span class="ratio" class:under={line.ratio.under}>{line.ratio.text}</span>{/if}
+          <button class="x" aria-label="Cancel order: {line.text}" title="Cancel this order (/halt)" data-testid="cancel-order"
+            onclick={() => run({ verb: 'halt', args: { unit: o.from, order: o.id } })}>✕</button>
         </div>
       {:else}
         <p class="muted">No orders. {threat ? 'Unopposed.' : `Try /attack ${unit.designation} ‹target›.`}</p>
@@ -391,6 +393,9 @@
   .sub-cap.threat b { color: var(--hostile); }
   .order { display: flex; justify-content: space-between; gap: var(--s2); padding: 3px 0; border-bottom: 1px dotted var(--rule); }
   .ratio { font: 700 12px/1 var(--font-mono); }
+  .order .x { margin-left: auto; flex: none; min-width: 24px; height: 22px; border: 1px solid var(--rule); background: none; color: var(--ink-3); font: 12px/1 var(--font-mono); }
+  .order .x:hover { color: var(--hostile); border-color: var(--hostile); }
+  :global([data-tier='phone']) .order .x { min-width: 44px; height: 36px; }
   .ratio.under { color: var(--hostile); }
   .link { background: none; border: 0; padding: 0; color: var(--friend); text-decoration: underline; text-underline-offset: 2px; text-align: left; }
   .hist { font-size: 12px; padding: 2px 0; color: var(--ink-2); }

@@ -145,3 +145,20 @@ test('desktop: drop a unit into an EA, size it from its card, and the unit moves
   await expect.poll(() => page.locator(records).getAttribute('transform')).not.toBe(before);
   expect(errors(page)).toEqual([]);
 });
+
+test('desktop: the inspector cancels an order with its ✕ (halt)', async ({ page, context, baseURL }) => {
+  await signIn(context, 'alice');
+  await resetShared(context, baseURL!);
+  watchErrors(page);
+  await openMap(page);
+  const input = page.getByTestId('command-input');
+  await input.fill('/advancing LEAK on sector hq'); await input.press('Enter');
+  await expect(page.getByTestId('command-preview')).toContainText('✓');
+  await input.fill('/find LEAK'); await input.press('Enter');
+  const cancel = page.getByRole('button', { name: /Cancel order: Advancing/ });
+  await expect(cancel).toBeVisible();
+  await cancel.click();
+  await expect(page.getByTestId('command-preview')).toContainText('LEAK HALTED: ADVANCE ON HOUSEHOLD HQ CANCELLED');
+  await expect(cancel).toHaveCount(0);
+  expect(errors(page)).toEqual([]);
+});
