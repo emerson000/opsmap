@@ -21,13 +21,14 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
  const verbText=tokens[0]?.value.replace(/^\//,'').toLowerCase()??'';
  const verb=aliases[verbText]??verbText;
  let candidates:Suggestion[]=[];
- // Unit order: the verb's own groups (`group`, lower first), then units already named in this command last,
- // then recency, then the most recent unit's sector, then the most recently changed, then creation order.
+ // Unit order: units already named in this command last; the verb's own groups (`group`, lower first), except
+ // that the unit just used (clicked or commanded) beats a soft group; then recency, then the most recent unit's
+ // sector, then the most recently changed, then creation order. `strict` groups (who may attack) always hold.
  const recentRank=new Map((opts.recent??[]).map((id,i)=>[id,i] as const));
  const anchor=(opts.recent??[]).map(id=>doc.units.find(u=>u.id===id)).find(Boolean);
  const named=new Set(tokens.slice(1,complete?undefined:-1).map(t=>t.value.toUpperCase()));
- const units=(values:Unit[]=doc.units.filter(unresolved),group:(u:Unit)=>number=()=>0):Suggestion[]=>values
-  .map((u,i)=>({u,key:[group(u),Number(named.has(u.designation.toUpperCase())),recentRank.get(u.id)??Infinity,Number(u.sectorId!==anchor?.sectorId),-Date.parse(u.updatedAt)||0,i]}))
+ const units=(values:Unit[]=doc.units.filter(unresolved),group:(u:Unit)=>number=()=>0,strict=false):Suggestion[]=>values
+  .map((u,i)=>({u,key:[Number(named.has(u.designation.toUpperCase())),!strict&&recentRank.get(u.id)===0?-Infinity:group(u),recentRank.get(u.id)??Infinity,Number(u.sectorId!==anchor?.sectorId),-Date.parse(u.updatedAt)||0,i]}))
   .sort((a,b)=>{for(let k=0;k<a.key.length;k++)if(a.key[k]!==b.key[k])return a.key[k]<b.key[k]?-1:1;return 0;})
   .map(({u})=>({insert:u.designation,label:u.designation,detail:`${u.title} · ${doc.sectors.find(s=>s.id===u.sectorId)?.name??''}`,unitId:u.id,kind:'unit'}));
  const sectors=():Suggestion[]=>doc.sectors.map(s=>({insert:/\s/.test(s.name)?JSON.stringify(s.name):s.name,label:s.name,kind:'sector'}));
@@ -103,7 +104,7 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
    if(verb==='unblock')candidates=units(doc.units.filter(u=>u.lifecycle==='blocked'));
    if(verb==='unpin')candidates=units(doc.units.filter(u=>u.posOverride));
    // The attacker slot: own units first (friend, then assumed), unresolved only.
-   if(verb==='attack'||verb==='moving'){const rank=(a:string)=>a==='friend'?0:a==='assumed'?1:2;candidates=units(doc.units.filter(unresolved),u=>rank(u.affiliation));}
+   if(verb==='attack'||verb==='moving'){const rank=(a:string)=>a==='friend'?0:a==='assumed'?1:2;candidates=units(doc.units.filter(unresolved),u=>rank(u.affiliation),true);}
    if(verb==='bda')candidates=units(doc.units.filter(unresolved),u=>-(Number(['hostile','suspect'].includes(u.affiliation))*2+Number(doc.orders.some(o=>o.to===u.id&&o.type==='attack'))));
    if(verb==='id')candidates=units(doc.units.filter(unresolved),u=>Number(!['pending','unknown'].includes(u.affiliation)));
   }

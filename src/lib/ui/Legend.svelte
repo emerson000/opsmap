@@ -39,6 +39,8 @@
     ['Drag a symbol', 'Move it'],
     ['Drag the handle', 'Attack a hostile or suspect'],
     ['Double-click ground', 'Capture a new unit there'],
+    ['Right-click a symbol', 'Its menu: attack, move, due, note, block, done… (also the menu key or Shift+F10)'],
+    ['Right-click ground / area', 'Capture menu / the area’s card'],
     ['/  ·  0  ·  Ctrl+Z', 'Command bar · fit map · undo (Shift: redo)'],
   ];
   const arrows = [

@@ -181,6 +181,7 @@
       {focusInsets} touch={phone || env.coarse} compact={phone}
       onselect={(id) => { if (id) ui.beyondSector = null; }}
       oninspect={inspect}
+      oncommandtext={(text: string, caret?: number) => prefill(text, caret)}
       oncontextnew={(ctx: { sectorId: string; ring: Ring }, identity?: string) => {
         const name = doc.sectors.find(s => s.id === ctx.sectorId)?.name ?? ctx.sectorId;
         const head = `/new ${identity ? identity + ' ' : ''}"`;

@@ -23,12 +23,20 @@ describe('unit order in suggestions', () => {
     expect(units(doc, '/note ')[0]).toBe('TOOLS');
   });
 
-  it('keeps each verb’s own groups ahead of recency', () => {
+  it('puts the unit just used ahead of soft groups, but keeps friendlies first as attackers', () => {
     const doc = seedDoc(now);
     const hostile = doc.units.find(u => u.affiliation === 'hostile')!;
+    const friend = doc.units.find(u => u.affiliation === 'friend')!;
     const list = units(doc, '/attack ', [hostile.id]);
     expect(doc.units.find(u => u.designation === list[0])!.affiliation).toBe('friend');
     expect(units(doc, '/bda ', [hostile.id])[0]).toBe(hostile.designation);
+    // /bda lists threats first, but a friendly just clicked leads.
+    expect(units(doc, '/bda ', [friend.id])[0]).toBe(friend.designation);
+    // Only the most recent unit jumps the group; older ones stay inside their group.
+    const second = units(doc, '/bda ', [hostile.id, friend.id]);
+    const threat = (d: string) => ['hostile', 'suspect'].includes(doc.units.find(u => u.designation === d)!.affiliation);
+    expect(second[0]).toBe(hostile.designation);
+    expect(second.slice(0, second.indexOf(friend.designation)).length).toBeGreaterThanOrEqual(second.filter(threat).length);
   });
 
   it('puts a unit already named in the command last, and still ranks typed prefixes first', () => {

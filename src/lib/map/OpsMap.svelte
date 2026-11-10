@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import type { Command, Ring, Unit } from '../../core/model/types';
   import { AREA_SIZES, RING_R, aoScale, areaMembers, areaSizeName, type AreaSize } from '../../core/model/geometry';
   const AREA_SIZE_NAMES = Object.keys(AREA_SIZES) as AreaSize[];
@@ -8,6 +8,7 @@
   import { formatDtg } from '../../core/model/sidc';
   import { getDoc, selection } from '../model/store.svelte';
   import { dispatch } from '../commands/dispatch';
+  import { touchUnit } from '../commands/recent.svelte';
   import { buildScene, type Trail } from './scene';
   import { buildTerrain } from './terrain';
   import { annularSectorPath } from './arrows';
@@ -26,6 +27,8 @@
     oninspect?: (id: string, size: 'peek' | 'full') => void;
     /** Capture on open ground (double-click, or long-press then a capture-menu choice). */
     oncontextnew?: (ctx: { sectorId: string; ring: Ring }, identity?: string) => void;
+    /** Put a command in the command bar for the user to finish (right-click menu items ending in …). */
+    oncommandtext?: (text: string, caret?: number) => void;
     /** A sector's beyond chevron was clicked. */
     onbeyond?: (sectorId: string) => void;
     /** Errors from drag commands. Without it the map shows its own toast. */
@@ -49,7 +52,7 @@
     /** Other users' selections (v2 presence), outlined in their color. */
     remote?: { unitId: string; userId: string; color: string; initials: string; name: string }[];
   }
-  let { onselect, oninspect, oncontextnew, onbeyond, onerror, onnotice, trails, insets = NO_INSETS, focusInsets, touch = false, compact = false, now: nowProp, theme: themeProp, remote = [] }: Props = $props();
+  let { onselect, oninspect, oncontextnew, oncommandtext, onbeyond, onerror, onnotice, trails, insets = NO_INSETS, focusInsets, touch = false, compact = false, now: nowProp, theme: themeProp, remote = [] }: Props = $props();
 
   const uid = `om${Math.random().toString(36).slice(2, 8)}`;
   const terrain = buildTerrain(TERRAIN_SEED, TERRAIN_BOUNDS, 22);
@@ -156,6 +159,7 @@
       e.preventDefault();
       cancelAnimationFrame(anim);
       userMoved = true;
+      unitMenu = null;
       applyView(zoomAround(view2d, rel(e), wheelFactor(e.deltaY, e.deltaMode, e.ctrlKey)));
     };
     svg.addEventListener('wheel', onWheel, { passive: false });
@@ -191,6 +195,8 @@
   }
   function selectUnit(id: string | null) {
     selection.selectedId = id;
+    // Every click counts as using the unit, even when it was already selected: it leads the next suggestions.
+    if (id) touchUnit({ id });
     onselect?.(id);
   }
 
@@ -281,6 +287,7 @@
     const target = e.target as Element;
     if (captureMenu) captureMenu = null;
     if (measureCard) measureCard = null;
+    if (unitMenu) unitMenu = null;
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     cancelAnimationFrame(anim);
     if (pointers.size === 2) { capture(e); startPinch(); return; }
@@ -419,11 +426,91 @@
     try { oncontextnew?.(contextAt(doc, toWorld(e))); } catch { /* no sectors */ }
   }
   function onMapKey(e: KeyboardEvent) {
-    if (e.key === 'Escape' && (captureMenu || measureCard)) { captureMenu = null; measureCard = null; return; }
+    if (e.key === 'Escape' && (captureMenu || measureCard || unitMenu)) { captureMenu = null; measureCard = null; unitMenu = null; return; }
     if (e.key === 'Escape' && selection.selectedId) selectUnit(null);
   }
   function unitKey(e: KeyboardEvent, id: string) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectUnit(id); }
+    // The keyboard's context-menu key, or Shift+F10: the unit's menu at its symbol.
+    if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) {
+      e.preventDefault();
+      const su = scene.units.find(u => u.id === id);
+      if (su) openUnitMenu(id, { x: view2d.x + su.x * view2d.k, y: view2d.y + su.y * view2d.k });
+    }
+  }
+
+  // ---------- right-click (desktop) ----------
+  // A unit: its menu. An OBJ/EA/NAI: its card. Open ground: the capture menu. Touch keeps long-press.
+  type MenuItem = { key: string; label: string; act: () => void; warn?: boolean; sep?: boolean };
+  let unitMenu = $state<{ id: string; x: number; y: number; py: number } | null>(null);
+  let unitMenuEl = $state<HTMLDivElement | undefined>();
+  let unitMenuH = $state(0);
+  const MENU_W = 220;
+  const menuX = (x: number) => Math.max(8, Math.min(x, (container?.clientWidth ?? 0) - MENU_W - 8));
+  const menuUnit = $derived(unitMenu ? doc.units.find(u => u.id === unitMenu?.id) : undefined);
+  function onContextMenu(e: MouseEvent) {
+    e.preventDefault();
+    if (lastPointerType === 'touch') return;
+    captureMenu = null; measureCard = null; unitMenu = null;
+    const t = e.target as Element;
+    if (t.closest('[data-beyond]') || t.closest('.handle')) return;
+    const p = rel(e);
+    const unitId = t.closest('[data-unit-id]')?.getAttribute('data-unit-id');
+    if (unitId && doc.units.some(u => u.id === unitId)) { openUnitMenu(unitId, p); return; }
+    const measureId = t.closest('[data-measure-id]')?.getAttribute('data-measure-id');
+    if (measureId) { openMeasure(measureId); return; }
+    try { captureMenu = { x: menuX(p.x), y: p.y + 2, py: p.y, ctx: contextAt(doc, toWorld(e)) }; } catch { /* no sectors */ }
+  }
+  function openUnitMenu(id: string, p: P) {
+    selectUnit(id);
+    unitMenu = { id, x: menuX(p.x), y: p.y + 2, py: p.y };
+    void tick().then(() => unitMenuEl?.querySelector<HTMLElement>('[role="menuitem"]')?.focus());
+  }
+  /** Finish in the command bar: `text` with the caret at its end, or at `caret`. */
+  const ask = (text: string, caret?: number) => () => oncommandtext?.(text, caret);
+  /** Run at once, then confirm with the order line and an Undo, as a drag-made attack does. */
+  const act = (verb: string, args: Record<string, unknown> = {}) => () => {
+    if (!unitMenu) return;
+    const cmd = { verb, args: { unit: unitMenu.id, ...args } };
+    try { const res = dispatch(cmd); if (res.ok) onnotice?.(res.log); else toast(res.error); }
+    catch (e) { toast(`Could not ${verb}: ${e instanceof Error ? e.message : String(e)}`); }
+  };
+  function unitMenuItems(u: Unit): MenuItem[] {
+    const d = u.designation, items: MenuItem[] = [];
+    const threat = u.affiliation === 'hostile' || u.affiliation === 'suspect';
+    if (u.lifecycle === 'done' || u.lifecycle === 'dropped') {
+      items.push({ key: 'note', label: 'Note…', act: ask(`/note ${d} ""`, `/note ${d} "`.length) });
+      return items;
+    }
+    if (canAttack(u)) items.push({ key: 'attack', label: 'Attack…', act: ask(`/attack ${d} `) });
+    items.push({ key: 'move', label: 'Move…', act: ask(`/move ${d} to `) });
+    items.push({ key: 'due', label: 'Due date…', act: ask(`/due ${d} `) });
+    items.push({ key: 'note', label: 'Note…', act: ask(`/note ${d} ""`, `/note ${d} "`.length) });
+    const first = items.length;
+    if (!threat) items.push(u.lifecycle === 'blocked'
+      ? { key: 'unblock', label: 'Unblock', act: act('unblock') }
+      : { key: 'block', label: 'Block…', act: ask(`/block ${d} by ""`, `/block ${d} by "`.length) });
+    if (u.posOverride) items.push({ key: 'unpin', label: 'Unpin', act: act('unpin') });
+    if (doc.orders.some(o => o.from === u.id)) items.push({ key: 'halt', label: 'Halt orders', act: act('halt') });
+    items.push({ key: 'key', label: u.keyTerrain ? 'Clear key terrain' : 'Mark key terrain', act: act('key') });
+    if (items[first]) items[first].sep = true;
+    items.push({ key: 'done', label: threat ? 'Destroyed' : 'Done', act: act('done'), sep: true });
+    items.push({ key: 'drop', label: threat ? 'Bypassed' : 'Drop', act: act('drop', threat ? { bypassed: true } : {}), warn: true });
+    return items;
+  }
+  function chooseUnitItem(item: MenuItem) {
+    item.act();
+    unitMenu = null;
+  }
+  function unitMenuKey(e: KeyboardEvent) {
+    const items = [...(unitMenuEl?.querySelectorAll<HTMLElement>('[role="menuitem"]') ?? [])];
+    const at = items.indexOf(document.activeElement as HTMLElement);
+    const go = (i: number) => { e.preventDefault(); items[(i + items.length) % items.length]?.focus(); };
+    if (e.key === 'ArrowDown') go(at + 1);
+    else if (e.key === 'ArrowUp') go(at - 1);
+    else if (e.key === 'Home') go(0);
+    else if (e.key === 'End') go(items.length - 1);
+    else if (e.key === 'Escape' || e.key === 'Tab') { e.preventDefault(); e.stopPropagation(); unitMenu = null; svg?.focus(); }
   }
   function chooseCapture(identity?: string) {
     const m = captureMenu;
@@ -458,12 +545,19 @@
   const RING_NAME: Record<Ring, string> = { hq: 'HQ', near: 'close', mid: 'deep', far: 'far', beyond: 'beyond' };
 </script>
 
+<!-- A press outside the map (sidebars, bars) closes its right-click menus; the map's own presses close them too. -->
+<svelte:window onpointerdown={(e) => {
+  const t = e.target as Element;
+  if (!t.isConnected || t.closest?.('.capture-menu') || container?.contains(t)) return;
+  unitMenu = null; if (!touch) captureMenu = null;
+}} />
+
 <div class="opsmap" data-theme={theme} bind:this={container} bind:clientHeight={mapH}>
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <svg bind:this={svg} class="map-svg" role="application" aria-label="Tactical map" tabindex="-1" data-zoom={view2d.k.toFixed(4)}
     class:dragging={drag?.moved || link}
     onpointerdown={onPointerDown} onpointermove={onPointerMove} onpointerup={onPointerUp} onpointercancel={onPointerCancel}
-    ondblclick={onDblClick} onkeydown={onMapKey} oncontextmenu={(e) => { if (lastPointerType === 'touch') e.preventDefault(); }}>
+    ondblclick={onDblClick} onkeydown={onMapKey} oncontextmenu={onContextMenu}>
     <g transform="translate({view2d.x} {view2d.y}) scale({view2d.k})">
       <TerrainLayer {terrain} {uid} {s} {mt} />
       <FrameworkLayer {scene} {uid} {s} {mt} declutter={compactPl} {theme} view={doc.settings.view} activeSectorId={preview?.sectorId ?? selectedUnit?.sectorId ?? null} {onbeyond} />
@@ -610,11 +704,24 @@
         <button class="btn" onclick={() => (measureCard = null)}>Close</button>
       </div>
   {/if}
+  {#if unitMenu && menuUnit}
+    {@const u = menuUnit}
+    {@const um = unitMenu}
+    <div class="capture-menu desk-menu" role="menu" tabindex="-1" aria-label="{u.designation} actions" data-testid="unit-menu" data-unit={u.id}
+      bind:this={unitMenuEl} bind:offsetHeight={unitMenuH} onkeydown={unitMenuKey} oncontextmenu={(e) => e.preventDefault()}
+      style="left:{um.x}px; top:{um.y + unitMenuH <= mapH - (insets?.bottom ?? 0) - 8 ? um.y : Math.max(8, um.py - unitMenuH - 2)}px">
+      <div class="cm-title"><b>{u.designation}</b> {u.title}</div>
+      {#each unitMenuItems(u) as item (item.key)}
+        {#if item.sep}<div class="cm-sep" role="separator"></div>{/if}
+        <button class="btn" class:warn={item.warn} role="menuitem" tabindex="-1" data-action={item.key} onclick={() => chooseUnitItem(item)}>{item.label}</button>
+      {/each}
+    </div>
+  {/if}
   {#if captureMenu}
     {@const m = captureMenu}
     {@const sec = captureSector}
     <!-- Below the finger, or above it when the command bar or sheet would cover it; never under the finger, which lifts onto it. -->
-    <div class="capture-menu" role="menu" aria-label="Capture here" data-testid="capture-menu" bind:offsetHeight={menuH}
+    <div class="capture-menu" class:desk-menu={!touch} role="menu" aria-label="Capture here" data-testid="capture-menu" bind:offsetHeight={menuH}
       style="left:{m.x}px; top:{menuTop(m)}px">
       <div class="cm-title">New here · {sec?.name ?? m.ctx.sectorId} · {RING_NAME[m.ctx.ring]}</div>
       <button class="btn" role="menuitem" onclick={() => chooseCapture()}>New unit</button>
@@ -714,6 +821,14 @@
   .map-controls.touch .btn {height:44px;min-width:44px;justify-content:center;font-size:14px;}
   .capture-menu { position:absolute; z-index:4; width:220px; display:flex; flex-direction:column; gap:4px; padding:8px; background:var(--om-panel); color:var(--om-ink); border:2px solid var(--om-ink); box-shadow:0 4px 16px rgba(0,0,0,0.25); }
   .capture-menu .btn { height:44px; justify-content:center; }
+  /* Desktop menus (right-click): compact rows, left-aligned, keyboard focus visible. */
+  .desk-menu { gap:0; padding:4px; }
+  .desk-menu .btn { height:28px; justify-content:flex-start; border-color:transparent; background:transparent; padding:0 8px; }
+  .desk-menu .btn:hover, .desk-menu .btn:focus-visible { background:var(--om-ink); color:var(--om-panel); outline:none; }
+  .desk-menu .btn.warn { color:var(--om-hostile); }
+  .desk-menu .btn.warn:hover, .desk-menu .btn.warn:focus-visible { background:var(--om-hostile); color:#fff; }
+  .desk-menu .cm-title { padding:4px 8px 6px; border-bottom:1px solid var(--om-ink-soft); margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-transform:none; letter-spacing:0.02em; }
+  .cm-sep { height:1px; margin:4px 2px; background:var(--om-ink-soft); opacity:0.5; }
   .cm-title { font:600 12px/1.3 var(--om-font-cond); letter-spacing:0.08em; text-transform:uppercase; padding:2px 2px 4px; }
   .measure-card { width: 240px; }
   .cm-meta { font: 12px/1.35 var(--om-font); padding: 0 2px 4px; }
