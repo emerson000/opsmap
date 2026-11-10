@@ -51,6 +51,10 @@ Clearing orders: `/halt <unit>` cancels all of a unit's own orders, and `/halt <
 
 Task forces: a unit becomes a task force (TF bracket) when another unit is attached to it, `/attach <unit> to <tf>`. Only the task force itself may hold orders that cross a sector boundary, e.g. `/attack <tf> <hostile in another sector>`; its attached units may not.
 
+Supporting attacks (`/attack <unit> <hostile> support`, or a second attack dragged onto a hostile that already has a main effort) draw as a thinner arrow with an open head and SPT. Staff and Detail always show them; Commander shows them when their attacker, their target or the main attacker on that target is selected.
+
+Command bar suggestions list units in this order: each command's own grouping first (for example friendlies first for the attacker of `/attack`), then the units you last commanded or selected in this browser tab, most recent first (a unit just captured with `/new` counts), then units in that unit's sector, then the most recently changed. A unit already named in the command goes last, and names that start with what you typed come first. Another user's activity does not change your order.
+
 Support between friendlies: `/support <unit> <engaged unit>` (alias `/spt`) has one friendly back another, in any sector, without a task force. It draws a dashed arrow with an open head and SPT from the supporter to the supported unit (Staff and Detail, or in Commander when either is selected), adds the supporter's weight to the force ratio of the attacks the supported unit makes, and is cleared with `/halt <unit> support` or the inspector's ✕. It is not an attack: the supporter takes no order against the hostile.
 
 Sector HQs as targets: `/advancing <hostile> on sector hq` (its own sector's HQ) or `on <sector> hq`, and `/moving <unit> to sector hq` for a friendly falling back. The targeted sector HQ then shows in every view. Moving the unit to another sector cancels the order; removing the sector drops it, or retargets it to the receiving sector's HQ with `reassign`. Plain `hq` is still the center.

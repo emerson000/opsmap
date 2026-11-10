@@ -1,9 +1,11 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount, tick, untrack } from 'svelte';
   import type { Doc } from '../../core/model/types';
   import { parse } from '../commands/grammar';
   import { suggest, type Suggestion } from '../../core/commands/suggest';
   import { dispatchText } from '../commands/dispatch';
+  import { recentIds, touchUnit } from '../commands/recent.svelte';
+  import { selection } from '../model/store.svelte';
   import { tokenize } from '../../core/commands/tokenize';
   import { miniSymbol } from './mini';
   import { barRequest, lastResult, assessPrompt, write, ui, env, type Theme } from './shell.svelte';
@@ -25,9 +27,13 @@
 
   const isCommand = $derived(value.trimStart().startsWith('/'));
   const result = $derived(isCommand && value.trim().length > 1 ? parse(value, doc) : null);
-  const sug = $derived(isCommand && focused ? suggest(value, cursor, doc) : { items: [] as Suggestion[], ghost: '' });
+  const sug = $derived(isCommand && focused ? suggest(value, cursor, doc, { recent: recentIds(doc) }) : { items: [] as Suggestion[], ghost: '' });
   const items = $derived(sug.items);
   const showPop = $derived(open && focused && items.length > 0);
+
+  // Selecting a unit on the map counts as using it: it leads the next unit list.
+  // untrack: touchUnit reads the list it writes, which would re-run this effect without end.
+  $effect(() => { const id = selection.selectedId; if (id) untrack(() => touchUnit({ id })); });
 
   /** Remaining syntax slots after the complete tokens typed so far (inline ghost). */
   const ghostTail = $derived.by(() => {

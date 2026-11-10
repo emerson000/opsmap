@@ -7,7 +7,12 @@ import { unresolved } from './resolve';
 import { tokenize } from './tokenize';
 export interface Suggestion {insert:string;label:string;detail?:string;unitId?:string;kind:'verb'|'unit'|'sector'|'echelon'|'function'|'identity'|'keyword'|'date';}
 const keyword=(insert:string,kind:Suggestion['kind']='keyword'):Suggestion=>({insert,label:insert,kind});
-export function suggest(input:string,cursor:number,doc:Doc):{items:Suggestion[];ghost:string} {
+export interface SuggestOptions {
+ /** Units this user commanded or selected recently, most recent first. They lead each unit list, so a chain of
+  *  commands on one unit needs no typing; then units in that unit's sector, then the most recently changed. */
+ recent?:readonly string[];
+}
+export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={}):{items:Suggestion[];ghost:string} {
  const prefix=input.slice(0,Math.max(0,Math.min(input.length,cursor)));
  let tokens;
  try {tokens=tokenize(prefix);}catch{return {items:[],ghost:'Close the quoted text with "'};}
@@ -16,14 +21,22 @@ export function suggest(input:string,cursor:number,doc:Doc):{items:Suggestion[];
  const verbText=tokens[0]?.value.replace(/^\//,'').toLowerCase()??'';
  const verb=aliases[verbText]??verbText;
  let candidates:Suggestion[]=[];
- const units=(values:Unit[]=doc.units.filter(unresolved)):Suggestion[]=>values.map(u=>({insert:u.designation,label:u.designation,detail:`${u.title} · ${doc.sectors.find(s=>s.id===u.sectorId)?.name??''}`,unitId:u.id,kind:'unit'}));
+ // Unit order: the verb's own groups (`group`, lower first), then units already named in this command last,
+ // then recency, then the most recent unit's sector, then the most recently changed, then creation order.
+ const recentRank=new Map((opts.recent??[]).map((id,i)=>[id,i] as const));
+ const anchor=(opts.recent??[]).map(id=>doc.units.find(u=>u.id===id)).find(Boolean);
+ const named=new Set(tokens.slice(1,complete?undefined:-1).map(t=>t.value.toUpperCase()));
+ const units=(values:Unit[]=doc.units.filter(unresolved),group:(u:Unit)=>number=()=>0):Suggestion[]=>values
+  .map((u,i)=>({u,key:[group(u),Number(named.has(u.designation.toUpperCase())),recentRank.get(u.id)??Infinity,Number(u.sectorId!==anchor?.sectorId),-Date.parse(u.updatedAt)||0,i]}))
+  .sort((a,b)=>{for(let k=0;k<a.key.length;k++)if(a.key[k]!==b.key[k])return a.key[k]<b.key[k]?-1:1;return 0;})
+  .map(({u})=>({insert:u.designation,label:u.designation,detail:`${u.title} · ${doc.sectors.find(s=>s.id===u.sectorId)?.name??''}`,unitId:u.id,kind:'unit'}));
  const sectors=():Suggestion[]=>doc.sectors.map(s=>({insert:/\s/.test(s.name)?JSON.stringify(s.name):s.name,label:s.name,kind:'sector'}));
  const identities=()=>['friend','hostile','neutral','unknown','suspect','assumed','pending'].map(s=>keyword(s,'identity'));
  const sizes=():Suggestion[]=>ECHELONS.map(e=>({insert:e.key,label:`${e.key} · ${e.mark}`,detail:e.range,kind:'echelon'}));
  const functions=():Suggestion[]=>FUNCTIONS.map(f=>({insert:f.key,label:f.key,detail:f.label,kind:'function'}));
  const before=previous.at(-1)?.value.toLowerCase();
  const source=doc.units.find(u=>u.designation.toLowerCase()===previous[1]?.value.toLowerCase()||u.id===previous[1]?.value.replace(/^#/,''));
- const threats=()=>doc.units.filter(u=>unresolved(u)&&['hostile','suspect'].includes(u.affiliation)&&u.id!==source?.id).sort((a,b)=>Number(b.sectorId===source?.sectorId)-Number(a.sectorId===source?.sectorId));
+ const threats=()=>units(doc.units.filter(u=>unresolved(u)&&['hostile','suspect'].includes(u.affiliation)&&u.id!==source?.id),u=>Number(u.sectorId!==source?.sectorId));
  const dates=()=>['today','tmw','mon','tue','wed','thu','fri','sat','sun','eow','eom','+3d'].map(s=>keyword(s,'date'));
  let hint='';
 
@@ -33,7 +46,7 @@ export function suggest(input:string,cursor:number,doc:Doc):{items:Suggestion[];
  else if(verb==='size'&&previous.length===2)candidates=sizes();
  else if(verb==='id'&&previous.length===2)candidates=identities();
  else if(verb==='fn'&&previous.length===2)candidates=functions();
- else if(verb==='support'&&previous.length===2){const engaged=new Set(doc.orders.filter(o=>o.type==='attack').map(o=>o.from));candidates=units(doc.units.filter(u=>unresolved(u)&&(u.affiliation==='friend'||u.affiliation==='assumed')&&u.designation.toUpperCase()!==previous[1].value.toUpperCase()).sort((x,y)=>Number(engaged.has(y.id))-Number(engaged.has(x.id))));}
+ else if(verb==='support'&&previous.length===2){const engaged=new Set(doc.orders.filter(o=>o.type==='attack').map(o=>o.from));candidates=units(doc.units.filter(u=>unresolved(u)&&(u.affiliation==='friend'||u.affiliation==='assumed')&&u.designation.toUpperCase()!==previous[1].value.toUpperCase()),u=>Number(!engaged.has(u.id)));}
  else if(verb==='halt'&&previous.length===2){const u=doc.units.find(x=>x.designation.toUpperCase()===previous[1].value.toUpperCase());candidates=[...new Set(doc.orders.filter(o=>o.from===u?.id).map(o=>o.type))].map(s=>keyword(s));}
  else if(verb==='cp'&&previous.length===2)candidates=['main','tac','alt','rear','none'].map(s=>keyword(s));
  else if(verb==='new'){
@@ -90,11 +103,11 @@ export function suggest(input:string,cursor:number,doc:Doc):{items:Suggestion[];
    if(verb==='unblock')candidates=units(doc.units.filter(u=>u.lifecycle==='blocked'));
    if(verb==='unpin')candidates=units(doc.units.filter(u=>u.posOverride));
    // The attacker slot: own units first (friend, then assumed), unresolved only.
-   if(verb==='attack'||verb==='moving'){const rank=(a:string)=>a==='friend'?0:a==='assumed'?1:2;candidates=units(doc.units.filter(unresolved).sort((a,b)=>rank(a.affiliation)-rank(b.affiliation)));}
-   if(verb==='bda')candidates=units(doc.units.filter(unresolved).sort((a,b)=>Number(['hostile','suspect'].includes(b.affiliation))*2+Number(doc.orders.some(o=>o.to===b.id&&o.type==='attack'))-Number(['hostile','suspect'].includes(a.affiliation))*2-Number(doc.orders.some(o=>o.to===a.id&&o.type==='attack'))));
-   if(verb==='id')candidates=units(doc.units.filter(unresolved).sort((a,b)=>Number(['pending','unknown'].includes(b.affiliation))-Number(['pending','unknown'].includes(a.affiliation))));
+   if(verb==='attack'||verb==='moving'){const rank=(a:string)=>a==='friend'?0:a==='assumed'?1:2;candidates=units(doc.units.filter(unresolved),u=>rank(u.affiliation));}
+   if(verb==='bda')candidates=units(doc.units.filter(unresolved),u=>-(Number(['hostile','suspect'].includes(u.affiliation))*2+Number(doc.orders.some(o=>o.to===u.id&&o.type==='attack'))));
+   if(verb==='id')candidates=units(doc.units.filter(unresolved),u=>Number(!['pending','unknown'].includes(u.affiliation)));
   }
-  if(['attack','moving'].includes(verb)&&previous.length>=2)candidates=units(threats());
+  if(['attack','moving'].includes(verb)&&previous.length>=2)candidates=threats();
   if(verb==='attach'&&before==='to')candidates=units(doc.units.filter(u=>u.taskForce&&u.id!==source?.id&&unresolved(u)));
 
   if(['attack','axis','moving'].includes(verb)&&previous.length>=2)candidates.push(...doc.measures.filter(m=>m.type==='obj').map(m=>({insert:JSON.stringify(m.name),label:`${m.type.toUpperCase()} ${m.name}`,kind:'keyword' as const})));

@@ -7,6 +7,7 @@ import { parse } from './grammar';
 import { undo, redo, record, cloneDoc, undoLabel } from './undo';
 import { sitrepText } from './sitrep';
 import { turnDetails, turnState } from './turn';
+import { noteCommand } from './recent.svelte';
 export type DispatchResult={ok:true;log:string}|{ok:false;error:string;at?:number};
 export interface CommandEvent {sequence:number;cmd:Command;text?:string;unitId?:string;}
 /** Shell actions (copy, file picker, pan, help, SITREP) are handled by the UI subscriber. */
@@ -37,6 +38,11 @@ function dispatchRemote(r:Remote,cmd:Command):DispatchResult {
  return {ok:true,log:res.log};
 }
 export function dispatch(cmd:Command):DispatchResult {
+ const res=dispatchAny(cmd);
+ if(res.ok&&cmd.verb!=='undo'&&cmd.verb!=='redo')noteCommand(cmd,res.log);
+ return res;
+}
+function dispatchAny(cmd:Command):DispatchResult {
  if(remote){try {return dispatchRemote(remote,cmd);}catch(error){return {ok:false,error:error instanceof Error?error.message:'Command failed'};}}
  try {
   if(cmd.verb==='undo'||cmd.verb==='redo'){

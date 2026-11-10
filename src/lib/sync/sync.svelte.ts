@@ -4,6 +4,7 @@ import type { Doc } from '../../core/model/types';
 import { importJson } from '../../core/model/json';
 import { setDoc } from '../model/store.svelte';
 import { useRemote } from '../commands/dispatch';
+import { clearRecent } from '../commands/recent.svelte';
 import { STORAGE_KEY as V1_KEY } from '../model/persist';
 import { lastResult, toast } from '../ui/shell.svelte';
 import { SyncEngine, type Cache, type OpMeta, type SocketLike, type Status } from './engine';
@@ -253,6 +254,7 @@ export function switchMap(id: string): boolean {
   if (engine.pendingCount) { toast(`Wait: ${engine.pendingCount} change${engine.pendingCount === 1 ? '' : 's'} on this map not saved yet`); return false; }
   saveCache();
   live.mapId = id; live.online = [];
+  clearRecent(); // unit ids belong to the map they came from
   remember(id);
   connect(id);
   return true;
