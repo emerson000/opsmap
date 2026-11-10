@@ -9,7 +9,7 @@ export const aliases:Record<string,string>={n:'new','+':'new',aff:'id',ech:'size
 export const SYNTAX:Record<string,string>={
  new:'[identity] [size] [function] "‹title›" [in ‹sector›] [ring] [due ‹date›] [as ‹designation›]',
  id:'‹unit› ‹identity› [confirm]',size:'‹unit› ‹echelon›',fn:'‹unit› ‹function›',rename:'‹unit› "‹title›" [as ‹designation›]',
- move:'‹unit› [to ‹sector›] ‹ring› | ‹unit› near ‹unit›',attack:'‹unit› ‹target› [main|support] [planned]',moving:'‹unit› to ‹target|nearest hostile|hq›',axis:'‹unit› to OBJ ‹name› [via PL ‹name›, ...]',advancing:'‹hostile› on ‹hq|unit›',
+ move:'‹unit› [to ‹sector›] ‹ring› | ‹unit› near ‹unit›',attack:'‹unit› ‹target› [main|support] [planned]',moving:'‹unit› to ‹target|nearest hostile|hq|sector hq|‹sector› hq›',axis:'‹unit› to OBJ ‹name› [via PL ‹name›, ...]',advancing:'‹hostile› on ‹hq|sector hq|‹sector› hq|unit›',
  cp:'‹unit› ‹main|tac|alt|rear|none›',bda:'‹unit› ‹0–100%|fc|dmg|des|full›',block:'‹unit› [by "‹reason›"]',unblock:'‹unit›',done:'‹unit›',drop:'‹unit› [bypassed]',reinforce:'‹unit› [with ‹unit›]',reduce:'‹unit› ["‹scope cut›"]',attach:'‹unit› to ‹task force›',detach:'‹unit›',link:'‹unit› ‹unit› [as dependency|handoff]',due:'‹unit› ‹date|none›',note:'‹unit› "‹text›"',rate:'‹unit› ‹A–F›‹1–6›',key:'‹unit›',sector:'add ‹name› | rename ‹name› ‹new name› | remove ‹name› [reassign ‹sector›] | width ‹name› ‹degrees›',pl:'add "‹name›" ‹date› | date ‹name› ‹date› | remove ‹name›',obj:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | join ‹name› ‹unit›… | leave ‹name› ‹unit›… | size ‹name› ‹small|medium|large|xl› | remove ‹name›',ea:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | join ‹name› ‹unit›… | leave ‹name› ‹unit›… | size ‹name› ‹small|medium|large|xl› | remove ‹name›',nai:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | join ‹name› ‹unit›… | leave ‹name› ‹unit›… | size ‹name› ‹small|medium|large|xl› | remove ‹name›',find:'‹unit›',sitrep:'[copy]',intent:'"‹one line›"',turn:'',view:'commander|staff|detail',undo:'',redo:'',export:'',import:'',sidc:'‹unit› ‹20 digits›',help:'',
 };
 const rings=['hq','near','mid','far','beyond'];
@@ -36,7 +36,15 @@ export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult 
   const selected=doc.units.find(u=>u.id===context.selectedId);
   const subject=():Unit=>{const t=take('unit');const u=resolveUnit(t.value,doc,t.start,selected?.sectorId);a.unit=u.id;return u;};
   const sector=()=>{eat('sector');const t=take('sector');return resolveSector(t.value,doc,t.start).id;};
-  const target=(source?:Unit)=>{if(eat('hq'))return 'hq';const type=peek()?.value.toLowerCase();if(['obj','ea','nai','pl'].includes(type??'')){take('type');const t=take('control measure');return resolveMeasure(t.value,doc,type as 'obj',t.start).id;}const t=take('target');return resolveTarget(t.value,doc,t.start,source?.sectorId??selected?.sectorId).id;};
+  /** `hq` (the center), `sector hq` (the source's own sector HQ) or `<sector> hq` (that sector's HQ, as `hq:<id>`). */
+  const sectorHq=(source?:Unit):string|undefined=>{
+   const t=peek(),next=tokens[i+1];
+   if(!t||!next||next.value.toLowerCase()!=='hq')return;
+   if(t.value.toLowerCase()==='sector'){const owner=source??selected;if(!owner)throw new CommandError('Name the sector: ‹sector› hq',t.start);take('sector');take('hq');return `hq:${owner.sectorId}`;}
+   const sec=doc.sectors.find(s=>s.name.toLowerCase()===t.value.toLowerCase()||s.id===t.value.toLowerCase());
+   if(!sec)return;take('sector');take('hq');return `hq:${sec.id}`;
+  };
+  const target=(source?:Unit)=>{const shq=sectorHq(source);if(shq)return shq;if(eat('hq'))return 'hq';const type=peek()?.value.toLowerCase();if(['obj','ea','nai','pl'].includes(type??'')){take('type');const t=take('control measure');return resolveMeasure(t.value,doc,type as 'obj',t.start).id;}const t=take('target');return resolveTarget(t.value,doc,t.start,source?.sectorId??selected?.sectorId).id;};
   const date=()=>{const t=take('date');try{return parseDate(t.value,now,doc.settings.tz);}catch(e){throw new CommandError((e as Error).message,t.start);}};
   const quoted=(label:string)=>{const t=take(label);if(!t.quoted)throw new CommandError(`Quote the ${label}`,t.start);return t.value;};
   switch(verb){

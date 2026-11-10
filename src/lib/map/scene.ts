@@ -22,6 +22,8 @@ export interface SceneSector {
   wedge: string; band: string; rimPath: string;
   boundary: { segments: [Pt, Pt][]; mark: Pt & { angle: number } };
   hq: Pt; chevron: Pt & { angle: number }; beyondCount: number;
+  /** An order targets this sector's HQ, so it shows in every view. */
+  hqTargeted: boolean;
 }
 export interface SceneRing { key: Ring; r: number; label: string; date: string; paths: string[]; /** Arc center of each label path, degrees (screen, 270 = up). */ centers: number[] }
 export interface SceneOrder {
@@ -124,6 +126,7 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
       hq: world(SECTOR_HQ_R, centerDeg),
       chevron: { ...world(CHEVRON_R, centerDeg), angle: centerDeg },
       beyondCount: beyondBySector.get(s.id) ?? 0,
+      hqTargeted: doc.orders.some(o => o.to === `hq:${s.id}`),
     };
   });
   const sectorById = new Map(sectors.map(s => [s.id, s]));
@@ -190,6 +193,7 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
     return { id: m.id, type: m.type, label: m.type.toUpperCase(), name: m.name.toUpperCase(), x: r2(p.x), y: r2(p.y), r, outline, members: shape.members, labelY: r2(shape.members ? p.y - r - 13 * scale : p.y) };
   });
   anchors.set('hq', { x: 0, y: 0, clear: HQ_CLEAR * scale });
+  for (const sec of sectors) anchors.set(`hq:${sec.id}`, { x: sec.hq.x, y: sec.hq.y, clear: 14 * scale });
 
   // Orders
   const visibleOrder = (ord: Order) => {

@@ -1,5 +1,5 @@
 import ms from 'milsymbol';
-import type { Affiliation, Command, CommandPost, ControlMeasure, Doc, Echelon, FunctionKey, Order, Ring, Unit, Touched } from '../model/types';
+import type { Affiliation, Command, CommandPost, ControlMeasure, Sector, Doc, Echelon, FunctionKey, Order, Ring, Unit, Touched } from '../model/types';
 import { designationFrom, effectiveCondition } from '../model/derive';
 import { ECHELONS, echelonIndex } from '../model/echelon';
 import { FUNCTIONS } from '../model/functions';
@@ -48,7 +48,7 @@ function validOrders(doc:Doc):void {
   const main=new Set<string>();
   for(const order of doc.orders){
     const source=doc.units.find(u=>u.id===order.from);if(!source)continue;
-    const target=doc.units.find(u=>u.id===order.to)??doc.measures.find(m=>m.id===order.to);
+    const target=order.to.startsWith('hq:')?{sectorId:order.to.slice(3)}:doc.units.find(u=>u.id===order.to)??doc.measures.find(m=>m.id===order.to);
     if(target?.sectorId&&target.sectorId!==source.sectorId&&!source.taskForce)throw new CommandError('Cross-sector orders require a task force');
     if(order.type==='attack'&&order.role==='main'){if(main.has(source.sectorId))order.role='support';else main.add(source.sectorId);}
   }
@@ -65,32 +65,41 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
       const cancelled=doc.orders.filter(o=>{
         if(!ids.has(o.from)&&!ids.has(o.to))return false;
         const source=doc.units.find(x=>x.id===o.from);
-        const target=doc.units.find(x=>x.id===o.to)??doc.measures.find(x=>x.id===o.to);
+        const target=o.to.startsWith('hq:')?{sectorId:o.to.slice(3)}:doc.units.find(x=>x.id===o.to)??doc.measures.find(x=>x.id===o.to);
         return source&&!source.taskForce&&target?.sectorId&&source.sectorId!==target.sectorId;
       });
       doc.orders=doc.orders.filter(o=>!cancelled.some(c=>c.id===o.id));
-      return cancelled.map(order=>`; ${order.type.toUpperCase()} ON ${doc.units.find(x=>x.id===order.to)?.designation??doc.measures.find(m=>m.id===order.to)?.name??'HQ'} CANCELLED (BOUNDARY)`).join('');
+      return cancelled.map(order=>`; ${order.type.toUpperCase()} ON ${doc.units.find(x=>x.id===order.to)?.designation??doc.measures.find(m=>m.id===order.to)?.name??(order.to.startsWith('hq:')?`${doc.sectors.find(x=>x.id===order.to.slice(3))?.name.toUpperCase()??''} HQ`:'HQ')} CANCELLED (BOUNDARY)`).join('');
     };
     /** Place a unit by hand: free spot near the requested position, pinned against auto-advance. */
     const relocate=(u:Unit,sectorId:string,pos:{r:number;theta:number})=>{u.sectorId=sectorId;u.pos=resolvePlacement(doc,sectorId,pos,u.id);if(u.dueAt)u.posOverride=true;changed(u);};
     const areaOf=(u:Unit)=>doc.measures.find(m=>m.members?.includes(u.id));
     const release=(m:ControlMeasure,id:string)=>{m.members=(m.members??[]).filter(x=>x!==id);if(!m.members.length)delete m.members;};
     const label=(u:Unit)=>`${u.designation} (${u.fn.toUpperCase()} ${u.echelon?.toUpperCase()??'UNK'})`;
-    const setOrder=(source:Unit,target:Unit|ControlMeasure|'hq',type:Order['type'],role?:Order['role'])=>{
+    /** The center HQ ('hq'), a sector HQ ('hq:<sector id>'), a unit or a control measure. */
+    type Target=Unit|ControlMeasure|'hq'|{sectorHq:Sector};
+    const hqTarget=(value:unknown):Target|undefined=>{
+      if(value==='hq')return 'hq';
+      if(typeof value==='string'&&value.startsWith('hq:'))return {sectorHq:item(doc.sectors,value.slice(3),'sector')};
+    };
+    const setOrder=(source:Unit,target:Target,type:Order['type'],role?:Order['role'])=>{
       requireThat(unresolved(source),'Archived or destroyed units cannot receive orders');
-      requireThat(target==='hq'||target.id!==source.id,'An order cannot target its own unit');
-      if(target!=='hq'){
+      requireThat(target==='hq'||'sectorHq'in target||target.id!==source.id,'An order cannot target its own unit');
+      if(typeof target==='object'&&'sectorHq'in target){
+        requireThat(type==='advance'||type==='move','Only advance and move orders can target a sector HQ');
+        requireThat(target.sectorHq.id===source.sectorId||source.taskForce,'Cross-sector orders require a task force');
+      }else if(target!=='hq'){
         requireThat(!('lifecycle'in target)||unresolved(target),'Target is archived or destroyed');
         requireThat(!target.sectorId||target.sectorId===source.sectorId||source.taskForce,'Cross-sector orders require a task force');
       }
       if(type==='attack'){
         requireThat(source.affiliation==='friend'||source.affiliation==='assumed','Only friendly units can attack');
-        requireThat(target!=='hq'&&('affiliation'in target?(target.affiliation==='hostile'||target.affiliation==='suspect'):target.type==='obj'),'Attack target must be a hostile, suspect, or objective');
+        requireThat(target!=='hq'&&!('sectorHq'in target)&&('affiliation'in target?(target.affiliation==='hostile'||target.affiliation==='suspect'):target.type==='obj'),'Attack target must be a hostile, suspect, or objective');
         if(role==='main')for(const order of doc.orders)if(order.type==='attack'&&order.role==='main'&&doc.units.find(u=>u.id===order.from)?.sectorId===source.sectorId)order.role='support';
         if(a.planned!==true)source.lifecycle='active';
       }
       doc.orders=doc.orders.filter(o=>!(o.from===source.id&&o.type===type));
-      const order:Order={id:uniqueId('o',doc.orders),type,from:source.id,to:target==='hq'?'hq':target.id,createdAt:at};
+      const order:Order={id:uniqueId('o',doc.orders),type,from:source.id,to:target==='hq'?'hq':'sectorHq'in target?`hq:${target.sectorHq.id}`:target.id,createdAt:at};
       if(role)order.role=role;if(a.planned===true)order.planned=true;
       if(type==='axis'){
         requireThat(target!=='hq'&&'type'in target&&target.type==='obj','Axis requires an objective');
@@ -99,7 +108,7 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
         order.planned=true;
       }
       doc.orders.push(order);changed(source);
-      const name=target==='hq'?'HQ':'designation'in target?label(target):`${target.type.toUpperCase()} ${target.name}`;
+      const name=target==='hq'?'HQ':'sectorHq'in target?`${target.sectorHq.name.toUpperCase()} HQ`:'designation'in target?label(target):`${target.type.toUpperCase()} ${target.name}`;
       log=`${label(source)} ${type==='attack'?'ATTACKS':type==='advance'?'ADVANCES ON':type==='axis'?'AXIS TO':'MOVES TO'} ${name}${role==='main'?' — MAIN EFFORT':role==='support'?' — SUPPORT':''}${order.planned?' — PLANNED':''}`;
     };
     switch(cmd.verb){
@@ -139,9 +148,9 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
         break;
       }
       case 'attack': {const u=unit(),target=item([...doc.units,...doc.measures],a.target,'target');const role=a.role??'main';requireThat(role==='main'||role==='support','Invalid attack role');setOrder(u,target,'attack',role);break;}
-      case 'moving': {const u=unit();const target=a.target==='hq'?'hq':item([...doc.units,...doc.measures],a.target,'target');if(target!=='hq'&&'affiliation'in target&&(target.affiliation==='hostile'||target.affiliation==='suspect')){const hasMain=doc.orders.some(o=>o.type==='attack'&&o.role==='main'&&doc.units.find(x=>x.id===o.from)?.sectorId===u.sectorId);setOrder(u,target,'attack',hasMain?'support':'main');}else setOrder(u,target,'move');break;}
+      case 'moving': {const u=unit();const target=hqTarget(a.target)??item([...doc.units,...doc.measures],a.target,'target');if(target!=='hq'&&'affiliation'in target&&(target.affiliation==='hostile'||target.affiliation==='suspect')){const hasMain=doc.orders.some(o=>o.type==='attack'&&o.role==='main'&&doc.units.find(x=>x.id===o.from)?.sectorId===u.sectorId);setOrder(u,target,'attack',hasMain?'support':'main');}else setOrder(u,target,'move');break;}
       case 'axis':setOrder(unit(),item(doc.measures,a.target,'objective'),'axis');break;
-      case 'advancing': {const u=unit();requireThat(u.affiliation==='hostile'||u.affiliation==='suspect','Only hostiles or suspects can advance');setOrder(u,a.target==='hq'?'hq':item(doc.units,a.target,'unit'),'advance');break;}
+      case 'advancing': {const u=unit();requireThat(u.affiliation==='hostile'||u.affiliation==='suspect','Only hostiles or suspects can advance');setOrder(u,hqTarget(a.target)??item(doc.units,a.target,'unit'),'advance');break;}
       case 'bda': {
         const u=unit();
         if(a.strength!==undefined){const strength=finite(a.strength,'strength');requireThat(strength>=0&&strength<=100,'Strength must be 0–100%');u.strength=strength;if(u.affiliation==='hostile'&&strength===0&&u.condition==='none'){u.condition='destroyed';u.lifecycle='done';}}
@@ -192,7 +201,9 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
           else if(action==='remove'){
             requireThat(doc.sectors.length>1,'Cannot remove the last sector');const occupied=doc.units.some(u=>u.sectorId===sector.id)||doc.measures.some(m=>m.sectorId===sector.id);
             requireThat(!occupied||a.reassign,'Sector contains units or measures; use reassign <sector>');
-            if(a.reassign){const target=item(doc.sectors,a.reassign,'reassignment sector');requireThat(target.id!==sector.id,'Reassignment must use another sector');for(const u of doc.units)if(u.sectorId===sector.id){u.sectorId=target.id;u.pos.theta=normalizeDeg(target.startDeg+target.widthDeg/2);changed(u);}for(const m of doc.measures)if(m.sectorId===sector.id){m.sectorId=target.id;if(m.pos)m.pos.theta=normalizeDeg(target.startDeg+target.widthDeg/2);}}
+            if(a.reassign){const target=item(doc.sectors,a.reassign,'reassignment sector');requireThat(target.id!==sector.id,'Reassignment must use another sector');for(const u of doc.units)if(u.sectorId===sector.id){u.sectorId=target.id;u.pos.theta=normalizeDeg(target.startDeg+target.widthDeg/2);changed(u);}for(const m of doc.measures)if(m.sectorId===sector.id){m.sectorId=target.id;if(m.pos)m.pos.theta=normalizeDeg(target.startDeg+target.widthDeg/2);}for(const o of doc.orders)if(o.to===`hq:${sector.id}`)o.to=`hq:${target.id}`;}
+            // Orders on the removed sector's HQ go with it (or to the receiving sector's HQ above).
+            doc.orders=doc.orders.filter(o=>o.to!==`hq:${sector.id}`);
             doc.sectors=doc.sectors.filter(s=>s.id!==sector.id);const total=doc.sectors.reduce((n,s)=>n+s.widthDeg,0);doc.sectors.forEach(s=>s.widthDeg*=360/total);
           }else if(action==='width'){
             const width=finite(a.degrees,'sector width');requireThat(width>0&&width<=360&&(doc.sectors.length===1?width===360:width<360),'Sector width must leave space for every sector');const rest=360-sector.widthDeg;for(const s of doc.sectors)s.widthDeg=s.id===sector.id?width:s.widthDeg*(360-width)/rest;

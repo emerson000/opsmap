@@ -100,6 +100,7 @@ export function suggest(input:string,cursor:number,doc:Doc):{items:Suggestion[];
   if(verb==='moving'&&before==='to')candidates.push(keyword('nearest hostile'));
   if(verb==='attach'&&previous.length===2)candidates=[keyword('to')];
   if(verb==='advancing'&&previous.length===2)candidates=[keyword('on')];
+  if((verb==='advancing'&&before==='on')||(verb==='moving'&&before==='to'))candidates.unshift(keyword('sector hq'),...doc.sectors.map(s=>({insert:`${/\s/.test(s.name)?JSON.stringify(s.name):s.name} hq`,label:`${s.name} HQ`,kind:'keyword' as const})));
  }
  const query=(previous.length===0?fragment.replace(/^\//,''):fragment).toLowerCase();
  const ranked=candidates.filter(c=>c.insert.toLowerCase().includes(query)||c.label.toLowerCase().includes(query)).sort((a,b)=>Number(!a.insert.toLowerCase().startsWith(query))-Number(!b.insert.toLowerCase().startsWith(query)));

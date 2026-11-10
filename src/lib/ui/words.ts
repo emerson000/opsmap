@@ -47,14 +47,14 @@ export function unitLabel(u: Unit): string {
 
 /** One line per order, from the point of view of `unitId`. */
 export function orderLine(doc: Doc, o: Order, unitId: string): { text: string; otherId: string | null; ratio?: { text: string; under: boolean } } {
-  const name = (id: string) => id === 'hq' ? 'HQ' : doc.units.find(u => u.id === id)?.designation ?? doc.measures.find(m => m.id === id)?.name ?? id;
+  const name = (id: string) => id === 'hq' ? 'HQ' : id.startsWith('hq:') ? `${doc.sectors.find(s => s.id === id.slice(3))?.name.toUpperCase() ?? ''} HQ` : doc.units.find(u => u.id === id)?.designation ?? doc.measures.find(m => m.id === id)?.name ?? id;
   const outgoing = o.from === unitId;
   const otherId = outgoing ? o.to : o.from;
   const verb = o.type === 'attack' ? (o.role === 'main' ? 'Main attack' : 'Supporting attack')
     : o.type === 'advance' ? 'Advancing' : o.type === 'axis' ? 'Axis of advance' : o.type === 'move' ? 'Moving' : `Linkup${o.kind ? ` (${o.kind})` : ''}`;
   const text = outgoing ? `${verb} → ${name(o.to)}` : `${verb} ← ${name(o.from)}`;
   const ratio = o.type === 'attack' ? forceRatio(doc, o.to) ?? undefined : undefined;
-  return { text: `${text}${o.planned ? ' · planned' : ''}`, otherId: otherId === 'hq' || !doc.units.some(u => u.id === otherId) ? null : otherId, ratio };
+  return { text: `${text}${o.planned ? ' · planned' : ''}`, otherId: otherId === 'hq' || otherId.startsWith('hq:') || !doc.units.some(u => u.id === otherId) ? null : otherId, ratio };
 }
 
 /** The first unit designation that appears in a log line (for click-to-select). */

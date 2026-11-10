@@ -74,14 +74,12 @@
   {/each}
 
   <!-- Sector HQs at each wedge's inner edge, life HQ at the center -->
-  {#if view !== 'commander'}
-  {#each scene.sectors as sec (sec.id)}
+  {#each scene.sectors.filter(x => view !== 'commander' || x.hqTargeted) as sec (sec.id)}
     {@const sym = sectorHqSymbol(SECTOR_HQ_SIZE, theme, sec.name.toUpperCase().slice(0,4))}
     <image href={sym.href} x={sec.hq.x - sym.center.x * s} y={sec.hq.y - sym.center.y * s} width={sym.width * s} height={sym.height * s} class="hq-symbol">
       <title>{sec.name} sector HQ</title>
     </image>
   {/each}
-  {/if}
   <!-- Frame centered on the origin; the staff points down to it. -->
   <image href={hq.href} x={-hq.center.x * s} y={-hq.center.y * s} width={hq.width * s} height={hq.height * s} class="hq-symbol" />
 </g>

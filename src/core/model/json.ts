@@ -66,7 +66,7 @@ export function importJson(text:string):Doc {
   for(const o of orders) {
     if(o.type==='link') requireValid(unitIds.has(o.from)&&unitIds.has(o.to),'link endpoints must be unit IDs');
     optional(o,'kind',v=>oneOf(v,['dependency','handoff']));
-    requireValid(oneOf(o.type,['attack','axis','advance','move','link'])&&unitIds.has(o.from)&&(o.to==='hq'||unitIds.has(o.to)||measureIds.has(o.to))&&date(o.createdAt),'order');
+    requireValid(oneOf(o.type,['attack','axis','advance','move','link'])&&unitIds.has(o.from)&&(o.to==='hq'||typeof o.to==='string'&&o.to.startsWith('hq:')&&sectorIds.has(o.to.slice(3))||unitIds.has(o.to)||measureIds.has(o.to))&&date(o.createdAt),'order');
     optional(o,'role',v=>oneOf(v,['main','support']));optional(o,'planned',v=>typeof v==='boolean');
     optional(o,'via',v=>Array.isArray(v)&&v.every(id=>measures.some(m=>m.id===id&&m.type==='pl')));
   }
