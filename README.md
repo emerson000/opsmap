@@ -41,6 +41,10 @@ Theme follows the system (`prefers-color-scheme`, live) unless this browser pick
 
 Control measures: `/obj|/ea|/nai move <name> [to <sector>] <hq|near|mid|far>` (the ring words `close`, `deep` and `aoi` also work everywhere) or `move <name> near <unit>`; `/pl date <name> <date>` re-dates a phase line (phase lines sit at their date and are not dragged). Both are ordinary undoable ops.
 
+AO size: `/ao size small|medium|large|xl` (also `/sector size`, and the AO SIZE buttons in the Situation panel) sets how much room the rings give each symbol, for the whole map and every user. Large and XL draw symbols smaller against the rings and space them closer, so a crowded band holds more; small does the reverse. Changing it places every unit again within its own sector and ring, so due dates keep their meaning, and it undoes like any other change. When a capture or move cannot get full spacing, the log adds `BAND FULL: TRY /ao size large` (or `xl`). The value is stored as `settings.aoSize` (absent means medium). `/sector width` remains the way to widen a single crowded sector.
+
+Pins: moving a dated unit by hand (drag, `/move`, or a sector change) pins it, and auto-advance then skips it. `/unpin <unit>` (or Unpin in the inspector) clears the pin and returns it to the ring its due date gives, in the same sector; the due date is kept. `/due <unit> <date>` also clears the pin.
+
 Command posts: `/cp <unit> main|tac|alt|rear` marks a unit as a headquarters of that type (the HQ staff, with MAIN, TAC, ALT or REAR in place of the icon, in every view); `/cp <unit> none` clears it, restoring its icon. The inspector has the same choice. Suggested meanings: MAIN home base, TAC where you work today, ALT the fallback, REAR errands and logistics.
 
 Clearing orders: `/halt <unit>` cancels all of a unit's own orders, and `/halt <unit> advance|move|attack|axis|link` only that kind (`/stop` and `/cancel` also work); each order in the inspector has a ✕ that does the same for that one order. Undo restores them.

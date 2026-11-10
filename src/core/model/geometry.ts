@@ -60,11 +60,21 @@ export function ringForRadius(r:number):Ring {return r<=1?'hq':r<=2?'near':r<=3?
  * then search radial offsets in 0.05 steps. HQ penetrators use the outer perimeter arc.
  * The maximum-clearance fallback keeps an overfull wedge usable without changing its time meaning.
  */
-export function resolvePlacement(doc:Doc,sectorId:string,requested:Polar,ignoreId?:string,footprint=0.74):Polar {
+export function resolvePlacement(doc:Doc,sectorId:string,requested:Polar,ignoreId?:string,footprint?:number):Polar {
+  return placement(doc,sectorId,requested,ignoreId,footprint).pos;
+}
+/** Whether a unit at `pos` keeps the full spacing from its neighbors (false: its band is overfull at this AO size). */
+export function placementFits(doc:Doc,sectorId:string,pos:Polar,ignoreId?:string):boolean {
+  return placement(doc,sectorId,pos,ignoreId).fits;
+}
+function placement(doc:Doc,sectorId:string,requested:Polar,ignoreId?:string,footprint?:number):{pos:Polar;fits:boolean} {
   const sector=doc.sectors.find(s=>s.id===sectorId);
   if(!sector) throw new Error(`Unknown sector: ${sectorId}`);
+  // Bigger AO: symbols draw smaller against the rings, so every clearance shrinks by the same factor.
+  const k=aoScale(doc);footprint??=0.74/k;
   const ring=ringForRadius(requested.r),[lo,hi]=RING_R[ring];
-  const min=ring==='hq'?0.62:lo+0.025,max=hi-0.025;
+  const hqMin=Math.max(0.4,0.62/k),hqGap=0.29/k;
+  const min=ring==='hq'?hqMin:lo+0.025,max=hi-0.025;
   const radius=ring==='hq'&&requested.r<min?max:Math.max(min,Math.min(max,requested.r));
   const offset=Math.max(2,Math.min(6,sector.widthDeg/12));
   const start=sector.startDeg+offset,end=sector.startDeg+sector.widthDeg-offset;
@@ -73,10 +83,10 @@ export function resolvePlacement(doc:Doc,sectorId:string,requested:Polar,ignoreI
   const preferred=ring==='hq'&&requested.r<min?start:wanted<=end?Math.max(start,wanted):center;
   const occupied=doc.units.filter(u=>u.id!==ignoreId&&u.lifecycle!=='dropped').map(u=>({...polarToXY(u.pos),r:u.pos.r}));
   const hqs=doc.sectors.map(s=>polarToXY(1,s.startDeg+s.widthDeg/2));
-  const gap=ring==='hq'?Math.min(footprint,0.43):footprint;
+  const gap=ring==='hq'?Math.min(footprint,0.43/k):footprint;
   const clearance=(p:Polar)=>{
     const xy=polarToXY(p);
-    return Math.min(p.r/0.62,...occupied.map(o=>Math.hypot(xy.x-o.x,xy.y-o.y)/(ring==='hq'&&o.r>1?footprint:gap)),...hqs.map(o=>Math.hypot(xy.x-o.x,xy.y-o.y)/0.29));
+    return Math.min(p.r/hqMin,...occupied.map(o=>Math.hypot(xy.x-o.x,xy.y-o.y)/(ring==='hq'&&o.r>1?footprint:gap)),...hqs.map(o=>Math.hypot(xy.x-o.x,xy.y-o.y)/hqGap));
   };
   let best={r:radius,theta:normalizeDeg(preferred)},score=-Infinity;
   const radii=[radius];
@@ -88,16 +98,28 @@ export function resolvePlacement(doc:Doc,sectorId:string,requested:Polar,ignoreI
   angles.push(end);angles.sort((a,b)=>Math.abs(a-preferred)-Math.abs(b-preferred));
   for(const r of radii)for(const theta of angles){
     const p={r,theta:normalizeDeg(theta)},value=clearance(p);
-    if(value>=1)return p;
+    if(value>=1)return {pos:p,fits:true};
     if(value>score){score=value;best=p;}
   }
-  return best;
+  return {pos:best,fits:false};
 }
 export function freeSpot(doc:Doc,sectorId:string,ring:Ring):Polar {
   const sector=doc.sectors.find(s=>s.id===sectorId);
   if(!sector)throw new Error(`Unknown sector: ${sectorId}`);
   const [,hi]=RING_R[ring];
   return resolvePlacement(doc,sectorId,{r:hi-0.05,theta:sector.startDeg+Math.min(6,sector.widthDeg/12)});
+}
+
+/** AO sizes for `/ao size`: how much room the rings give each symbol. Medium (1) is the default;
+ *  large and xl draw symbols smaller against the rings and pack them closer, small does the reverse. */
+export const AO_SIZES={small:0.8,medium:1,large:1.35,xl:1.75} as const;
+export type AoSize=keyof typeof AO_SIZES;
+export const aoScale=(doc:{settings?:{aoSize?:number}}):number=>doc.settings?.aoSize??1;
+/** The preset closest to a scale. */
+export function aoSizeName(scale:number|undefined):AoSize {
+  const value=scale??1;let best:AoSize='medium';
+  for(const key of Object.keys(AO_SIZES) as AoSize[])if(Math.abs(AO_SIZES[key]-value)<Math.abs(AO_SIZES[best]-value))best=key;
+  return best;
 }
 
 /** Area sizes for `/obj|/ea|/nai size`: the minimum radius in map units. Medium is the default. */

@@ -72,6 +72,7 @@ export function importJson(text:string):Doc {
   }
   for(const entry of log) {requireValid(date(entry.at)&&string(entry.text),'log entry');optional(entry,'cmd',string);optional(entry,'by',string);optional(entry,'via',string);}
   requireValid(object(value.settings)&&oneOf(value.settings.view,['commander','staff','detail'])&&oneOf(value.settings.theme,['light','dark'])&&typeof value.settings.autoAdvance==='boolean','settings');
+  optional(value.settings,'aoSize',v=>typeof v==='number'&&Number.isFinite(v)&&v>=0.5&&v<=3);
   optional(value.settings,'tz',v=>{try {if(!string(v))return false;new Intl.DateTimeFormat('en',{timeZone:v});return true;}catch{return false;}});
   optional(value,'lastTurn',date);
   optional(value,'intent',v=>object(v)&&date(v.date)&&string(v.text));

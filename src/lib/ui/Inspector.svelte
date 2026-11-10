@@ -11,6 +11,7 @@
   import { miniSymbol } from './mini';
   import { annotate, initials, color, nameOf } from '../sync/sync.svelte';
   import { isArchived } from '../map/scene';
+  import { AO_SIZES, aoScale, aoSizeName, type AoSize } from '../../core/model/geometry';
   import { ui, env, run, toast, type Theme } from './shell.svelte';
   import { AFFILIATIONS, AFF_LABEL, CONDITIONS, LIFECYCLE_LABEL, RINGS, band, echelonRange, orderLine, ringOf, unitLabel } from './words';
 
@@ -224,7 +225,8 @@
         <select class="field" value={ringOf(unit)} onchange={(e) => setPlace(unit.sectorId, e.currentTarget.value as Ring)} aria-label="Ring">
           {#each RINGS as r (r.key)}<option value={r.key}>{r.label} · {r.horizon}</option>{/each}
         </select>
-        {#if unit.posOverride}<span class="note">Pinned by hand: auto-advance skips it. Re-date to release.</span>{/if}
+        {#if unit.posOverride}<span class="note">Pinned by hand: auto-advance skips it.</span>
+          <button class="btn" data-testid="unpin" title="Return to the ring its due date gives (/unpin)" onclick={() => run(cmd('unpin'))}>Unpin</button>{/if}
       </dd>
 
       <dt>Area (OBJ · EA · NAI)</dt>
@@ -340,6 +342,16 @@
       <div class="cap sub-cap pending">Inbox (pending) <b>{inbox.length}</b></div>
       {#each inbox as u (u.id)}{@render row(u)}{:else}<p class="muted">Inbox empty.</p>{/each}
     </section>
+    <section class="block ao" data-testid="ao-size">
+      <div class="cap sub-cap" id="ao-label">AO size</div>
+      <div class="seg" role="radiogroup" aria-labelledby="ao-label">
+        {#each Object.keys(AO_SIZES) as AoSize[] as k (k)}
+          {@const on = aoSizeName(aoScale(doc)) === k}
+          <button class="btn" role="radio" aria-checked={on} class:on data-size={k} title="/ao size {k}: {k === 'medium' ? 'default spacing' : AO_SIZES[k] > 1 ? 'smaller symbols, more room per ring' : 'larger symbols, less room'}"
+            onclick={() => { if (!on) run({ verb: 'sector', args: { action: 'size', size: k } }); }}>{k === 'xl' ? 'XL' : k[0].toUpperCase() + k.slice(1)}</button>
+        {/each}
+      </div>
+    </section>
     {#if env.coarse || env.tier === 'phone'}
       <p class="hint">Tap a symbol to inspect it; double-tap or long-press for every field. Long-press, then drag to move it. Long-press open ground to capture there. Drag the round handle under a selected friendly onto a hostile to attack.</p>
     {:else}
@@ -350,6 +362,9 @@
 
 <style>
   .hist .by, .meta .by { display: inline-block; margin: 0 4px; padding: 0 3px; font: 700 12px/1.4 var(--font-mono); color: #fff; background: var(--who); border-radius: 2px; }
+  .ao .seg { display: flex; margin-top: var(--s1); }
+  .ao .seg .btn { flex: 1; }
+  .ao .seg .btn + .btn { margin-left: -1px; }
   .hist.undone { text-decoration: line-through; opacity: 0.65; }
   .inspector { height: 100%; padding: var(--s3); background: var(--panel-glass); border-left: 2px solid var(--rule-strong); }
   .head { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); padding-bottom: var(--s2); border-bottom: 1px solid var(--rule); margin-bottom: var(--s2); }

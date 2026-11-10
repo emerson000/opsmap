@@ -62,7 +62,7 @@ export interface Doc {
   log: LogEntry[];
   intent?: { date: string; text: string };
   lastTurn?: string;
-  settings: { view: 'commander'|'staff'|'detail'; theme: 'light'|'dark'; autoAdvance: boolean; tz?: string };
+  settings: { view: 'commander'|'staff'|'detail'; theme: 'light'|'dark'; autoAdvance: boolean; tz?: string; /** `/ao size` scale (AO_SIZES); absent = medium. */ aoSize?: number };
 }
 export type Command = { verb: string; args: Record<string, unknown>; raw?: string };
 export type View = Doc['settings']['view'];

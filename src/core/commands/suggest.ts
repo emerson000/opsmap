@@ -59,7 +59,8 @@ export function suggest(input:string,cursor:number,doc:Doc):{items:Suggestion[];
  }
 
  else if(verb==='view')candidates=['commander','staff','detail'].map(s=>keyword(s));
- else if(verb==='sector'&&previous.length===1)candidates=['add','rename','remove','width'].map(s=>keyword(s));
+ else if(verb==='sector'&&previous.length===1)candidates=['add','rename','remove','width','size'].map(s=>keyword(s));
+ else if(verb==='sector'&&previous.length===2&&previous[1].value.toLowerCase()==='size')candidates=['small','medium','large','xl'].map(s=>keyword(s));
  else if(verb==='sector'&&previous.length===2)candidates=sectors();
  else if(['obj','ea','nai','pl'].includes(verb)&&previous.length===1)candidates=(verb==='pl'?['add','date','remove']:['add','move','join','leave','size','remove']).map(s=>keyword(s));
  else if(['obj','ea','nai','pl'].includes(verb)&&previous.length===2&&['remove','move','date','join','leave','size'].includes(previous[1].value.toLowerCase()))
@@ -87,6 +88,7 @@ export function suggest(input:string,cursor:number,doc:Doc):{items:Suggestion[];
   candidates=units();
   if(previous.length===1){
    if(verb==='unblock')candidates=units(doc.units.filter(u=>u.lifecycle==='blocked'));
+   if(verb==='unpin')candidates=units(doc.units.filter(u=>u.posOverride));
    // The attacker slot: own units first (friend, then assumed), unresolved only.
    if(verb==='attack'||verb==='moving'){const rank=(a:string)=>a==='friend'?0:a==='assumed'?1:2;candidates=units(doc.units.filter(unresolved).sort((a,b)=>rank(a.affiliation)-rank(b.affiliation)));}
    if(verb==='bda')candidates=units(doc.units.filter(unresolved).sort((a,b)=>Number(['hostile','suspect'].includes(b.affiliation))*2+Number(doc.orders.some(o=>o.to===b.id&&o.type==='attack'))-Number(['hostile','suspect'].includes(a.affiliation))*2-Number(doc.orders.some(o=>o.to===a.id&&o.type==='attack'))));

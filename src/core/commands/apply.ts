@@ -3,7 +3,7 @@ import type { Affiliation, Command, CommandPost, ControlMeasure, Sector, Doc, Ec
 import { designationFrom, effectiveCondition } from '../model/derive';
 import { ECHELONS, echelonIndex } from '../model/echelon';
 import { FUNCTIONS } from '../model/functions';
-import { AREA_SIZES, RING_R, areaShape, freeSpot, polarToXY, resolvePlacement, ringForRadius, normalizeDeg, radiusForDate, sectorAt, snap, xyToPolar, type AreaSize } from '../model/geometry';
+import { AO_SIZES, AREA_SIZES, RING_R, aoScale, aoSizeName, placementFits, areaShape, freeSpot, polarToXY, resolvePlacement, ringForRadius, normalizeDeg, radiusForDate, sectorAt, snap, xyToPolar, type AreaSize } from '../model/geometry';
 import { importJson } from '../model/json';
 import { cloneDoc } from '../model/clone';
 import { advanceDay } from './turn';
@@ -59,6 +59,12 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
     const doc=cloneDoc(original),a=cmd.args,at=now.toISOString();let log='';
     const unit=()=>item(doc.units,a.unit,'unit');
     const changed=(u:Unit)=>{u.updatedAt=at;};
+    /** A unit that could not get full spacing: suggest the next AO size up. */
+    const crowded=(u:Unit)=>{
+      if(placementFits(doc,u.sectorId,u.pos,u.id))return '';
+      const next=(['large','xl'] as const).find(k=>AO_SIZES[k]>aoScale(doc));
+      return next?` — BAND FULL: TRY /ao size ${next}`:' — BAND FULL';
+    };
     /** Orders that a sector change leaves crossing a boundary are cancelled; returns their log suffix. */
     const cancelBoundary=(moved:Unit[],measureIds:string[]=[]):string=>{
       const ids=new Set([...moved.map(u=>u.id),...measureIds]);
@@ -123,7 +129,8 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
         const u:Unit={id:uniqueId('u',doc.units),title,designation,kind,affiliation:a.affiliation===undefined&&kind==='person'?'neutral':affiliation,fn,echelon,lifecycle:'todo',presence:'present',condition:'none',sectorId:sector.id,pos:freeSpot(doc,sector.id,ring),createdAt:at,updatedAt:at};
         checkPerson(u,u.affiliation,a.confirm);
         if(a.dueAt){u.dueAt=date(a.dueAt);u.pos.r=radiusForDate(u.dueAt,now,doc.settings.tz);}
-        u.pos=resolvePlacement(doc,u.sectorId,u.pos);doc.units.push(u);log=`CAPTURE ${u.designation} — ${u.affiliation.toUpperCase()} ${FUNCTIONS.find(f=>f.key===u.fn)!.label.toUpperCase()} ${ {tm:'TEAM',sqd:'SQUAD',sec:'SECTION',plt:'PLATOON',coy:'COMPANY',bn:'BATTALION',rgt:'REGIMENT',bde:'BRIGADE',div:'DIVISION',corps:'CORPS',army:'ARMY'}[echelon]} IN ${sector.name.toUpperCase()}`;
+        u.pos=resolvePlacement(doc,u.sectorId,u.pos);doc.units.push(u);const full=crowded(u);log=`CAPTURE ${u.designation} — ${u.affiliation.toUpperCase()} ${FUNCTIONS.find(f=>f.key===u.fn)!.label.toUpperCase()} ${ {tm:'TEAM',sqd:'SQUAD',sec:'SECTION',plt:'PLATOON',coy:'COMPANY',bn:'BATTALION',rgt:'REGIMENT',bde:'BRIGADE',div:'DIVISION',corps:'CORPS',army:'ARMY'}[echelon]} IN ${sector.name.toUpperCase()}`;
+        log+=full;
         if(echelonIndex(echelon)>=8)log+=' — Consider a task force with subordinate units';
         break;
       }
@@ -144,7 +151,7 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
         if(area&&fromSector!==u.sectorId){release(area,u.id);left=`; LEFT ${area.type.toUpperCase()} ${area.name}`;}
         const cancelled=cancelBoundary([u]);
         validOrders(doc);
-        log=`MOVE ${u.designation} → ${doc.sectors.find(s=>s.id===u.sectorId)?.name.toUpperCase()} / ${ringForRadius(u.pos.r).toUpperCase()}${u.pos.r>4?' (OFF MAP)':''}${u.posOverride?' — OVERRIDE PIN':''}${cancelled}${left}`;
+        log=`MOVE ${u.designation} → ${doc.sectors.find(s=>s.id===u.sectorId)?.name.toUpperCase()} / ${ringForRadius(u.pos.r).toUpperCase()}${u.pos.r>4?' (OFF MAP)':''}${u.posOverride?' — OVERRIDE PIN':''}${cancelled}${left}${crowded(u)}`;
         break;
       }
       case 'attack': {const u=unit(),target=item([...doc.units,...doc.measures],a.target,'target');const role=a.role??'main';requireThat(role==='main'||role==='support','Invalid attack role');setOrder(u,target,'attack',role);break;}
@@ -180,6 +187,13 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
         if(a.kind)order.kind=a.kind as Order['kind'];
         doc.orders.push(order);changed(u);
         log=`LINKUP ${u.designation} / ${other.designation}${a.kind?` — ${String(a.kind).toUpperCase()}`:''}`;break;
+      }
+      case 'unpin': {
+        // Back to the ring its due date gives, keeping its sector and bearing; auto-advance moves it again.
+        const u=unit();requireThat(u.posOverride,`${u.designation} is not pinned`);
+        delete u.posOverride;
+        if(u.dueAt)u.pos=resolvePlacement(doc,u.sectorId,{r:radiusForDate(u.dueAt,now,doc.settings.tz),theta:u.pos.theta},u.id);
+        changed(u);log=`${u.designation} UNPINNED → ${ringForRadius(u.pos.r).toUpperCase()}${crowded(u)}`;break;
       }
       case 'due': {const u=unit();if(a.dueAt===null){delete u.dueAt;delete u.posOverride;}else {u.dueAt=date(a.dueAt);u.pos.r=radiusForDate(u.dueAt,now,doc.settings.tz);delete u.posOverride;u.pos=resolvePlacement(doc,u.sectorId,u.pos,u.id);}changed(u);log=`${u.designation} DUE ${u.dueAt??'NONE'}`;break;}
       case 'note': {const u=unit();requireThat(typeof a.note==='string','Expected note');u.note=a.note;changed(u);log=`${u.designation} NOTE ${u.note}`;break;}
@@ -220,6 +234,13 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
       case 'key': {const u=unit();u.keyTerrain=a.value===undefined?!u.keyTerrain:a.value===true;changed(u);log=`${u.designation} KEY TERRAIN ${u.keyTerrain?'MARKED':'CLEARED'}`;break;}
       case 'sector': {
         const action=text(a.action,'sector action');
+        if(action==='size'){
+          const name=text(a.size,'AO size') as keyof typeof AO_SIZES;requireThat(name in AO_SIZES,'Expected small, medium, large or xl');
+          requireThat(aoSizeName(aoScale(doc))!==name,`AO is already ${name.toUpperCase()}`);
+          if(name==='medium')delete doc.settings.aoSize;else doc.settings.aoSize=AO_SIZES[name];
+          for(const u of doc.units)u.pos=resolvePlacement(doc,u.sectorId,u.pos,u.id);
+          log=`AO SIZE ${name.toUpperCase()}`;break;
+        }
         if(action==='add'){
           const name=text(a.name,'sector name');requireThat(!doc.sectors.some(s=>s.name.toLowerCase()===name.toLowerCase()),'Sector name already exists');const width=360/(doc.sectors.length+1);doc.sectors.forEach(s=>s.widthDeg*=(360-width)/360);const existing=doc.sectors.reduce((n,s)=>n+s.widthDeg,0);doc.sectors.push({id:uniqueId('sector',doc.sectors),name,startDeg:0,widthDeg:360-existing});
         }else{

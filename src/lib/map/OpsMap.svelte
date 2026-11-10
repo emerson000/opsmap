@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { Command, Ring, Unit } from '../../core/model/types';
-  import { AREA_SIZES, RING_R, areaMembers, areaSizeName, type AreaSize } from '../../core/model/geometry';
+  import { AREA_SIZES, RING_R, aoScale, areaMembers, areaSizeName, type AreaSize } from '../../core/model/geometry';
   const AREA_SIZE_NAMES = Object.keys(AREA_SIZES) as AreaSize[];
   import { mapLabels, visibleWorld } from './maplabels';
   import { band } from '../ui/words';
@@ -76,7 +76,8 @@
   const theme = $derived(themeProp ?? doc.settings.theme);
   /** Zoom, rounded so that panning (x/y only) does not recompute labels. */
   const zk = $derived(Math.round(view2d.k * 1000) / 1000);
-  const s = $derived(mapScale(zk, fitK) * Math.max(1,Math.min(1.3,fitK/0.64)) * (compact ? 0.72 : 1));
+  // A larger AO draws symbols smaller against the rings; placement spaces them by the same factor.
+  const s = $derived(mapScale(zk, fitK) * Math.max(1,Math.min(1.3,fitK/0.64)) * (compact ? 0.72 : 1) / aoScale(doc));
   /** World size of the smallest legible text at this zoom. */
   const mt = $derived(MIN_TEXT / zk);
   /** Unit labels grow with the text floor: 10.5 px base, never under MIN_TEXT on screen. */

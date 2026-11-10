@@ -1,16 +1,16 @@
 import type { Command, Doc, Unit } from '../model/types';
 import { apply, functions, identities, sizes } from './apply';
-import { AREA_SIZES } from '../model/geometry';
+import { AO_SIZES, AREA_SIZES } from '../model/geometry';
 import { nearestHostile, resolveMeasure, resolveSector, resolveTarget, resolveUnit } from './resolve';
 import { CommandError, parseDate, tokenize, type Token } from './tokenize';
 export type ParseResult={ok:true;cmd:Command;preview:string}|{ok:false;error:string;at:number};
-export const VERBS=['new','id','size','fn','rename','move','attack','moving','axis','advancing','bda','block','unblock','done','drop','reinforce','reduce','attach','detach','link','due','note','rate','key','cp','halt','support','sector','pl','obj','ea','nai','find','sitrep','intent','turn','view','undo','redo','export','import','sidc','help'] as const;
+export const VERBS=['new','id','size','fn','rename','move','attack','moving','axis','advancing','bda','block','unblock','unpin','done','drop','reinforce','reduce','attach','detach','link','due','note','rate','key','cp','halt','support','sector','pl','obj','ea','nai','find','sitrep','intent','turn','view','undo','redo','export','import','sidc','help'] as const;
 export const aliases:Record<string,string>={n:'new','+':'new',aff:'id',ech:'size',mv:'move',atk:'attack',mov:'moving',adv:'advancing',str:'bda',x:'done',reinf:'reinforce',dtg:'due',g:'note',ao:'sector',commandpost:'cp',stop:'halt',cancel:'halt',spt:'support'};
 export const SYNTAX:Record<string,string>={
  new:'[identity] [size] [function] "‹title›" [in ‹sector›] [ring] [due ‹date›] [as ‹designation›]',
  id:'‹unit› ‹identity› [confirm]',size:'‹unit› ‹echelon›',fn:'‹unit› ‹function›',rename:'‹unit› "‹title›" [as ‹designation›]',
  move:'‹unit› [to ‹sector›] ‹ring› | ‹unit› near ‹unit›',attack:'‹unit› ‹target› [main|support] [planned]',moving:'‹unit› to ‹target|nearest hostile|hq|sector hq|‹sector› hq›',axis:'‹unit› to OBJ ‹name› [via PL ‹name›, ...]',advancing:'‹hostile› on ‹hq|sector hq|‹sector› hq|unit›',
- cp:'‹unit› ‹main|tac|alt|rear|none›',halt:'‹unit› [advance|move|attack|axis|link|support]',support:'‹friendly› ‹friendly› (any sector)',bda:'‹unit› ‹0–100%|fc|dmg|des|full›',block:'‹unit› [by "‹reason›"]',unblock:'‹unit›',done:'‹unit›',drop:'‹unit› [bypassed]',reinforce:'‹unit› [with ‹unit›]',reduce:'‹unit› ["‹scope cut›"]',attach:'‹unit› to ‹task force›',detach:'‹unit›',link:'‹unit› ‹unit› [as dependency|handoff]',due:'‹unit› ‹date|none›',note:'‹unit› "‹text›"',rate:'‹unit› ‹A–F›‹1–6›',key:'‹unit›',sector:'add ‹name› | rename ‹name› ‹new name› | remove ‹name› [reassign ‹sector›] | width ‹name› ‹degrees›',pl:'add "‹name›" ‹date› | date ‹name› ‹date› | remove ‹name›',obj:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | join ‹name› ‹unit›… | leave ‹name› ‹unit›… | size ‹name› ‹small|medium|large|xl› | remove ‹name›',ea:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | join ‹name› ‹unit›… | leave ‹name› ‹unit›… | size ‹name› ‹small|medium|large|xl› | remove ‹name›',nai:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | join ‹name› ‹unit›… | leave ‹name› ‹unit›… | size ‹name› ‹small|medium|large|xl› | remove ‹name›',find:'‹unit›',sitrep:'[copy]',intent:'"‹one line›"',turn:'',view:'commander|staff|detail',undo:'',redo:'',export:'',import:'',sidc:'‹unit› ‹20 digits›',help:'',
+ cp:'‹unit› ‹main|tac|alt|rear|none›',halt:'‹unit› [advance|move|attack|axis|link|support]',support:'‹friendly› ‹friendly› (any sector)',bda:'‹unit› ‹0–100%|fc|dmg|des|full›',block:'‹unit› [by "‹reason›"]',unblock:'‹unit›',unpin:'‹pinned unit›',done:'‹unit›',drop:'‹unit› [bypassed]',reinforce:'‹unit› [with ‹unit›]',reduce:'‹unit› ["‹scope cut›"]',attach:'‹unit› to ‹task force›',detach:'‹unit›',link:'‹unit› ‹unit› [as dependency|handoff]',due:'‹unit› ‹date|none›',note:'‹unit› "‹text›"',rate:'‹unit› ‹A–F›‹1–6›',key:'‹unit›',sector:'add ‹name› | rename ‹name› ‹new name› | remove ‹name› [reassign ‹sector›] | width ‹name› ‹degrees› | size ‹small|medium|large|xl›',pl:'add "‹name›" ‹date› | date ‹name› ‹date› | remove ‹name›',obj:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | join ‹name› ‹unit›… | leave ‹name› ‹unit›… | size ‹name› ‹small|medium|large|xl› | remove ‹name›',ea:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | join ‹name› ‹unit›… | leave ‹name› ‹unit›… | size ‹name› ‹small|medium|large|xl› | remove ‹name›',nai:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | join ‹name› ‹unit›… | leave ‹name› ‹unit›… | size ‹name› ‹small|medium|large|xl› | remove ‹name›',find:'‹unit›',sitrep:'[copy]',intent:'"‹one line›"',turn:'',view:'commander|staff|detail',undo:'',redo:'',export:'',import:'',sidc:'‹unit› ‹20 digits›',help:'',
 };
 const rings=['hq','near','mid','far','beyond'];
 /** The inspector's plain ring words, accepted as aliases. */
@@ -83,7 +83,7 @@ export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult 
    case 'advancing':{const u=subject();expect('on');a.target=target(u);break;}
    case 'bda': {subject();const t=take('strength or condition'),key=t.value.toLowerCase();if(/^\d+(?:\.\d+)?%$/.test(key))a.strength=Number(key.slice(0,-1));else{const conditions:Record<string,string>={fc:'fully-capable',dmg:'damaged',des:'destroyed',full:'full',ftc:'full',none:'none',destroyed:'destroyed',damaged:'damaged','fully-capable':'fully-capable'};a.condition=conditions[key];if(!a.condition)throw new CommandError('Expected 0–100%, fc, dmg, des, or full',t.start);}break;}
    case 'block':subject();if(eat('by'))a.note=quoted('reason');break;
-   case 'unblock':case 'done':case 'detach':case 'key':case 'find':subject();break;
+   case 'unblock':case 'unpin':case 'done':case 'detach':case 'key':case 'find':subject();break;
    case 'drop':subject();a.bypassed=eat('bypassed');break;
    case 'reinforce':subject();if(eat('with')){const t=take('unit');a.with=resolveUnit(t.value,doc,t.start,selected?.sectorId).id;}break;
    case 'reduce':subject();if(peek())a.note=quoted('scope cut');break;
@@ -98,7 +98,8 @@ export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult 
    case 'sector': {
     const action=take('sector action').value.toLowerCase();a.action=action;
     if(action==='add')a.name=take('sector name').value;
-    else {a.sectorId=sector();if(action==='rename'){eat('to');a.name=take('new sector name').value;}else if(action==='width')a.degrees=Number(take('degrees').value);else if(action==='remove'){if(eat('reassign'))a.reassign=sector();}else throw new CommandError('Expected add, rename, remove, or width',at);}
+    else if(action==='size'){const t=take('AO size');const v=t.value.toLowerCase();if(!(v in AO_SIZES))throw new CommandError('Expected small, medium, large or xl',t.start);a.size=v;}
+    else {a.sectorId=sector();if(action==='rename'){eat('to');a.name=take('new sector name').value;}else if(action==='width')a.degrees=Number(take('degrees').value);else if(action==='remove'){if(eat('reassign'))a.reassign=sector();}else throw new CommandError('Expected add, rename, remove, width, or size',at);}
     break;
    }
    case 'pl':case 'obj':case 'ea':case 'nai': {

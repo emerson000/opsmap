@@ -24,7 +24,7 @@ const cases:[string,string,string][]=[
  ['attach','/attach TOOLS to MOVE','/attach MOVE to PACKING'],['detach','/detach PACKING','/detach'],
  ['link','/link TOOLS Q4RPT as handoff','/link TOOLS'],['due','/due TOOLS +3d','/due TOOLS someday'],
  ['note','/note TOOLS "Read docs"','/note TOOLS'],['rate','/rate KNEE B2','/rate KNEE Z9'],['key','/key HOME','/key missing'],
- ['sector','/sector add Learning','/sector width Work 0'],['pl','/pl add "REVIEW" 2026-11-20','/pl add "REVIEW" nonsense'],
+ ['sector','/sector add Learning','/sector width Work 0'],['sector','/ao size large','/ao size huge'],['pl','/pl add "REVIEW" 2026-11-20','/pl add "REVIEW" nonsense'],
  ['obj','/obj add "RESULT" in Work near','/obj add "RESULT" in absent'],['ea','/ea add "BATCH" in Work mid','/ea add'],['nai','/nai add "WATCH" in Work far','/nai add "WATCH"'],
  ['find','/find TOOLS','/find missing'],['sitrep','/sitrep copy','/sitrep junk'],['intent','/intent "Finish tax response"','/intent'],
  ['turn','/turn','/turn extra'],['view','/view staff','/view cockpit'],['undo','/undo','/undo extra'],['redo','/redo','/redo extra'],
