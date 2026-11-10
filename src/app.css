@@ -1,0 +1,92 @@
+/* opsmap shell: a staff map on a light table (light) or an ops-center screen (dark).
+   Offline font stacks only. Spacing scale: 4 / 8 / 12 / 16 / 24 px. */
+:root {
+  --font-mono: 'IBM Plex Mono', 'JetBrains Mono', 'DejaVu Sans Mono', ui-monospace, 'Liberation Mono', monospace;
+  --font-cond: 'IBM Plex Sans Condensed', 'Roboto Condensed', 'Arial Narrow', 'DejaVu Sans Condensed', 'Liberation Sans Narrow', sans-serif;
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px;
+  --bar-h: 40px;
+
+  --ground: #eee7d3;
+  --panel: #f6f1e3;
+  --panel-2: #ece5d2;
+  --panel-glass: rgba(246, 241, 227, 0.94);
+  --ink: #23211c;
+  --ink-2: #4d4940;
+  --ink-3: #6a6555;
+  --rule: #b9b09a;
+  --rule-strong: #23211c;
+  --accent: #b36f00;        /* selection / focus, grease-pencil amber */
+  --accent-bg: rgba(212, 138, 0, 0.14);
+  --friend: #1c3f8c;
+  --hostile: #b3121f;
+  --hostile-bg: rgba(196, 20, 43, 0.1);
+  --ok: #2d6a2d;
+  --k-green: #2d7a2d; --k-amber: #b07800; --k-red: #b3121f; --k-black: #23211c;
+  --shadow: 0 1px 0 rgba(35, 33, 28, 0.08), 0 4px 16px rgba(35, 33, 28, 0.12);
+  color-scheme: light;
+}
+:root[data-theme='dark'] {
+  --ground: #171f1b;
+  --panel: #111814;
+  --panel-2: #18221d;
+  --panel-glass: rgba(17, 24, 20, 0.94);
+  --ink: #c9d4c4;
+  --ink-2: #a3b09d;
+  --ink-3: #8b9b85;
+  --rule: #2c3a32;
+  --rule-strong: #4f6357;
+  --accent: #ffb02e;
+  --accent-bg: rgba(255, 176, 46, 0.12);
+  --friend: #86a9ff;
+  --hostile: #ff6464;
+  --hostile-bg: rgba(255, 93, 93, 0.12);
+  --ok: #7fcf7f;
+  --k-green: #6fcf6f; --k-amber: #f0b43c; --k-red: #ff6464; --k-black: #c9d4c4;
+  --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 6px 24px rgba(0, 0, 0, 0.45);
+  color-scheme: dark;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+/* The shell is fixed to the viewport: the page itself never scrolls, rubber-bands or zooms. The only
+   zoom is the map's own (touch-action: none on the map). Everywhere else touch-action is pan-x pan-y:
+   panels still scroll, but a pinch or double-tap does nothing. touch-action is intersected along the
+   ancestors, so setting it on html/body covers every control. The viewport also sets
+   maximum-scale=1, user-scalable=no, and App blocks iOS gesture* events, which Safari uses for page zoom. */
+html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; touch-action: pan-x pan-y; }
+body { position: fixed; inset: 0; height: 100dvh; }
+body { background: var(--ground); color: var(--ink); font: 12px/1.4 var(--font-mono); -webkit-font-smoothing: antialiased; }
+#app { height: 100%; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+/* Controls: no pinch or double-tap page zoom, no 300 ms delay. */
+button, a, input, select, textarea, label { touch-action: pan-x pan-y; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* Shared panel vocabulary */
+.cap { font-family: var(--font-cond); font-weight: 700; letter-spacing: 0.14em; text-transform: uppercase; font-size: 12px; color: var(--ink-2); }
+.tag { display: inline-block; min-width: 18px; padding: 0 3px; border: 1px solid var(--rule-strong); font: 700 12px/14px var(--font-mono); text-align: center; color: var(--ink); }
+.btn {
+  display: inline-flex; align-items: center; gap: var(--s1); height: 24px; padding: 0 var(--s2);
+  background: transparent; border: 1px solid var(--rule); color: var(--ink);
+  font: 600 12px/1 var(--font-cond); letter-spacing: 0.1em; text-transform: uppercase; white-space: nowrap;
+}
+.btn:hover { border-color: var(--ink); background: var(--accent-bg); }
+.btn.on { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+.btn.warn { border-color: var(--hostile); color: var(--hostile); }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.field { width: 100%; height: 24px; padding: 0 var(--s1); background: var(--panel); border: 1px solid var(--rule); border-radius: 0; }
+.field:hover { border-color: var(--ink-3); }
+.field:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 1px var(--accent); }
+textarea.field { height: auto; min-height: 44px; padding: var(--s1); resize: vertical; }
+.scroll { overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--rule) transparent; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Phone tier (set on <html data-tier>): 44 px tap targets, 16 px form text (iOS zooms the page
+   when a focused field is smaller). */
+[data-tier='phone'] .btn { height: 44px; padding: 0 var(--s3); }
+[data-tier='phone'] .field { height: 44px; font-size: 16px; }
+[data-tier='phone'] textarea.field { height: auto; min-height: 88px; }
+[data-tier='phone'] select.field { font-size: 16px; }
+@media (pointer: coarse) {
+  input, select, textarea, .field { font-size: 16px; }
+}
