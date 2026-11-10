@@ -96,6 +96,10 @@
   const unopposed = $derived(live.filter(u => (u.affiliation === 'hostile' || u.affiliation === 'suspect') && u.pos.r < 2 && !attacked.has(u.id)).sort((a, b) => a.pos.r - b.pos.r));
   const mains = $derived(doc.orders.filter(o => o.type === 'attack' && o.role === 'main').map(o => ({ from: doc.units.find(u => u.id === o.from), to: doc.units.find(u => u.id === o.to) ?? undefined, o })).filter(m => m.from));
   const blocked = $derived(live.filter(u => u.lifecycle === 'blocked'));
+  const CP_TYPES = [
+    { key: 'main', label: 'main command post' }, { key: 'tac', label: 'tactical, forward' },
+    { key: 'alt', label: 'alternate, backup' }, { key: 'rear', label: 'rear, support' },
+  ] as const;
 </script>
 
 {#snippet row(u: Unit, extra?: string)}
@@ -187,6 +191,14 @@
             <button class="btn" onclick={() => (confirmHostile = false)}>Keep</button>
           </div>
         {/if}
+      </dd>
+
+      <dt><span class="tag">AA</span> Command post</dt>
+      <dd>
+        <select class="field" value={unit.cp ?? ''} onchange={(e) => { const el = e.currentTarget; run(cmd('cp', { cp: el.value || null })); el.value = unit?.cp ?? ''; }} aria-label="Command post" data-testid="unit-cp">
+          <option value="">None</option>
+          {#each CP_TYPES as c (c.key)}<option value={c.key}>{c.key.toUpperCase()} · {c.label}</option>{/each}
+        </select>
       </dd>
 
       <dt><span class="tag">SIDC</span> Function (icon)</dt>

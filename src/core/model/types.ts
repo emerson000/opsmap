@@ -3,6 +3,7 @@ export type Lifecycle = 'todo'|'active'|'blocked'|'done'|'dropped';
 export type Presence = 'present'|'planned';
 export type Condition = 'none'|'fully-capable'|'damaged'|'destroyed'|'full';
 export type Echelon = 'tm'|'sqd'|'sec'|'plt'|'coy'|'bn'|'rgt'|'bde'|'div'|'corps'|'army';
+export type CommandPost = 'main'|'tac'|'alt'|'rear';
 export type Ring = 'hq'|'near'|'mid'|'far'|'beyond';
 export type FunctionKey = 'inf'|'armor'|'ca'|'recon'|'mi'|'eng'|'sig'|'liaison'|'civ'|'med'|'mtf'|'fin'|'sup'|'trans'|'maint'|'sec'|'ad'|'mp'|'eod'|'sf'|'rel'|'learn'|'hq'|'place'|'person'|'event';
 export interface Unit {
@@ -27,6 +28,8 @@ export interface Unit {
   note?: string;
   rating?: string;
   keyTerrain?: boolean;
+  /** Command post type: draws the HQ staff with MAIN, TAC, ALT or REAR inside the frame. */
+  cp?: CommandPost;
   sidcOverride?: string;
   createdAt: string;
   updatedAt: string;

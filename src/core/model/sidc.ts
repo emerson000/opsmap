@@ -11,10 +11,13 @@ export function toSidc(u:Unit):string {
   const fn=FUNCTION_BY_KEY[u.fn];
   const condition=effectiveCondition(u);
   const status=u.presence==='planned'?'1':u.condition!=='none'?statuses[u.condition]:u.lifecycle==='blocked'?'3':u.lifecycle==='done'?(u.affiliation==='hostile'?'4':'2'):statuses[condition];
-  const h=(u.fn==='hq'?2:0)+(u.taskForce?4:0);
+  // A command post is a headquarters, whatever its function.
+  const h=(u.fn==='hq'||u.cp?2:0)+(u.taskForce?4:0);
   const echelon=fn.symbolSet==='10' && u.echelon?ECHELONS.find(e=>e.key===u.echelon)?.code??'00':'00';
   const entity=(u.affiliation==='hostile'||u.affiliation==='suspect')?HOSTILE_ENTITIES[u.fn]??fn.entity:fn.entity;
-  return `130${identities[u.affiliation]}${fn.symbolSet}${status}${h}${echelon}${entity}0000`;
+  // A command post shows its type (MAIN, TAC…) in place of the icon, as in standard CP symbols.
+  const icon=u.cp&&fn.symbolSet==='10'?'000000':entity;
+  return `130${identities[u.affiliation]}${fn.symbolSet}${status}${h}${echelon}${icon}0000`;
 }
 export function formatDtg(input:string|Date,tz=DEFAULT_TZ):string {
   const p=parts(new Date(input),tz),pad=(n:number)=>String(n).padStart(2,'0');
@@ -23,6 +26,8 @@ export function formatDtg(input:string|Date,tz=DEFAULT_TZ):string {
 }
 export function symbolOptions(u:Unit,view:View):SymbolOptions {
   const options:SymbolOptions={simpleStatusModifier:true,uniqueDesignation:u.designation,civilianColor:u.fn==='person'};
+  // Special C2 headquarters (field AA): shown inside the frame in every view.
+  if(u.cp)options.specialHeadquarters=u.cp.toUpperCase();
   if(view!=='commander') {
     if(u.strength!==undefined) options.combatEffectiveness=`${u.strength}%`;
     if(u.reinforced) options.reinforcedReduced=`(${u.reinforced})`;

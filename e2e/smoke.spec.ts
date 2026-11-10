@@ -1,3 +1,4 @@
+import { VERBS } from '../src/core/commands/grammar';
 import { test, expect, type Page } from '@playwright/test';
 import { command, errors, openLog, openMap, userPage } from './helpers';
 
@@ -118,7 +119,7 @@ test('autocomplete exposes all commands in a scrolling list and advances /new sl
  const page = await userPage(browser, 'alice', baseURL!, true);
  await openMap(page);await closeSitrep(page);
  const input=page.getByTestId('command-input');await input.fill('/');
- const options=page.getByRole('option');await expect(options).toHaveCount(40);
+ const options=page.getByRole('option');await expect(options).toHaveCount(VERBS.length);
  for(let i=0;i<12;i++)await input.press('ArrowDown');
  await expect(input).toHaveAttribute('aria-activedescendant','cmd-option-12');
  expect(await page.getByRole('listbox').evaluate(el=>el.scrollTop)).toBeGreaterThan(0);

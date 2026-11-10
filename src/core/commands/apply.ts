@@ -1,5 +1,5 @@
 import ms from 'milsymbol';
-import type { Affiliation, Command, ControlMeasure, Doc, Echelon, FunctionKey, Order, Ring, Unit, Touched } from '../model/types';
+import type { Affiliation, Command, CommandPost, ControlMeasure, Doc, Echelon, FunctionKey, Order, Ring, Unit, Touched } from '../model/types';
 import { designationFrom, effectiveCondition } from '../model/derive';
 import { ECHELONS, echelonIndex } from '../model/echelon';
 import { FUNCTIONS } from '../model/functions';
@@ -175,6 +175,12 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
       case 'due': {const u=unit();if(a.dueAt===null){delete u.dueAt;delete u.posOverride;}else {u.dueAt=date(a.dueAt);u.pos.r=radiusForDate(u.dueAt,now,doc.settings.tz);delete u.posOverride;u.pos=resolvePlacement(doc,u.sectorId,u.pos,u.id);}changed(u);log=`${u.designation} DUE ${u.dueAt??'NONE'}`;break;}
       case 'note': {const u=unit();requireThat(typeof a.note==='string','Expected note');u.note=a.note;changed(u);log=`${u.designation} NOTE ${u.note}`;break;}
       case 'rate': {const u=unit();requireThat(typeof a.rating==='string'&&/^[A-F][1-6]$/i.test(a.rating),'Rating must be A–F followed by 1–6');u.rating=a.rating.toUpperCase();changed(u);log=`${u.designation} RATED ${u.rating}`;break;}
+      case 'cp': {
+        const u=unit();
+        if(a.cp===null){requireThat(u.cp,`${u.designation} is not a command post`);delete u.cp;log=`${u.designation} CP REMOVED`;}
+        else {requireThat(['main','tac','alt','rear'].includes(String(a.cp)),'Expected main, tac, alt, rear or none');requireThat(u.cp!==a.cp,`${u.designation} is already ${String(a.cp).toUpperCase()} CP`);u.cp=a.cp as CommandPost;log=`${u.designation} CP ${u.cp.toUpperCase()}`;}
+        changed(u);break;
+      }
       case 'key': {const u=unit();u.keyTerrain=a.value===undefined?!u.keyTerrain:a.value===true;changed(u);log=`${u.designation} KEY TERRAIN ${u.keyTerrain?'MARKED':'CLEARED'}`;break;}
       case 'sector': {
         const action=text(a.action,'sector action');
