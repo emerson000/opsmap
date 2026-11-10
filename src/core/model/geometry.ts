@@ -99,3 +99,34 @@ export function freeSpot(doc:Doc,sectorId:string,ring:Ring):Polar {
   const [,hi]=RING_R[ring];
   return resolvePlacement(doc,sectorId,{r:hi-0.05,theta:sector.startDeg+Math.min(6,sector.widthDeg/12)});
 }
+
+/** Area sizes for `/obj|/ea|/nai size`: the minimum radius in map units. Medium is the default. */
+export const AREA_SIZES={small:0.25,medium:0.35,large:0.5,xl:0.7} as const;
+export type AreaSize=keyof typeof AREA_SIZES;
+export const DEFAULT_AREA_SIZE=AREA_SIZES.medium;
+/** Room around a member's center, so the outline encloses its symbol (the renderer widens it when zoomed out). */
+export const AREA_MARGIN=0.4;
+/** The size preset closest to a radius. */
+export function areaSizeName(size:number|undefined):AreaSize {
+  const value=size??DEFAULT_AREA_SIZE;
+  let best:AreaSize='medium';
+  for(const key of Object.keys(AREA_SIZES) as AreaSize[])if(Math.abs(AREA_SIZES[key]-value)<Math.abs(AREA_SIZES[best]-value))best=key;
+  return best;
+}
+/** The units an area holds, in order. `include` filters (e.g. to visible units); dropped units never count. */
+export function areaMembers(doc:Pick<Doc,'units'>,m:{members?:string[]},include?:(u:Doc['units'][number])=>boolean) {
+  const byId=new Map(doc.units.map(u=>[u.id,u]));
+  return (m.members??[]).map(id=>byId.get(id)).filter((u):u is Doc['units'][number]=>Boolean(u&&u.lifecycle!=='dropped'&&(!include||include(u))));
+}
+/** Drawn center and radius of an area in map units: centered on its members and enclosing them with a margin,
+ *  never smaller than its size; without members, its own position and size. */
+export function areaShape(doc:Pick<Doc,'units'|'sectors'>,m:Pick<import('./types').ControlMeasure,'pos'|'size'|'members'|'sectorId'>,include?:(u:Doc['units'][number])=>boolean,margin=AREA_MARGIN):{center:XY;radius:number;members:number} {
+  const size=m.size??DEFAULT_AREA_SIZE;
+  const sector=doc.sectors.find(s=>s.id===m.sectorId);
+  const own=polarToXY(m.pos??{r:2.5,theta:sector?sector.startDeg+sector.widthDeg/2:0});
+  const members=areaMembers(doc,m,include).map(u=>polarToXY(u.pos));
+  if(!members.length)return {center:own,radius:size,members:0};
+  const center={x:members.reduce((n,p)=>n+p.x,0)/members.length,y:members.reduce((n,p)=>n+p.y,0)/members.length};
+  const reach=Math.max(...members.map(p=>Math.hypot(p.x-center.x,p.y-center.y)));
+  return {center,radius:Math.max(size,reach+Math.max(AREA_MARGIN,margin)),members:members.length};
+}

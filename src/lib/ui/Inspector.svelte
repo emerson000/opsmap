@@ -75,6 +75,15 @@
   const orders = $derived(unit ? doc.orders.filter(o => o.from === unit.id || o.to === unit.id) : []);
   const parent = $derived(unit?.parentId ? doc.units.find(u => u.id === unit.parentId) : undefined);
   const members = $derived(unit ? doc.units.filter(u => u.parentId === unit.id) : []);
+  const areas = $derived(doc.measures.filter(m => m.type !== 'pl'));
+  const area = $derived(unit ? areas.find(m => m.members?.includes(unit.id)) : undefined);
+  /** Join the chosen area (the unit moves inside it), or leave the current one. */
+  function setArea(id: string) {
+    if (!unit) return;
+    const target = areas.find(m => m.id === id);
+    if (target) run({ verb: target.type, args: { action: 'join', measure: target.id, units: [unit.id] } });
+    else if (area) run({ verb: area.type, args: { action: 'leave', measure: area.id, units: [unit.id] } });
+  }
   const cond = $derived(unit ? effectiveCondition(unit) : 'none');
   const k = $derived(band(unit?.strength));
   const resolved = $derived(unit ? unit.lifecycle === 'done' || unit.lifecycle === 'dropped' : false);
@@ -204,6 +213,14 @@
           {#each RINGS as r (r.key)}<option value={r.key}>{r.label} · {r.horizon}</option>{/each}
         </select>
         {#if unit.posOverride}<span class="note">Pinned by hand: auto-advance skips it. Re-date to release.</span>{/if}
+      </dd>
+
+      <dt>Area (OBJ · EA · NAI)</dt>
+      <dd>
+        <select class="field" value={area?.id ?? ''} onchange={(e) => { const el = e.currentTarget; setArea(el.value); el.value = area?.id ?? ''; }} aria-label="Area" data-testid="unit-area">
+          <option value="">None</option>
+          {#each areas as m (m.id)}<option value={m.id}>{m.type.toUpperCase()} {m.name}</option>{/each}
+        </select>
       </dd>
 
       <dt><span class="tag">W</span> Due (DTG)</dt>

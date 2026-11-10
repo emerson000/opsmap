@@ -41,6 +41,8 @@ Theme follows the system (`prefers-color-scheme`, live) unless this browser pick
 
 Control measures: `/obj|/ea|/nai move <name> [to <sector>] <hq|near|mid|far>` (the ring words `close`, `deep` and `aoi` also work everywhere) or `move <name> near <unit>`; `/pl date <name> <date>` re-dates a phase line (phase lines sit at their date and are not dragged). Both are ordinary undoable ops.
 
+Areas (OBJ, EA, NAI) hold units. `/ea join <name> <unit>…` moves units inside an area and `/ea leave <name> <unit>…` releases them; on the map, drop a unit inside an area's outline to add it and drag it out past the outline to remove it, or pick the area in the unit's inspector. A unit belongs to at most one area, and moving a member to another sector by command takes it out. The outline is centered on its members and grows to enclose them; `/ea size <name> small|medium|large|xl` sets the smallest it draws (medium by default, also on the area's card). Moving an area moves its members with it. The same forms work for `/obj` and `/nai`.
+
 ## Multiple maps
 
 The server holds any number of shared maps (up to 50). Each map has its own op journal, sequence numbers, snapshots, undo history, presence and 04:00 morning turn; users, sessions, tokens and backups are shared, and everything stays in the one `opsmap.db`. The first map in creation order is the default. Upgrading an existing database moves its journal into the map `main`, named "Main", without changing it.

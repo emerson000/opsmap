@@ -45,7 +45,9 @@ export interface Order {
   createdAt: string;
 }
 export interface Sector { id: string; name: string; startDeg: number; widthDeg: number; color?: string; }
-export interface ControlMeasure { id: string; type: 'obj'|'ea'|'nai'|'pl'; name: string; sectorId?: string; pos?: {r:number;theta:number}; size?: number; date?: string; }
+/** Area measures (OBJ, EA, NAI) have a center, a minimum radius (`size`) and optional member units; the drawn
+ *  area is centered on its members and grows to enclose them. A unit belongs to at most one area. */
+export interface ControlMeasure { id: string; type: 'obj'|'ea'|'nai'|'pl'; name: string; sectorId?: string; pos?: {r:number;theta:number}; size?: number; members?: string[]; date?: string; }
 export interface LogEntry { id: string; at: string; text: string; cmd?: string; by?: string; via?: string; }
 export interface Doc {
   version: 1;

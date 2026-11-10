@@ -3,7 +3,7 @@ import type { Affiliation, Command, ControlMeasure, Doc, Echelon, FunctionKey, O
 import { designationFrom, effectiveCondition } from '../model/derive';
 import { ECHELONS, echelonIndex } from '../model/echelon';
 import { FUNCTIONS } from '../model/functions';
-import { RING_R, freeSpot, resolvePlacement, ringForRadius, normalizeDeg, radiusForDate, sectorAt, snap } from '../model/geometry';
+import { AREA_SIZES, RING_R, areaShape, freeSpot, polarToXY, resolvePlacement, ringForRadius, normalizeDeg, radiusForDate, sectorAt, snap, xyToPolar, type AreaSize } from '../model/geometry';
 import { importJson } from '../model/json';
 import { cloneDoc } from '../model/clone';
 import { advanceDay } from './turn';
@@ -59,6 +59,22 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
     const doc=cloneDoc(original),a=cmd.args,at=now.toISOString();let log='';
     const unit=()=>item(doc.units,a.unit,'unit');
     const changed=(u:Unit)=>{u.updatedAt=at;};
+    /** Orders that a sector change leaves crossing a boundary are cancelled; returns their log suffix. */
+    const cancelBoundary=(moved:Unit[],measureIds:string[]=[]):string=>{
+      const ids=new Set([...moved.map(u=>u.id),...measureIds]);
+      const cancelled=doc.orders.filter(o=>{
+        if(!ids.has(o.from)&&!ids.has(o.to))return false;
+        const source=doc.units.find(x=>x.id===o.from);
+        const target=doc.units.find(x=>x.id===o.to)??doc.measures.find(x=>x.id===o.to);
+        return source&&!source.taskForce&&target?.sectorId&&source.sectorId!==target.sectorId;
+      });
+      doc.orders=doc.orders.filter(o=>!cancelled.some(c=>c.id===o.id));
+      return cancelled.map(order=>`; ${order.type.toUpperCase()} ON ${doc.units.find(x=>x.id===order.to)?.designation??doc.measures.find(m=>m.id===order.to)?.name??'HQ'} CANCELLED (BOUNDARY)`).join('');
+    };
+    /** Place a unit by hand: free spot near the requested position, pinned against auto-advance. */
+    const relocate=(u:Unit,sectorId:string,pos:{r:number;theta:number})=>{u.sectorId=sectorId;u.pos=resolvePlacement(doc,sectorId,pos,u.id);if(u.dueAt)u.posOverride=true;changed(u);};
+    const areaOf=(u:Unit)=>doc.measures.find(m=>m.members?.includes(u.id));
+    const release=(m:ControlMeasure,id:string)=>{m.members=(m.members??[]).filter(x=>x!==id);if(!m.members.length)delete m.members;};
     const label=(u:Unit)=>`${u.designation} (${u.fn.toUpperCase()} ${u.echelon?.toUpperCase()??'UNK'})`;
     const setOrder=(source:Unit,target:Unit|ControlMeasure|'hq',type:Order['type'],role?:Order['role'])=>{
       requireThat(unresolved(source),'Archived or destroyed units cannot receive orders');
@@ -107,26 +123,19 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
       case 'fn': {const u=unit(),fn=functions[String(a.fn)];requireThat(fn,'Invalid function');const kind=fn==='person'?'person':fn==='place'?'place':fn==='event'?'event':'unit';requireThat(kind!=='person'||u.affiliation!=='hostile'||a.confirm===true,'Mark a person hostile? Add confirm to proceed.');u.fn=fn;u.kind=kind;changed(u);log=`${u.designation} FUNCTION ${fn.toUpperCase()}`;break;}
       case 'rename': {const u=unit();u.title=text(a.title,'title');if(a.designation!==undefined){const d=text(a.designation,'designation').toUpperCase();requireThat(/^[A-Z0-9][A-Z0-9_-]*$/.test(d)&&!doc.units.some(other=>other.id!==u.id&&other.designation===d),'Designation must be unique and uppercase');u.designation=d;}changed(u);log=`${u.designation} RENAMED ${u.title}`;break;}
       case 'move': {
-        const u=unit();
+        const u=unit(),fromSector=u.sectorId;
         if(a.r!==undefined||a.theta!==undefined){const pos=snap({r:finite(a.r,'radius'),theta:finite(a.theta,'angle')},doc.sectors);if(a.sectorId!==undefined)requireThat(pos.sectorId===a.sectorId,'Position does not belong to the selected sector');u.pos={r:pos.r,theta:pos.theta};u.sectorId=pos.sectorId;}
         else if(a.nearUnit){const target=item(doc.units,a.nearUnit,'unit');u.sectorId=target.sectorId;const sector=item(doc.sectors,u.sectorId,'sector');const theta=normalizeDeg(target.pos.theta+Math.min(5,sector.widthDeg/10));const pos=snap({r:Math.min(4.45,target.pos.r+0.15),theta:sectorAt(theta,doc.sectors)?.id===sector.id?theta:target.pos.theta},doc.sectors);u.pos={r:pos.r,theta:pos.theta};}
         else {const ring=text(a.ring,'ring') as Ring;requireThat(rings.includes(ring),'Invalid ring');const sector=item(doc.sectors,a.sectorId??u.sectorId,'sector');u.sectorId=sector.id;u.pos=freeSpot(doc,sector.id,ring);}
         u.pos=resolvePlacement(doc,u.sectorId,u.pos,u.id);
         if(u.dueAt)u.posOverride=true;
         changed(u);
-        const cancelled=doc.orders.filter(o=>{
-          if(o.from!==u.id&&o.to!==u.id)return false;
-          const source=doc.units.find(x=>x.id===o.from);
-          const target=doc.units.find(x=>x.id===o.to)??doc.measures.find(x=>x.id===o.to);
-          return source&&!source.taskForce&&target?.sectorId&&source.sectorId!==target.sectorId;
-        });
-        doc.orders=doc.orders.filter(o=>!cancelled.some(c=>c.id===o.id));
+        // A member moved to another sector leaves its area instead of stretching it across the map.
+        const area=areaOf(u);let left='';
+        if(area&&fromSector!==u.sectorId){release(area,u.id);left=`; LEFT ${area.type.toUpperCase()} ${area.name}`;}
+        const cancelled=cancelBoundary([u]);
         validOrders(doc);
-        log=`MOVE ${u.designation} → ${doc.sectors.find(s=>s.id===u.sectorId)?.name.toUpperCase()} / ${ringForRadius(u.pos.r).toUpperCase()}${u.pos.r>4?' (OFF MAP)':''}${u.posOverride?' — OVERRIDE PIN':''}`;
-        for(const order of cancelled){
-          const target=doc.units.find(x=>x.id===order.to)?.designation??doc.measures.find(m=>m.id===order.to)?.name??'HQ';
-          log+=`; ${order.type.toUpperCase()} ON ${target} CANCELLED (BOUNDARY)`;
-        }
+        log=`MOVE ${u.designation} → ${doc.sectors.find(s=>s.id===u.sectorId)?.name.toUpperCase()} / ${ringForRadius(u.pos.r).toUpperCase()}${u.pos.r>4?' (OFF MAP)':''}${u.posOverride?' — OVERRIDE PIN':''}${cancelled}${left}`;
         break;
       }
       case 'attack': {const u=unit(),target=item([...doc.units,...doc.measures],a.target,'target');const role=a.role??'main';requireThat(role==='main'||role==='support','Invalid attack role');setOrder(u,target,'attack',role);break;}
@@ -190,20 +199,71 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
         if(a.action==='move'){
           const m=item(doc.measures,a.measure,'control measure');requireThat(m.type===type,'Wrong control measure type');
           requireThat(type!=='pl','A phase line sits at its date: use /pl date ‹name› ‹date›');
+          // Where the area is drawn now: a drag or move shifts that center (members included).
+          const from=areaShape(doc,m).center;
           // Area measures stay on the map: hq through far (inside PL QUARTER).
           const maxR=RING_R.far[1]-0.05;
           if(a.r!==undefined||a.theta!==undefined){const pos=snap({r:Math.min(maxR,finite(a.r,'radius')),theta:finite(a.theta,'angle')},doc.sectors);if(a.sectorId!==undefined)requireThat(pos.sectorId===a.sectorId,'Position does not belong to the selected sector');m.pos={r:pos.r,theta:pos.theta};m.sectorId=pos.sectorId;}
           else if(a.nearUnit){const target=item(doc.units,a.nearUnit,'unit');const pos=snap({r:Math.min(maxR,target.pos.r+0.3),theta:target.pos.theta},doc.sectors);m.sectorId=pos.sectorId;m.pos={r:pos.r,theta:pos.theta};}
           else {const ring=text(a.ring,'ring') as Ring;requireThat(['hq','near','mid','far'].includes(ring),'Invalid ring');const sector=item(doc.sectors,a.sectorId??m.sectorId,'sector');m.sectorId=sector.id;m.pos=freeSpot(doc,sector.id,ring);}
+          // Members move with their area, keeping their spacing; then each settles into a free spot.
+          const members=(m.members??[]).map(id=>doc.units.find(u=>u.id===id)).filter((u):u is Unit=>Boolean(u&&u.lifecycle!=='dropped'));
+          if(members.length){
+            const target=polarToXY(m.pos!),dx=target.x-from.x,dy=target.y-from.y;
+            for(const u of members){const p=polarToXY(u.pos);const s=snap(xyToPolar(p.x+dx,p.y+dy),doc.sectors);u.sectorId=s.sectorId;u.pos={r:s.r,theta:s.theta};}
+            for(const u of members)relocate(u,u.sectorId,u.pos);
+          }
+          // Orders on the area or its members that now cross a sector boundary are cancelled.
+          const cancelled=cancelBoundary(members,[m.id]);validOrders(doc);
           const sector=doc.sectors.find(x=>x.id===m.sectorId);
-          log=`${type.toUpperCase()} ${m.name} MOVED → ${(sector?.name??m.sectorId??'').toUpperCase()} ${ringForRadius(m.pos!.r).toUpperCase()}`;
+          log=`${type.toUpperCase()} ${m.name} MOVED → ${(sector?.name??m.sectorId??'').toUpperCase()} ${ringForRadius(m.pos!.r).toUpperCase()}${members.length?` WITH ${members.length} UNIT${members.length===1?'':'S'}`:''}${cancelled}`;
+        }else if(a.action==='join'||a.action==='leave'){
+          const m=item(doc.measures,a.measure,'control measure');requireThat(m.type===type&&type!=='pl','Only OBJ, EA and NAI areas hold units');
+          requireThat(Array.isArray(a.units)&&a.units.length>0&&a.units.length<=50,'Expected one or more units');
+          const units=[...new Set(a.units as unknown[])].map(id=>item(doc.units,id,'unit'));
+          const at=a.r!==undefined||a.theta!==undefined?snap({r:finite(a.r,'radius'),theta:finite(a.theta,'angle')},doc.sectors):undefined;
+          requireThat(!at||units.length===1,'A position applies to one unit');
+          const names=units.map(u=>u.designation).join(', ');
+          if(a.action==='join'){
+            requireThat(units.every(u=>u.lifecycle!=='dropped'),'Dropped units cannot join an area');
+            requireThat(units.some(u=>!m.members?.includes(u.id))||at,`Already in ${type.toUpperCase()} ${m.name}`);
+            const moved:Unit[]=[];let from='';
+            for(const u of units){
+              const previous=areaOf(u);
+              if(previous&&previous.id!==m.id){release(previous,u.id);from+=`; ${u.designation} LEFT ${previous.type.toUpperCase()} ${previous.name}`;}
+              if(at)relocate(u,at.sectorId,at);
+              else if(!m.members?.includes(u.id)){
+                // Into the area: next to its center, in the sector under that center.
+                const center=xyToPolar(areaShape(doc,m).center),sectorId=sectorAt(center.theta,doc.sectors)?.id??m.sectorId??u.sectorId;
+                relocate(u,sectorId,center);
+              }
+              if(!m.members?.includes(u.id))m.members=[...(m.members??[]),u.id];
+              changed(u);moved.push(u);
+            }
+            const cancelled=cancelBoundary(moved);validOrders(doc);
+            log=`${names} JOINED ${type.toUpperCase()} ${m.name}${from}${cancelled}`;
+          }else{
+            requireThat(units.every(u=>m.members?.includes(u.id)),`Not in ${type.toUpperCase()} ${m.name}: ${units.filter(u=>!m.members?.includes(u.id)).map(u=>u.designation).join(', ')}`);
+            for(const u of units){release(m,u.id);changed(u);}
+            let cancelled='';
+            if(at){relocate(units[0],at.sectorId,at);cancelled=cancelBoundary(units);validOrders(doc);}
+            log=`${names} LEFT ${type.toUpperCase()} ${m.name}${cancelled}`;
+          }
+        }else if(a.action==='size'){
+          const m=item(doc.measures,a.measure,'control measure');requireThat(m.type===type&&type!=='pl','Only OBJ, EA and NAI areas have a size');
+          const key=text(a.size,'size').toLowerCase();requireThat(Object.hasOwn(AREA_SIZES,key),'Expected small, medium, large or xl');
+          const size=AREA_SIZES[key as AreaSize];requireThat((m.size??AREA_SIZES.medium)!==size,`${type.toUpperCase()} ${m.name} is already ${key}`);
+          m.size=size;log=`${type.toUpperCase()} ${m.name} SIZE ${key.toUpperCase()}`;
         }else if(a.action==='date'){
           const m=item(doc.measures,a.measure,'control measure');requireThat(m.type==='pl'&&type==='pl','Only phase lines have a date');
           m.date=date(a.date);log=`PL ${m.name} DATED ${m.date.slice(0,10)}`;
         }else if(a.action==='remove'){
-          const m=item(doc.measures,a.measure,'control measure');requireThat(m.type===type,'Wrong control measure type');doc.measures=doc.measures.filter(x=>x.id!==m.id);doc.orders=doc.orders.filter(o=>o.to!==m.id).map(o=>o.via?{...o,via:o.via.filter(id=>id!==m.id)}:o);log=`${type.toUpperCase()} ${m.name} REMOVED`;
+          const m=item(doc.measures,a.measure,'control measure');requireThat(m.type===type,'Wrong control measure type');
+          // Released members count as changed, so undoing the removal conflicts with their later moves.
+          for(const id of m.members??[]){const u=doc.units.find(x=>x.id===id);if(u)changed(u);}
+          doc.measures=doc.measures.filter(x=>x.id!==m.id);doc.orders=doc.orders.filter(o=>o.to!==m.id).map(o=>o.via?{...o,via:o.via.filter(id=>id!==m.id)}:o);log=`${type.toUpperCase()} ${m.name} REMOVED`;
         }else{
-          requireThat(a.action==='add','Expected add, move, date, or remove');const name=text(a.name,'name').toUpperCase();requireThat(!doc.measures.some(m=>m.type===type&&m.name.toUpperCase()===name),'Control measure already exists');
+          requireThat(a.action==='add','Expected add, move, join, leave, size, date, or remove');const name=text(a.name,'name').toUpperCase();requireThat(!doc.measures.some(m=>m.type===type&&m.name.toUpperCase()===name),'Control measure already exists');
           const m:ControlMeasure={id:uniqueId(type,doc.measures),type,name};
           if(type==='pl')m.date=date(a.date);
           else {const sector=item(doc.sectors,a.sectorId,'sector'),ring=(a.ring??'mid') as Ring;requireThat(rings.includes(ring),'Invalid ring');m.sectorId=sector.id;m.pos=freeSpot(doc,sector.id,ring);m.size=0.35;}

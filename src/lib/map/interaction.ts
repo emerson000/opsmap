@@ -1,6 +1,6 @@
 // Turns pointer gestures on the map into commands. Pure; the component calls dispatch.
 import type { Command, Doc, Ring } from '../../core/model/types';
-import { RING_R, snap, xyToPolar } from '../../core/model/geometry';
+import { RING_R, areaShape, snap, xyToPolar } from '../../core/model/geometry';
 import { SCALE } from './constants';
 
 type XY = { x: number; y: number };
@@ -21,18 +21,35 @@ export function snapWorld(doc: Doc, world: XY) {
   return snap(xyToPolar(world.x / SCALE, world.y / SCALE), doc.sectors);
 }
 
-/** A drag-and-drop of a unit becomes exactly one `move` command. */
-export function dropCommand(doc: Doc, unitId: string, world: XY): Command {
+/** A drag-and-drop of a unit becomes exactly one command: dropped inside another area's outline it joins that
+ *  area, dropped outside its own area's outline it leaves it, otherwise it moves. */
+export function dropCommand(doc: Doc, unitId: string, world: XY, drawn?: { id: string; x: number; y: number; r: number }[]): Command {
   const s = snapWorld(doc, world);
-  return { verb: 'move', args: { unit: unitId, r: round(s.r), theta: round(s.theta), sectorId: s.sectorId } };
+  const pos = { r: round(s.r), theta: round(s.theta) };
+  const pt = { x: world.x / SCALE, y: world.y / SCALE };
+  // Hit-test the outlines as drawn (world px) when the map supplies them; otherwise the model's shapes.
+  const outline = (m: Doc['measures'][number]) => {
+    const d = drawn?.find(x => x.id === m.id);
+    if (d) return { center: { x: d.x / SCALE, y: d.y / SCALE }, radius: d.r / SCALE };
+    return areaShape(doc, m);
+  };
+  const distance = (m: Doc['measures'][number]) => { const shape = outline(m); return { m, d: Math.hypot(pt.x - shape.center.x, pt.y - shape.center.y), r: shape.radius }; };
+  const areas = doc.measures.filter(m => m.type !== 'pl').map(distance);
+  const current = areas.find(a => a.m.members?.includes(unitId));
+  const into = areas.filter(a => a.d <= a.r && a.m.id !== current?.m.id).sort((a, b) => a.d - b.d)[0];
+  if (into) return { verb: into.m.type, args: { action: 'join', measure: into.m.id, units: [unitId], ...pos } };
+  if (current && current.d > current.r) return { verb: current.m.type, args: { action: 'leave', measure: current.m.id, units: [unitId], ...pos } };
+  return { verb: 'move', args: { unit: unitId, ...pos, sectorId: s.sectorId } };
 }
 
 /** A drag-and-drop of an area measure (OBJ, EA, NAI) becomes exactly one `<type> move` command. */
-export function measureDropCommand(doc: Doc, measureId: string, world: XY): Command {
+/** `delta` (world px) shifts the area from its model center, so hidden members do not offset the move. */
+export function measureDropCommand(doc: Doc, measureId: string, world: XY, delta?: XY): Command {
   const m = doc.measures.find(x => x.id === measureId);
   if (!m) throw new Error(`Unknown control measure: ${measureId}`);
   if (m.type === 'pl') throw new Error('A phase line sits at its date: use /pl date');
-  const s = snapWorld(doc, world);
+  const from = areaShape(doc, m).center;
+  const s = snapWorld(doc, delta ? { x: from.x * SCALE + delta.x, y: from.y * SCALE + delta.y } : world);
   return { verb: m.type, args: { action: 'move', measure: m.id, r: round(s.r), theta: round(s.theta) } };
 }
 

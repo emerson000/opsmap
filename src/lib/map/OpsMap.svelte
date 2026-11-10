@@ -1,7 +1,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import type { Command, Ring, Unit } from '../../core/model/types';
-  import { RING_R } from '../../core/model/geometry';
+  import { AREA_SIZES, RING_R, areaMembers, areaSizeName, type AreaSize } from '../../core/model/geometry';
+  const AREA_SIZE_NAMES = Object.keys(AREA_SIZES) as AreaSize[];
   import { mapLabels, visibleWorld } from './maplabels';
   import { band } from '../ui/words';
   import { formatDtg } from '../../core/model/sidc';
@@ -215,6 +216,8 @@
   let captureMenu = $state<{ x: number; y: number; ctx: { sectorId: string; ring: Ring } } | null>(null);
   /** Small inspector for an OBJ, EA or NAI (long-press and let go, double-tap, or double-click). */
   let measureCard = $state<{ id: string; x: number; y: number } | null>(null);
+  /** The card's height, so it stays above whatever covers the bottom of the map (command bar, sheet). */
+  let cardH = $state(0), mapH = $state(0);
   const cardMeasure = $derived(measureCard ? doc.measures.find(x => x.id === measureCard?.id) : undefined);
   const cardSector = $derived(cardMeasure ? doc.sectors.find(x => x.id === cardMeasure.sectorId) : undefined);
   const captureSector = $derived(captureMenu ? doc.sectors.find(x => x.id === captureMenu?.ctx.sectorId) : undefined);
@@ -243,11 +246,13 @@
     return m ? { x: m.x + d.x - d.wx, y: m.y + d.y - d.wy } : { x: d.x, y: d.y };
   }
   const moving = $derived(drag?.kind === 'measure' && drag.moved ? { id: drag.id, dx: drag.x - drag.wx, dy: drag.y - drag.wy } : null);
+  /** Units that travel with the area being dragged. */
+  const movingMembers = $derived(new Set(moving ? doc.measures.find(m => m.id === moving.id)?.members ?? [] : []));
   function openMeasure(id: string) {
     const m = scene.measures.find(x => x.id === id);
     if (!m) return;
     const sx = view2d.x + m.x * view2d.k, sy = view2d.y + m.y * view2d.k;
-    measureCard = { id, x: Math.max(8, Math.min(sx - 120, container.clientWidth - 248)), y: Math.max(8, Math.min(sy + 24, container.clientHeight - 220)) };
+    measureCard = { id, x: Math.max(8, Math.min(sx - 120, container.clientWidth - 248)), y: Math.max(8, Math.min(sy + 24, container.clientHeight - 300)) };
   }
   function unitUnder(e: { clientX: number; clientY: number }): string | null {
     const el = document.elementFromPoint(e.clientX, e.clientY);
@@ -365,7 +370,7 @@
       const d = drag;
       drag = null; lifted = null;
       if (d.moved) {
-        try { run(d.kind === 'measure' ? measureDropCommand(doc, d.id, measureAt(d)) : dropCommand(doc, d.id, d)); } catch (err) { toast(err instanceof Error ? err.message : String(err)); }
+        try { run(d.kind === 'measure' ? measureDropCommand(doc, d.id, measureAt(d), { x: d.x - d.wx, y: d.y - d.wy }) : dropCommand(doc, d.id, d, scene.measures)); } catch (err) { toast(err instanceof Error ? err.message : String(err)); }
       } else if (d.kind === 'measure') {
         if (d.lifted) openMeasure(d.id);
       } else {
@@ -442,7 +447,7 @@
   const RING_NAME: Record<Ring, string> = { hq: 'HQ', near: 'close', mid: 'deep', far: 'far', beyond: 'beyond' };
 </script>
 
-<div class="opsmap" data-theme={theme} bind:this={container}>
+<div class="opsmap" data-theme={theme} bind:this={container} bind:clientHeight={mapH}>
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <svg bind:this={svg} class="map-svg" role="application" aria-label="Tactical map" tabindex="-1" data-zoom={view2d.k.toFixed(4)}
     class:dragging={drag?.moved || link}
@@ -472,8 +477,9 @@
         {#each scene.units as su (su.id)}
           {@const sym = unitSymbol(su.unit, su.symbolView, UNIT_SIZE * (su.ring==='hq'?0.6:1), theme, { contact: su.contact, bare:true })}
           {@const dragging = drag?.kind === 'unit' && drag?.id === su.id && drag.moved}
-          {@const x = dragging && drag ? drag.x : su.x}
-          {@const y = dragging && drag ? drag.y : su.y}
+          {@const carried = moving && movingMembers.has(su.id)}
+          {@const x = dragging && drag ? drag.x : carried ? su.x + moving!.dx : su.x}
+          {@const y = dragging && drag ? drag.y : carried ? su.y + moving!.dy : su.y}
           <g class="unit" class:dragging class:lifted={drag?.kind === 'unit' && lifted === su.id} class:selected={su.selected} class:link-target={link?.targetId === su.id}
             class:link-valid={link?.targetId === su.id && link.valid} class:complete={su.unit.lifecycle === 'done' && su.unit.affiliation === 'friend'}
             data-unit-id={su.id} data-interactive transform="translate({x} {y})"
@@ -574,10 +580,20 @@
   {#if measureCard && cardMeasure}
     {@const mm = cardMeasure}
     {@const sec = cardSector}
-      <div class="capture-menu measure-card" role="dialog" aria-label="{mm.type.toUpperCase()} {mm.name}" data-testid="measure-card" style="left:{measureCard.x}px; top:{measureCard.y}px">
+      <div class="capture-menu measure-card" role="dialog" aria-label="{mm.type.toUpperCase()} {mm.name}" data-testid="measure-card" bind:offsetHeight={cardH} style="left:{measureCard.x}px; top:{Math.max(8, Math.min(measureCard.y, mapH - (insets?.bottom ?? 0) - cardH - 8))}px">
         <div class="cm-title"><b>{mm.type.toUpperCase()}</b> {mm.name}</div>
         <div class="cm-meta">{({ obj: 'Objective', ea: 'Engagement area', nai: 'Named area of interest', pl: 'Phase line' })[mm.type]}{sec ? ` · ${sec.name}` : ''}{mm.pos ? ` · ${RING_NAME[ringOfRadius(mm.pos.r)]} ring` : ''}</div>
         <div class="cm-meta">{touch ? 'Long-press and drag to move it.' : 'Drag its outline or label to move it.'} Or: /{mm.type} move {mm.name} ‹ring›</div>
+        {#if mm.type !== 'pl'}
+          {@const inside = areaMembers(doc, mm).map(u => u.designation)}
+          <div class="cm-meta" data-testid="area-members"><b>{inside.length ? `Holds ${inside.join(', ')}.` : 'Empty.'}</b> Drop a unit inside to add it; drag it out to remove it.</div>
+          <div class="cm-sizes" role="radiogroup" aria-label="Minimum size">
+            {#each AREA_SIZE_NAMES as key (key)}
+              <button class="btn" role="radio" aria-checked={areaSizeName(mm.size) === key} class:on={areaSizeName(mm.size) === key} data-size={key}
+                onclick={() => { if (areaSizeName(mm.size) !== key) run({ verb: mm.type, args: { action: 'size', measure: mm.id, size: key } }); }}>{key === 'xl' ? 'XL' : key[0].toUpperCase() + key.slice(1)}</button>
+            {/each}
+          </div>
+        {/if}
         <button class="btn warn" onclick={() => { const cmd = { verb: mm.type, args: { action: 'remove', measure: mm.id } }; measureCard = null; run(cmd); }}>Remove</button>
         <button class="btn" onclick={() => (measureCard = null)}>Close</button>
       </div>
@@ -687,6 +703,10 @@
   .cm-title { font:600 12px/1.3 var(--om-font-cond); letter-spacing:0.08em; text-transform:uppercase; padding:2px 2px 4px; }
   .measure-card { width: 240px; }
   .cm-meta { font: 12px/1.35 var(--om-font); padding: 0 2px 4px; }
+  .cm-sizes { display:flex; margin: 2px 0 6px; }
+  .cm-sizes .btn { flex:1; height:32px; padding:0 4px; }
+  .cm-sizes .btn + .btn { margin-left:-1px; }
+  .cm-sizes .btn.on { background: var(--ink); color: var(--panel); border-color: var(--ink); }
   .map-svg { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
   .map-svg:active { cursor: grabbing; }
   .map-svg.dragging { cursor: grabbing; }

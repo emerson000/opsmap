@@ -53,7 +53,7 @@
     ? { top: topH + 4, right: sideW, bottom: dockH + 4, left: 0 }
     : phone
     ? { top: topH + 4, right: 0, bottom: dockH + SHEET_HEAD + 4, left: 0 }
-    : { top: BAR_H + 8, right: INSPECTOR_W + 8, bottom: CMD_H, left: leftW + 8 });
+    : { top: BAR_H + 8, right: INSPECTOR_W + 8, bottom: Math.max(CMD_H, dockH + 12), left: leftW + 8 });
   /** Focus centers a unit above whatever the sheet covers right now. */
   const focusInsets = $derived(phone && !side ? { ...insets, bottom: dockH + sheetH + 4 } : insets);
   const trails = $derived(turnDetails(doc).trails.map(t => ({ unitId: t.unitId, from: t.from })));

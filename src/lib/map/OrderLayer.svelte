@@ -23,8 +23,8 @@
       transform={moving?.id === m.id ? `translate(${moving.dx} ${moving.dy})` : undefined}>
       <path d={m.outline} class="outline" />
       <path d={m.outline} class="hit" stroke-width={hitW} data-measure-id={m.id} data-interactive role="button" tabindex="-1" aria-label="{m.label} {m.name} outline" />
-      <text x={m.x} y={m.y} class="m-type" font-size={Math.max(9.5 * s, mt)} dy={-0.2 * s} data-measure-id={m.id} data-interactive role="button" tabindex="-1" aria-label="{m.label} {m.name}">{m.label}</text>
-      {#if !declutter}<text x={m.x} y={m.y} class="m-name" font-size={Math.max(7.5 * s, mt)} dy={9 * s} data-measure-id={m.id} data-interactive>{m.name}</text>{/if}
+      <text x={m.x} y={m.labelY} class="m-type" font-size={Math.max(9.5 * s, mt)} dy={-0.2 * s} data-measure-id={m.id} data-interactive role="button" tabindex="-1" aria-label="{m.label} {m.name}">{m.label}</text>
+      {#if !declutter}<text x={m.x} y={m.labelY} class="m-name" font-size={Math.max(7.5 * s, mt)} dy={9 * s} data-measure-id={m.id} data-interactive>{m.name}</text>{/if}
       <title>{m.label} {m.name}: drag the outline or label to move</title>
     </g>
   {/each}

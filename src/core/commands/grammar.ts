@@ -1,5 +1,6 @@
 import type { Command, Doc, Unit } from '../model/types';
 import { apply, functions, identities, sizes } from './apply';
+import { AREA_SIZES } from '../model/geometry';
 import { nearestHostile, resolveMeasure, resolveSector, resolveTarget, resolveUnit } from './resolve';
 import { CommandError, parseDate, tokenize, type Token } from './tokenize';
 export type ParseResult={ok:true;cmd:Command;preview:string}|{ok:false;error:string;at:number};
@@ -9,7 +10,7 @@ export const SYNTAX:Record<string,string>={
  new:'[identity] [size] [function] "‹title›" [in ‹sector›] [ring] [due ‹date›] [as ‹designation›]',
  id:'‹unit› ‹identity› [confirm]',size:'‹unit› ‹echelon›',fn:'‹unit› ‹function›',rename:'‹unit› "‹title›" [as ‹designation›]',
  move:'‹unit› [to ‹sector›] ‹ring› | ‹unit› near ‹unit›',attack:'‹unit› ‹target› [main|support] [planned]',moving:'‹unit› to ‹target|nearest hostile|hq›',axis:'‹unit› to OBJ ‹name› [via PL ‹name›, ...]',advancing:'‹hostile› on ‹hq|unit›',
- bda:'‹unit› ‹0–100%|fc|dmg|des|full›',block:'‹unit› [by "‹reason›"]',unblock:'‹unit›',done:'‹unit›',drop:'‹unit› [bypassed]',reinforce:'‹unit› [with ‹unit›]',reduce:'‹unit› ["‹scope cut›"]',attach:'‹unit› to ‹task force›',detach:'‹unit›',link:'‹unit› ‹unit› [as dependency|handoff]',due:'‹unit› ‹date|none›',note:'‹unit› "‹text›"',rate:'‹unit› ‹A–F›‹1–6›',key:'‹unit›',sector:'add ‹name› | rename ‹name› ‹new name› | remove ‹name› [reassign ‹sector›] | width ‹name› ‹degrees›',pl:'add "‹name›" ‹date› | date ‹name› ‹date› | remove ‹name›',obj:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | remove ‹name›',ea:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | remove ‹name›',nai:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | remove ‹name›',find:'‹unit›',sitrep:'[copy]',intent:'"‹one line›"',turn:'',view:'commander|staff|detail',undo:'',redo:'',export:'',import:'',sidc:'‹unit› ‹20 digits›',help:'',
+ bda:'‹unit› ‹0–100%|fc|dmg|des|full›',block:'‹unit› [by "‹reason›"]',unblock:'‹unit›',done:'‹unit›',drop:'‹unit› [bypassed]',reinforce:'‹unit› [with ‹unit›]',reduce:'‹unit› ["‹scope cut›"]',attach:'‹unit› to ‹task force›',detach:'‹unit›',link:'‹unit› ‹unit› [as dependency|handoff]',due:'‹unit› ‹date|none›',note:'‹unit› "‹text›"',rate:'‹unit› ‹A–F›‹1–6›',key:'‹unit›',sector:'add ‹name› | rename ‹name› ‹new name› | remove ‹name› [reassign ‹sector›] | width ‹name› ‹degrees›',pl:'add "‹name›" ‹date› | date ‹name› ‹date› | remove ‹name›',obj:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | join ‹name› ‹unit›… | leave ‹name› ‹unit›… | size ‹name› ‹small|medium|large|xl› | remove ‹name›',ea:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | join ‹name› ‹unit›… | leave ‹name› ‹unit›… | size ‹name› ‹small|medium|large|xl› | remove ‹name›',nai:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | join ‹name› ‹unit›… | leave ‹name› ‹unit›… | size ‹name› ‹small|medium|large|xl› | remove ‹name›',find:'‹unit›',sitrep:'[copy]',intent:'"‹one line›"',turn:'',view:'commander|staff|detail',undo:'',redo:'',export:'',import:'',sidc:'‹unit› ‹20 digits›',help:'',
 };
 const rings=['hq','near','mid','far','beyond'];
 /** The inspector's plain ring words, accepted as aliases. */
@@ -90,10 +91,22 @@ export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult 
     break;
    }
    case 'pl':case 'obj':case 'ea':case 'nai': {
-    const actions=verb==='pl'?'add, date, or remove':'add, move, or remove';
+    const actions=verb==='pl'?'add, date, or remove':'add, move, join, leave, size, or remove';
     const action=take(actions).value.toLowerCase();a.action=action;
     if(action==='remove'){const t=take('name');a.measure=resolveMeasure(t.value,doc,verb,t.start).id;}
     else if(action==='add'){a.name=take('name').value;if(verb==='pl')a.date=date();else{expect('in');a.sectorId=sector();if(peek())a.ring=ringWord(take('ring').value);}}
+    else if((action==='join'||action==='leave')&&verb!=='pl'){
+     const t=take('name');a.measure=resolveMeasure(t.value,doc,verb,t.start).id;
+     const units:string[]=[];
+     do{const u=take('unit');const id=resolveUnit(u.value,doc,u.start,selected?.sectorId).id;if(!units.includes(id))units.push(id);}while(peek());
+     a.units=units;
+    }
+    else if(action==='size'&&verb!=='pl'){
+     const t=take('name');a.measure=resolveMeasure(t.value,doc,verb,t.start).id;
+     const z=take('size');const key=z.value.toLowerCase();
+     if(!Object.hasOwn(AREA_SIZES,key))throw new CommandError('Expected small, medium, large or xl',z.start);
+     a.size=key;
+    }
     else if(action==='date'&&verb==='pl'){const t=take('name');a.measure=resolveMeasure(t.value,doc,'pl',t.start).id;a.date=date();}
     else if(action==='move'&&verb!=='pl'){
      const t=take('name');a.measure=resolveMeasure(t.value,doc,verb,t.start).id;

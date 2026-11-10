@@ -58,8 +58,10 @@ export function importJson(text:string):Doc {
   }
   for(const m of measures) {
     requireValid(oneOf(m.type,['obj','ea','nai','pl'])&&string(m.name),'control measure');
-    optional(m,'sectorId',v=>sectorIds.has(v));optional(m,'pos',position);optional(m,'size',v=>finite(v)&&v>0);optional(m,'date',date);
+    optional(m,'sectorId',v=>sectorIds.has(v));optional(m,'pos',position);optional(m,'size',v=>finite(v)&&v>0);optional(m,'members',v=>Array.isArray(v)&&v.every(id=>typeof id==='string'&&unitIds.has(id))&&new Set(v).size===v.length);optional(m,'date',date);
   }
+  const placed=new Set<string>();
+  for(const m of measures)for(const id of (m.members as string[]|undefined)??[]){requireValid(m.type!=='pl'&&!placed.has(id),'area members: a unit belongs to at most one area');placed.add(id);}
   for(const o of orders) {
     if(o.type==='link') requireValid(unitIds.has(o.from)&&unitIds.has(o.to),'link endpoints must be unit IDs');
     optional(o,'kind',v=>oneOf(v,['dependency','handoff']));

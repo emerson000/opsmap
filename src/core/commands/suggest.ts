@@ -58,11 +58,17 @@ export function suggest(input:string,cursor:number,doc:Doc):{items:Suggestion[];
  else if(verb==='view')candidates=['commander','staff','detail'].map(s=>keyword(s));
  else if(verb==='sector'&&previous.length===1)candidates=['add','rename','remove','width'].map(s=>keyword(s));
  else if(verb==='sector'&&previous.length===2)candidates=sectors();
- else if(['obj','ea','nai','pl'].includes(verb)&&previous.length===1)candidates=(verb==='pl'?['add','date','remove']:['add','move','remove']).map(s=>keyword(s));
- else if(['obj','ea','nai','pl'].includes(verb)&&previous.length===2&&['remove','move','date'].includes(previous[1].value.toLowerCase()))
+ else if(['obj','ea','nai','pl'].includes(verb)&&previous.length===1)candidates=(verb==='pl'?['add','date','remove']:['add','move','join','leave','size','remove']).map(s=>keyword(s));
+ else if(['obj','ea','nai','pl'].includes(verb)&&previous.length===2&&['remove','move','date','join','leave','size'].includes(previous[1].value.toLowerCase()))
   candidates=doc.measures.filter(m=>m.type===verb).map(m=>({insert:/\s/.test(m.name)?JSON.stringify(m.name):m.name,label:`${verb.toUpperCase()} ${m.name}`,kind:'keyword' as const}));
  else if(['obj','ea','nai'].includes(verb)&&previous[1]?.value.toLowerCase()==='move'&&previous.length>=3&&before!=='near')candidates=[...(previous.length===3?[keyword('to')]:[]),...['hq','near','mid','far'].map(s=>keyword(s))];
  else if(['obj','ea','nai'].includes(verb)&&previous[1]?.value.toLowerCase()==='move'&&before==='near')candidates=units();
+ else if(['obj','ea','nai'].includes(verb)&&previous[1]?.value.toLowerCase()==='size'&&previous.length===3)candidates=['small','medium','large','xl'].map(s=>keyword(s));
+ else if(['obj','ea','nai'].includes(verb)&&['join','leave'].includes(previous[1]?.value.toLowerCase()??'')&&previous.length>=3){
+  const area=doc.measures.find(m=>m.type===verb&&m.name.toUpperCase()===previous[2].value.toUpperCase().replace(/^"|"$/g,''));
+  const leaving=previous[1].value.toLowerCase()==='leave',inside=new Set(area?.members??[]);
+  candidates=units().filter(c=>!c.unitId||(leaving?inside.has(c.unitId):!inside.has(c.unitId)));
+ }
  else if(verb==='pl'&&previous[1]?.value.toLowerCase()==='date'&&previous.length===3)candidates=dates();
  else if(verb==='bda'&&previous.length===2){
   const conditions:Record<string,string>={fc:'fully capable',dmg:'damaged (slash)',des:'destroyed (X)',full:'full to capacity'};

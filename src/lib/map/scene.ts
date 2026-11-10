@@ -1,7 +1,7 @@
 import { DEFAULT_TZ, calendarDay, parts, zonedTime } from '../../core/model/time';
 // Builds everything the map draws from a Doc: a pure projection, recomputed reactively.
 import type { ControlMeasure, Doc, Order, Ring, Unit, View } from '../../core/model/types';
-import { polarToXY, radiusForDate, RING_R } from '../../core/model/geometry';
+import { areaShape, polarToXY, radiusForDate, RING_R } from '../../core/model/geometry';
 import { forceRatio } from '../../core/model/forceRatio';
 import { annularSectorPath, arcTextPath, attackArrow, axisOutline, bentCurve, curvePath, labelAt, moveArrow, obstacleMark, type Curve, type Pt } from './arrows';
 import { BEYOND_R, CHEVRON_R, HQ_CLEAR, MAP_EDGE_R, RIM_LABEL_R, SCALE, SECTOR_HQ_R, UNIT_CLEAR } from './constants';
@@ -33,7 +33,9 @@ export interface SceneOrder {
   ratio?: { text: string; under: boolean }; ratioAt?: Pt & { angle: number };
   obstacle?: string;
 }
-export interface SceneMeasure { id: string; type: ControlMeasure['type']; label: string; name: string; x: number; y: number; r: number; outline: string }
+export interface SceneMeasure { id: string; type: ControlMeasure['type']; label: string; name: string; x: number; y: number; r: number; outline: string; members: number;
+  /** Label anchor: the center, or just above the top edge when members sit in the middle. */
+  labelY: number }
 export interface SceneGhost { unitId: string; unit: Unit; x: number; y: number; trail: string }
 export interface Scene {
   sectors: SceneSector[]; rings: SceneRing[]; customPls: (SceneRing & { id: string })[];
@@ -177,12 +179,13 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
 
   // Control measures
   const measures: SceneMeasure[] = doc.measures.filter(m => m.type !== 'pl').map(m => {
-    const s = m.sectorId ? sectorById.get(m.sectorId) : undefined;
-    const pos = m.pos ?? { r: 2.5, theta: s?.centerDeg ?? 0 };
-    const p = world(pos.r, pos.theta), r = (m.size ?? 0.35) * SCALE;
+    // Centered on its visible members and enclosing them; otherwise its own position and size.
+    // Symbols keep their screen size, so zoomed out the margin grows with them.
+    const shape = areaShape(doc, m, u => liveIds.has(u.id), (unitClear + 14 * scale) / SCALE);
+    const p = { x: shape.center.x * SCALE, y: shape.center.y * SCALE }, r = shape.radius * SCALE;
     const outline = m.type === 'obj' ? blob(m.id, p.x, p.y, r, 9, 0.45, false) : blob(m.id, p.x, p.y, r, 10, 0.3, true);
     anchors.set(m.id, { x: p.x, y: p.y, clear: r * 0.75 });
-    return { id: m.id, type: m.type, label: m.type.toUpperCase(), name: m.name.toUpperCase(), x: r2(p.x), y: r2(p.y), r, outline };
+    return { id: m.id, type: m.type, label: m.type.toUpperCase(), name: m.name.toUpperCase(), x: r2(p.x), y: r2(p.y), r, outline, members: shape.members, labelY: r2(shape.members ? p.y - r - 13 * scale : p.y) };
   });
   anchors.set('hq', { x: 0, y: 0, clear: HQ_CLEAR * scale });
 

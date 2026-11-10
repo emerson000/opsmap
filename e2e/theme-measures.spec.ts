@@ -107,3 +107,41 @@ test('desktop: attack by handle gives a toast with undo and the new arrow animat
   await expect(page.locator('g.order[data-order-id]')).toHaveCount(before);
   expect(errors(page)).toEqual([]);
 });
+
+test('desktop: drop a unit into an EA, size it from its card, and the unit moves with the EA', async ({ page, context, baseURL }) => {
+  await signIn(context, 'alice');
+  await resetShared(context, baseURL!);
+  watchErrors(page);
+  await openMap(page);
+  await page.getByRole('button', { name: 'Open order log', exact: true }).click();
+  const log = page.getByTestId('order-log');
+  const center = async (selector: string) => { const b = (await page.locator(selector).first().boundingBox())!; return { x: b.x + b.width / 2, y: b.y + b.height / 2 }; };
+  const drag = async (from: { x: number; y: number }, to: { x: number; y: number }) => {
+    await page.mouse.move(from.x, from.y); await page.mouse.down();
+    for (let i = 1; i <= 12; i++) await page.mouse.move(from.x + (to.x - from.x) * i / 12, from.y + (to.y - from.y) * i / 12);
+    await page.mouse.up();
+  };
+  const area = 'g.measure[data-measure="ea-saturday"]';
+  const records = 'g.unit[data-unit-id="records"]';
+
+  // Drop RECORDS on the EA's outline center: it joins.
+  await drag(await center(records), await center(`${area} path`));
+  await expect(log).toContainText('RECORDS JOINED EA SATURDAY');
+
+  // The card lists it; Large sets the minimum size.
+  await page.locator(`${area} text.m-type`).dispatchEvent('dblclick');
+  const card = page.getByTestId('measure-card');
+  await expect(card.getByTestId('area-members')).toContainText('Holds RECORDS');
+  await card.getByRole('radio', { name: 'Large' }).click();
+  await expect(log).toContainText('EA SATURDAY SIZE LARGE');
+  await page.keyboard.press('Escape');
+
+  // Dragging the EA by its label carries RECORDS along.
+  const before = await page.locator(records).getAttribute('transform');
+  const label = await center(`${area} text.m-type`);
+  await drag(label, { x: label.x - 60, y: label.y + 40 });
+  await expect(log).toContainText('EA SATURDAY MOVED');
+  await expect(log).toContainText('WITH 1 UNIT');
+  await expect.poll(() => page.locator(records).getAttribute('transform')).not.toBe(before);
+  expect(errors(page)).toEqual([]);
+});

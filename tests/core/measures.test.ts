@@ -56,7 +56,7 @@ describe('control measure move (/obj, /ea, /nai move)', () => {
   });
   it('suggests move, measure names and rings', () => {
     const doc = seedDoc(now);
-    expect(suggest('/nai ', 5, doc).items.map(i => i.insert)).toEqual(['add', 'move', 'remove']);
+    expect(suggest('/nai ', 5, doc).items.map(i => i.insert)).toEqual(['add', 'move', 'join', 'leave', 'size', 'remove']);
     expect(suggest('/nai move ', 10, doc).items.map(i => i.label)).toEqual(['NAI BENEFITS ENROLLMENT']);
     expect(suggest('/nai move BENEFITS ', 19, doc).items.map(i => i.insert)).toEqual(['to', 'hq', 'near', 'mid', 'far']);
     expect(suggest('/pl ', 4, doc).items.map(i => i.insert)).toEqual(['add', 'date', 'remove']);
