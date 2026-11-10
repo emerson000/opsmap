@@ -45,6 +45,14 @@ describe('buildScene from the seed', () => {
     expect(commander.flot).toBeNull();
     expect(commander.orders.every(o => !o.ratio)).toBe(true);
   });
+  it('commander shows a supporting attack only for its selected attacker, target or main attacker', () => {
+    const ids = (selectedId: string | null) => buildScene(doc, { view: 'commander', now, selectedId }).orders.map(o => o.id);
+    expect(ids(null)).not.toContain('o-tax-support');
+    for (const sel of ['records', 'irs', 'irsrsp']) expect(ids(sel)).toContain('o-tax-support');
+    expect(ids('q4rpt')).not.toContain('o-tax-support');
+    expect(buildScene(doc, { view: 'commander', now, selectedId: 'records' }).orders.find(o => o.id === 'o-tax-support')!.kind).toBe('support');
+  });
+
   it('staff view adds support, axis, force ratios and the FLOT', () => {
     expect(staff.orders.map(o => o.id).sort()).toEqual(['o-escalation', 'o-move-axis', 'o-tax-main', 'o-tax-support', 'o-work-main']);
     const taxMain = staff.orders.find(o => o.id === 'o-tax-main')!;

@@ -102,8 +102,11 @@ test('desktop: attack by handle gives a toast with undo and the new arrow animat
   await page.mouse.up();
   await expect(page.getByTestId('toasts')).toContainText('RECORDS ATTACKS LEAK');
   await expect(page.locator('g.order.fresh')).toHaveCount(1);
-  await expect(page.locator('g.order[data-order-id]')).toHaveCount(before + 1);
+  // RECORDS held a supporting attack on IRS, drawn while it is selected; a unit holds one attack, so the new one replaces it.
+  await expect(page.locator('g.order[data-order-id="o-tax-support"]')).toHaveCount(0);
+  await expect(page.locator('g.order[data-order-id]')).toHaveCount(before);
   await page.getByTestId('toasts').getByRole('button', { name: 'Undo' }).click();
+  await expect(page.locator('g.order[data-order-id="o-tax-support"]')).toHaveCount(1);
   await expect(page.locator('g.order[data-order-id]')).toHaveCount(before);
   expect(errors(page)).toEqual([]);
 });

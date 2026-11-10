@@ -201,6 +201,12 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
     if (staffPlus || o.showOrders?.includes(ord.id)) return true;
     // Support between friendlies: in Commander only for the selected supporter or supported unit.
     if (ord.type === 'support') return o.selectedId === ord.from || o.selectedId === ord.to;
+    if (ord.type === 'attack' && ord.role !== 'main') {
+      // A supporting attack: in Commander when its attacker, its target or the main attacker on that target is selected.
+      if (!o.selectedId) return false;
+      return o.selectedId === ord.from || o.selectedId === ord.to
+        || doc.orders.some(m => m.type === 'attack' && m.role === 'main' && m.to === ord.to && m.from === o.selectedId);
+    }
     return (ord.type === 'attack' && ord.role === 'main') || ord.type === 'advance';
   };
   // Command lines: each attached unit to its parent, in Staff and Detail, or for the selected HQ or member.
