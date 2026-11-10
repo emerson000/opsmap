@@ -4,7 +4,7 @@ import * as oidc from 'openid-client';
 import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import type { Context } from 'hono';
-import type { Config } from './config';
+import { originAllowed, type Config } from './config';
 import { Store, type User } from './db';
 const lifetime=86400*1000;
 const random=()=>randomBytes(32).toString('base64url');
@@ -45,7 +45,7 @@ export class Auth {
       if(!config.devUsers.includes(name))return c.text('Unknown dev user',403);
       const email=`${name}@dev.local`;const user=store.upsertUser(`dev:${name}`,email,name[0].toUpperCase()+name.slice(1),true);this.login(c,user);return c.redirect('/');
     });
-    this.routes.post('/logout',c=>{if(c.req.header('origin')!==config.publicUrl)return c.text('Invalid origin',403);const id=getCookie(c,'opsmap_sid');if(id)store.db.prepare('DELETE FROM sessions WHERE id=?').run(id);deleteCookie(c,'opsmap_sid',{path:'/',secure:!config.devUsers.length});return c.redirect('/');});
+    this.routes.post('/logout',c=>{if(!originAllowed(config,c.req.header('origin')))return c.text('Invalid origin',403);const id=getCookie(c,'opsmap_sid');if(id)store.db.prepare('DELETE FROM sessions WHERE id=?').run(id);deleteCookie(c,'opsmap_sid',{path:'/',secure:!config.devUsers.length});return c.redirect('/');});
   }
   private client() {return this.discovery??=oidc.discovery(new URL(this.config.issuer!),this.config.clientId!,this.config.clientSecret!).catch(error=>{this.discovery=undefined;throw error;});}
   private login(c:Context,user:User) {

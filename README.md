@@ -2,6 +2,23 @@
 
 A personal operations map: tasks and concerns drawn as APP-6 / MIL-STD-2525 style symbols on a pseudo-terrain map, with an HQ at the center and life sectors around it.
 
+## Run locally
+
+Requires Node.js 24 or newer (the server uses `node:sqlite`).
+
+```bash
+npm ci
+npm run build        # client bundle the server serves
+npm run dev:server   # API, sign-in and WebSocket on http://127.0.0.1:8080, data in ./.data
+npm run dev          # optional, second terminal: client with hot reload on http://localhost:5173
+```
+
+Open http://127.0.0.1:8080 (or http://localhost:5173 with `npm run dev`) and sign in as **alice** (admin) or **bob**. These development users exist only while the server listens on a loopback address, and any loopback origin is accepted; in production the browser origin must equal `PUBLIC_URL`, and a mismatch is logged. Override the defaults with `OPSMAP_DEV_USERS`, `OPSMAP_ADMIN_EMAILS`, `DATA_DIR` and `PORT`; the Vite proxy follows `OPSMAP_API` (default `http://127.0.0.1:8080`).
+
+For a production-style run: `npm run build && npm start`, with `PUBLIC_URL`, `OIDC_ISSUER`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_GROUP` and `OPSMAP_ADMIN_SUBS` set, behind HTTPS.
+
+Tests: `npm test` (unit), `npm run check` (types), `npx playwright test` (browser; run `npx playwright install` once).
+
 Each map has a calendar zone in `settings.tz`. The server stamps its zone into every map: `OPSMAP_TZ`, else `TZ`, else `UTC`. Calendar commands, due-date rings and the morning turn use the map's zone on every machine. The scheduler runs each map's morning turn at 04:00 in that zone, and the nightly backup at 04:00 in the server's zone.
 
 Set `OPSMAP_ADMIN_SUBS` to a comma-separated list of OIDC subjects (`sub` claims). Legacy `OPSMAP_ADMIN_EMAILS` grants access only when the ID token explicitly includes `email_verified: true`. Development login users have verified fixture addresses. Sessions expire absolutely 24 hours after login, including existing sessions created before this limit; use does not extend them. Provider access and refresh tokens are not retained, so group removal or account disablement can take up to 24 hours to take effect. Log out to revoke a browser session immediately.

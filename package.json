@@ -9,7 +9,7 @@
     "check": "svelte-check --tsconfig ./tsconfig.app.json && tsc -p tsconfig.node.json",
     "test": "vitest run",
     "e2e": "playwright test",
-    "dev:server": "tsx watch server/index.ts",
+    "dev:server": "OPSMAP_DEV_USERS=${OPSMAP_DEV_USERS:-alice,bob} OPSMAP_ADMIN_EMAILS=${OPSMAP_ADMIN_EMAILS:-alice@dev.local} DATA_DIR=${DATA_DIR:-.data} tsx watch server/index.ts",
     "build:server": "tsc -p server/tsconfig.json && esbuild server/index.ts server/cli.ts --bundle --platform=node --format=esm --packages=external --outdir=dist/server",
     "start": "node dist/server/index.js"
   },

@@ -71,3 +71,15 @@ describe('session and admin regressions',()=>{
   }finally{store.close();}
  });
 });
+
+describe('origin checks',()=>{
+ it('accepts only PUBLIC_URL in production and any loopback origin with dev users',async()=>{
+  const {originAllowed}=await import('../../server/config');
+  const base={port:8080,host:'127.0.0.1',publicUrl:'https://maps.example.invalid',dataDir:'/tmp',clientDir:'/tmp',adminEmails:[],group:'g'};
+  const prod={...base,devUsers:[]},dev={...base,publicUrl:'http://127.0.0.1:8080',devUsers:['alice']};
+  expect(originAllowed(prod,'https://maps.example.invalid')).toBe(true);
+  for(const o of ['http://localhost:5173','http://127.0.0.1:8080',undefined])expect(originAllowed(prod,o)).toBe(false);
+  for(const o of ['http://127.0.0.1:8080','http://localhost:8080','http://localhost:5173','http://[::1]:5173'])expect(originAllowed(dev,o)).toBe(true);
+  for(const o of ['https://localhost:5173','http://evil.invalid','http://localhost.evil.invalid:5173','http://localhost:5173/x','null'])expect(originAllowed(dev,o)).toBe(false);
+ });
+});

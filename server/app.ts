@@ -8,7 +8,7 @@ import { existsSync } from 'node:fs';
 import { Maps } from './maps';
 import { Auth } from './auth';
 import { Store, type User } from './db';
-import type { Config } from './config';
+import { originAllowed, warnOrigin, type Config } from './config';
 import type { Command } from '../src/core/model/types';
 import { schedulerTick } from './scheduler';
 import { mcpRequest } from './mcp';
@@ -29,7 +29,7 @@ export function createApp(config:Config) {
   const mapWrite=async(c:Context,admin:boolean,limit:number,run:(user:User,body:Record<string,unknown>)=>unknown)=>{
     const user=auth.current(c);if(!user)return c.json({error:'Authentication required'},401);
     if(admin&&!auth.admin(user))return c.json({error:'Administrator required'},403);
-    if(c.req.header('origin')!==config.publicUrl)return c.json({error:'Invalid origin'},403);
+    if(!originAllowed(config,c.req.header('origin'))){warnOrigin(config,c.req.header('origin'),'a map change');return c.json({error:'Invalid origin'},403);}
     try {
       if(Number(c.req.header('content-length'))>limit)return c.json({error:'Request too large'},413);
       const text=await boundedText(c.req.raw,limit),body=text?JSON.parse(text):{};
@@ -43,7 +43,7 @@ export function createApp(config:Config) {
   app.post('/api/import',async c=>{
     const user=auth.current(c);if(!user)return c.json({error:'Authentication required'},401);
     if(!auth.admin(user))return c.json({error:'Administrator required'},403);
-    if(c.req.header('origin')!==config.publicUrl)return c.json({error:'Invalid origin'},403);
+    if(!originAllowed(config,c.req.header('origin'))){warnOrigin(config,c.req.header('origin'),'an import');return c.json({error:'Invalid origin'},403);}
     try {
       if(Number(c.req.header('content-length'))>5*1024*1024)return c.json({error:'Document too large'},413);
       const text=await boundedText(c.req.raw,5*1024*1024);
@@ -52,7 +52,7 @@ export function createApp(config:Config) {
   });
   const tokenBuckets=new Map<string,{bucket:Bucket;at:number}>();
   app.post('/mcp',async c=>{
-    const origin=c.req.header('origin');if(origin&&origin!==config.publicUrl)return c.json({error:'Invalid origin'},403);
+    const origin=c.req.header('origin');if(origin&&!originAllowed(config,origin))return c.json({error:'Invalid origin'},403);
     const header=c.req.header('authorization'),identity=header?.startsWith('Bearer ')?store.tokenIdentity(header.slice(7)):undefined;
     if(!identity)return c.json({error:'Valid bearer token required'},401);
     for(const [key,value] of tokenBuckets)if(Date.now()-value.at>60000)tokenBuckets.delete(key);
@@ -94,7 +94,7 @@ export function startServer(config:Config,options:{schedule?:boolean}={}) {
     }
   };maps.listeners.add(broadcast);
   server.on('upgrade',(req,socket,head)=>{
-    if(req.url!=='/ws'||req.headers.origin!==config.publicUrl){socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');return;}
+    if(req.url!=='/ws'||!originAllowed(config,req.headers.origin)){if(req.url==='/ws')warnOrigin(config,req.headers.origin,'a WebSocket');socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\n\r\n');return;}
     const user=auth.session(req.headers.cookie);if(!user){socket.end('HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n');return;}
     wss.handleUpgrade(req,socket,head,ws=>{
       clients.set(ws,{user,mapId:maps.default.mapId,selectedId:null,ready:false,alive:true,cookie:req.headers.cookie??'',frames:new Bucket(30),presence:new Bucket(10,2)});

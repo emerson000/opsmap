@@ -13,3 +13,18 @@ export function config(env:NodeJS.ProcessEnv=process.env):Config {
   try{new Intl.DateTimeFormat('en',{timeZone:tz});}catch{throw new Error(`Invalid time zone: ${tz}`);}
   return {tz,port:Number(env.PORT??8080),host:env.HOST??'127.0.0.1',publicUrl,dataDir:env.DATA_DIR??'/data',clientDir:resolve(env.CLIENT_DIR??'dist/client'),devUsers,adminSubs:(env.OPSMAP_ADMIN_SUBS??'').split(',').map(x=>x.trim()).filter(Boolean),adminEmails:(env.OPSMAP_ADMIN_EMAILS??'').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean),issuer:env.OIDC_ISSUER,clientId:env.OIDC_CLIENT_ID,clientSecret:env.OIDC_CLIENT_SECRET,group:env.OIDC_GROUP??'opsmap_users'};
 }
+
+/** Production accepts only PUBLIC_URL. Development (dev users, loopback listener only) also accepts any loopback
+ *  origin, so http://localhost:8080 and the Vite dev server on another port work too. */
+export function originAllowed(config:Config,origin:string|undefined):boolean {
+  if(!origin)return false;
+  if(origin===config.publicUrl)return true;
+  if(!config.devUsers.length)return false;
+  try {const url=new URL(origin);return url.origin===origin&&url.protocol==='http:'&&['127.0.0.1','localhost','[::1]'].includes(url.hostname);}catch{return false;}
+}
+const warned=new Set<string>();
+/** One log line per refused origin, so a mismatched PUBLIC_URL is visible instead of a silent 403. */
+export function warnOrigin(config:Config,origin:string|undefined,what:string) {
+  const key=`${what}:${origin}`;if(warned.has(key)||warned.size>100)return;warned.add(key);
+  console.warn(`Refused ${what} from origin ${origin??'(none)'}: open the app at ${config.publicUrl} or set PUBLIC_URL to the address in the browser`);
+}
