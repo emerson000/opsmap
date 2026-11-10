@@ -242,6 +242,18 @@ test('double-tap on open ground zooms the map; long-press offers capture', async
   expect(errors(page)).toEqual([]);
 });
 
+test('long-press on open ground starts a hostile HQ', async ({ page, browserName }) => {
+  const t = await touchFor(page, browserName);
+  await page.getByRole('button', { name: 'Fit', exact: true }).click();
+  const box = (await page.locator('svg.map-svg').boundingBox())!;
+  const ground = { x: box.x + 30, y: box.y + box.height * 0.6 };
+  await longPress(page, t, ground);
+  await t.up();
+  await page.getByRole('menuitem', { name: 'New hostile HQ' }).click();
+  await expect(page.getByTestId('command-input')).toHaveValue(/^\/new hostile hq "" in \w+ \w+$/);
+  expect(errors(page)).toEqual([]);
+});
+
 test('long-press drags an NAI to new ground, and it stays there after reload', async ({ page, browserName }) => {
   const t = await touchFor(page, browserName);
   const label = 'g.measure[data-measure="nai-benefits"] text.m-type';

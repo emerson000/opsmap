@@ -37,6 +37,12 @@
   </g>
 {/if}
 
+<g class="command-lines" aria-hidden="true">
+  {#each scene.commandLines as c (c.id)}
+    <path d={c.d} class="cmd-line {c.side}" class:related={selectedId !== null && (c.fromId === selectedId || c.toId === selectedId)} data-command-line={c.fromId} stroke-width={2 * s} stroke-dasharray="{5 * s} {3 * s}" />
+  {/each}
+</g>
+
 <g class="orders">
   {#each scene.orders as o (o.id)}
     <g class="order {o.kind}" class:fresh={o.id === freshId} class:planned={o.planned} class:related={selectedId !== null && (o.fromId === selectedId || o.toId === selectedId)} data-order-id={o.id}>
@@ -68,6 +74,10 @@
 </g>
 
 <style>
+  .cmd-line { fill: none; stroke: var(--om-ink); stroke-linecap: round; opacity: 0.8; pointer-events: none; }
+  .cmd-line.friend { stroke: var(--om-friend); }
+  .cmd-line.threat { stroke: var(--om-hostile); }
+  .cmd-line.related { opacity: 1; }
   .measure .outline { fill: var(--om-measure-fill); stroke: var(--om-ink); stroke-width: 1.3; stroke-linejoin: round; }
   .measure.obj .outline { stroke-width: 1.8; }
   .measure.nai .outline { stroke-dasharray: 5 3; }

@@ -108,6 +108,8 @@
           <div class="item"><svg width="30" height="24" aria-hidden="true"><path d="M15 21v-12m-3-4a3 3 0 1 0 6 0a3 3 0 1 0-6 0" stroke="var(--ink)" fill="none"/></svg><span>Pin · manual date override</span></div>
           <div class="item"><img src={sym('13031002161100000000').href} alt=""/><span>Sector HQ · Staff and Detail</span></div>
           <div class="item"><img src={sym('13031002151211000000', { specialHeadquarters: 'TAC' }).href} alt=""/><span>Command post · /cp main, tac, alt, rear</span></div>
+          <div class="item"><img src={sym('13061002161100000000').href} alt=""/><span>Hostile HQ · staff from the left corner</span></div>
+          <div class="item"><svg width="38" height="24" aria-hidden="true"><path d="M3 18 L35 6" stroke="var(--hostile)" stroke-width="2" stroke-dasharray="5 3" fill="none"/></svg><span>Command line · unit to its HQ</span></div>
           {#each ['OBJ · objective','EA · engagement area / batch','NAI · named area of interest'] as graphic}<div class="item"><svg width="38" height="24" aria-hidden="true"><path d="M3 8L13 2L33 6L35 18L14 22L2 17Z" stroke="var(--ink)" fill="none"/></svg><span>{graphic}</span></div>{/each}
         </div>
       </section>

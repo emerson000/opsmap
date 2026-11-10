@@ -43,7 +43,8 @@ export function sidcSymbol(sidc: string, options: SymbolOptions): MapSymbol {
  * a ground-colored halo for legibility over terrain, and the engagement bar on contact.
  */
 export function unitSymbol(u: Unit, view: View, size: number, theme: Theme, extra: { contact?: boolean; bare?:boolean } = {}): MapSymbol {
-  const options: SymbolOptions = { ...symbolOptions(u, view), size, ...THEME_OPTS[theme] };
+  // A somewhat longer HQ staff (default 100) so headquarters of every identity stand out.
+  const options: SymbolOptions = { ...symbolOptions(u, view), size, hqStaffLength: 125, ...THEME_OPTS[theme] };
   if(extra.bare){options.uniqueDesignation='';delete options.combatEffectiveness;delete options.dtg;delete options.staffComments;delete options.evaluationRating;delete options.type;delete options.reinforcedReduced;delete options.higherFormation;}
   if (extra.contact) options.engagementBar = 'ENG';
   return sidcSymbol(toSidc(u), options);

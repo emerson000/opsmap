@@ -133,7 +133,7 @@
       <div class="who">
         <div class="desig">{unit.designation}</div>
         <div class="ttl">{unit.title}</div>
-        <div class="sub">{AFF_LABEL[unit.affiliation]} · {unit.presence === 'planned' ? 'planned (dashed)' : 'present'} · {LIFECYCLE_LABEL[unit.lifecycle]}</div>
+        <div class="sub">{AFF_LABEL[unit.affiliation]}{unit.cp ? ` · ${unit.cp.toUpperCase()} CP` : unit.fn === 'hq' ? ' · HQ' : ''} · {unit.presence === 'planned' ? 'planned (dashed)' : 'present'} · {LIFECYCLE_LABEL[unit.lifecycle]}</div>
       </div>
       <button class="btn close" onclick={() => { selection.selectedId = null; }} aria-label="Close inspector">✕</button>
     </header>

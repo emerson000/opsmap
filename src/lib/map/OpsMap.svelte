@@ -213,11 +213,15 @@
   let pressTimer: ReturnType<typeof setTimeout> | undefined;
   let lastTap: { t: number; x: number; y: number; unitId: string | null; measureId: string | null } | null = null;
   let lastPointerType = 'mouse';
-  let captureMenu = $state<{ x: number; y: number; ctx: { sectorId: string; ring: Ring } } | null>(null);
+  let captureMenu = $state<{ x: number; y: number; py: number; ctx: { sectorId: string; ring: Ring } } | null>(null);
   /** Small inspector for an OBJ, EA or NAI (long-press and let go, double-tap, or double-click). */
   let measureCard = $state<{ id: string; x: number; y: number } | null>(null);
   /** The card's height, so it stays above whatever covers the bottom of the map (command bar, sheet). */
-  let cardH = $state(0), mapH = $state(0);
+  let cardH = $state(0), mapH = $state(0), menuH = $state(0);
+  function menuTop(m: { y: number; py: number }): number {
+    const limit = mapH - (insets?.bottom ?? 0) - 8;
+    return m.y + menuH <= limit ? m.y : Math.max(8, m.py - 16 - menuH);
+  }
   const cardMeasure = $derived(measureCard ? doc.measures.find(x => x.id === measureCard?.id) : undefined);
   const cardSector = $derived(cardMeasure ? doc.sectors.find(x => x.id === cardMeasure.sectorId) : undefined);
   const captureSector = $derived(captureMenu ? doc.sectors.find(x => x.id === captureMenu?.ctx.sectorId) : undefined);
@@ -319,7 +323,7 @@
         try {
           const ctx = contextAt(doc, worldFromClient(g.sx, g.sy, svg.getBoundingClientRect(), view2d));
           const p = rel({ x: g.sx, y: g.sy });
-          captureMenu = { x: Math.max(8, Math.min(p.x - 110, container.clientWidth - 228)), y: Math.max(8, Math.min(p.y + 16, container.clientHeight - 200)), ctx };
+          captureMenu = { x: Math.max(8, Math.min(p.x - 110, container.clientWidth - 228)), y: p.y + 16, py: p.y, ctx };
         } catch { /* no sectors */ }
       }
     }, unitId || measureId ? LONG_PRESS : LONG_PRESS_GROUND);
@@ -438,6 +442,12 @@
   }
 
   // ---------- hover label ----------
+  /** ' · HQ', ' · MAIN CP', with the size of its organization when units are attached. */
+  function hqTag(u: Unit): string {
+    if (u.fn !== 'hq' && !u.cp) return '';
+    const n = doc.units.filter(x => x.parentId === u.id).length;
+    return ` · ${u.cp ? `${u.cp.toUpperCase()} CP` : 'HQ'}${n ? ` of ${n}` : ''}`;
+  }
   const AFF: Record<Unit['affiliation'], string> = { pending: 'Pending (not looked at)', unknown: 'Unknown', assumed: 'Assumed friend', friend: 'Friend', neutral: 'Neutral', suspect: 'Suspect', hostile: 'Hostile' };
   const RING_WORDS: Record<Ring, string> = { hq: 'HQ perimeter · today/overdue', near: 'Close · ≤ 7 days', mid: 'Deep · 8–30 days', far: 'Area of interest · 31–90 days', beyond: 'Beyond · > 90 days' };
   const hovered = $derived(!drag && !link ? scene.units.find(u => u.id === selection.hoveredId && !u.selected) : undefined);
@@ -464,7 +474,7 @@
         {#each scene.ghosts as g (g.unitId)}
           {@const sym = unitSymbol(g.unit, 'commander', UNIT_SIZE, theme, {bare:true})}
           <path d={g.trail} class="trail" />
-          <image href={sym.href} x={g.x - sym.anchor.x * s} y={g.y - sym.anchor.y * s} width={sym.width * s} height={sym.height * s} class="ghost" />
+          <image href={sym.href} x={g.x - sym.center.x * s} y={g.y - sym.center.y * s} width={sym.width * s} height={sym.height * s} class="ghost" />
         {/each}
       </g>
 
@@ -499,7 +509,8 @@
               {#if flashId === su.id}<circle r={24 * s} class="flash" />{/if}
               {#if link?.targetId === su.id}<circle r={23 * s} class="target-ring" />{/if}
               <rect x={-20*s} y={-24*s} width={40*s} height={48*s} fill="transparent" />
-              <image pointer-events="none" href={sym.href} x={-sym.anchor.x * s} y={-sym.anchor.y * s} width={sym.width * s} height={sym.height * s} />
+              <!-- Placed by the frame center, so an HQ's frame sits on its spot and its staff hangs below. -->
+              <image pointer-events="none" href={sym.href} x={-sym.center.x * s} y={-sym.center.y * s} width={sym.width * s} height={sym.height * s} />
               {#if su.unit.lifecycle === 'done' && su.unit.affiliation === 'friend'}
                 <path d="M0 0 H20 M14 -4 L20 0 L14 4" transform="translate(0 {28*s}) rotate({su.unit.pos.theta+180}) scale({s})" class="withdraw" />
               {/if}
@@ -601,11 +612,13 @@
   {#if captureMenu}
     {@const m = captureMenu}
     {@const sec = captureSector}
-    <div class="capture-menu" role="menu" aria-label="Capture here" data-testid="capture-menu"
-      style="left:{m.x}px; top:{m.y}px">
+    <!-- Below the finger, or above it when the command bar or sheet would cover it; never under the finger, which lifts onto it. -->
+    <div class="capture-menu" role="menu" aria-label="Capture here" data-testid="capture-menu" bind:offsetHeight={menuH}
+      style="left:{m.x}px; top:{menuTop(m)}px">
       <div class="cm-title">New here · {sec?.name ?? m.ctx.sectorId} · {RING_NAME[m.ctx.ring]}</div>
       <button class="btn" role="menuitem" onclick={() => chooseCapture()}>New unit</button>
       <button class="btn" role="menuitem" onclick={() => chooseCapture('hostile')}>New problem (hostile)</button>
+      <button class="btn" role="menuitem" onclick={() => chooseCapture('hostile hq')}>New hostile HQ</button>
       <button class="btn" role="menuitem" onclick={() => (captureMenu = null)}>Cancel</button>
     </div>
   {/if}
@@ -613,7 +626,7 @@
     {@const u = hovered.unit}
     <div class="hover-label" class:west={hovered.x<0} style="left:{hoverPos.x}px; top:{hoverPos.y - 30 * s * view2d.k}px">
       <div class="hl-title"><b>{u.designation}</b> {u.title}</div>
-      <div class="hl-meta">{AFF[u.affiliation]} · {u.presence === 'planned' ? 'planned' : 'present'} · {u.lifecycle}{u.echelon ? ` · ${u.echelon.toUpperCase()}` : ''}</div>
+      <div class="hl-meta">{AFF[u.affiliation]}{hqTag(u)} · {u.presence === 'planned' ? 'planned' : 'present'} · {u.lifecycle}{u.echelon ? ` · ${u.echelon.toUpperCase()}` : ''}</div>
       <div class="hl-meta">{RING_WORDS[hovered.ring]}{u.dueAt ? ` · due ${formatDtg(u.dueAt)}` : ''}{u.posOverride ? ' · pinned' : ''}</div>
     </div>
   {/if}

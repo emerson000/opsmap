@@ -37,9 +37,11 @@ export interface SceneMeasure { id: string; type: ControlMeasure['type']; label:
   /** Label anchor: the center, or just above the top edge when members sit in the middle. */
   labelY: number }
 export interface SceneGhost { unitId: string; unit: Unit; x: number; y: number; trail: string }
+/** A line from an attached unit to the HQ or task force it belongs to, in the HQ's identity color. */
+export interface SceneCommandLine { id: string; fromId: string; toId: string; d: string; side: 'friend' | 'threat' | 'other' }
 export interface Scene {
   sectors: SceneSector[]; rings: SceneRing[]; customPls: (SceneRing & { id: string })[];
-  units: SceneUnit[]; ghosts: SceneGhost[]; orders: SceneOrder[]; measures: SceneMeasure[];
+  units: SceneUnit[]; ghosts: SceneGhost[]; orders: SceneOrder[]; measures: SceneMeasure[]; commandLines: SceneCommandLine[];
   flot: string | null; flotLabel: Pt | null; mapR: number; beyondR: number;
 }
 
@@ -195,6 +197,20 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
     if (staffPlus || o.showOrders?.includes(ord.id)) return true;
     return (ord.type === 'attack' && ord.role === 'main') || ord.type === 'advance';
   };
+  // Command lines: each attached unit to its parent, in Staff and Detail, or for the selected HQ or member.
+  const commandLines: SceneCommandLine[] = [];
+  for (const u of live) {
+    if (!u.parentId) continue;
+    const parent = byId.get(u.parentId), a = anchors.get(u.id), b = anchors.get(u.parentId);
+    if (!parent || !a || !b || !liveIds.has(parent.id)) continue;
+    if (!staffPlus && o.selectedId !== u.id && o.selectedId !== parent.id) continue;
+    const dx = b.x - a.x, dy = b.y - a.y, len = Math.hypot(dx, dy);
+    if (len <= a.clear + b.clear) continue;
+    const ux = dx / len, uy = dy / len;
+    const side = parent.affiliation === 'friend' || parent.affiliation === 'assumed' ? 'friend' : parent.affiliation === 'hostile' || parent.affiliation === 'suspect' ? 'threat' : 'other';
+    commandLines.push({ id: `cmd-${u.id}`, fromId: u.id, toId: parent.id, side,
+      d: `M${r2(a.x + ux * a.clear)} ${r2(a.y + uy * a.clear)} L${r2(b.x - ux * b.clear)} ${r2(b.y - uy * b.clear)}` });
+  }
   const shown = doc.orders.filter(visibleOrder);
   const ratioOn = new Map<string, string>();   // target id → order id that carries the force ratio
   if (staffPlus) {
@@ -257,7 +273,7 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
     flotLabel = world(maxR + 0.14, maxDeg);
   }
 
-  return { sectors, rings, customPls, units, ghosts, orders, measures, flot, flotLabel, mapR: MAP_EDGE_R * SCALE, beyondR: BEYOND_R * SCALE };
+  return { sectors, rings, customPls, units, ghosts, orders, measures, commandLines, flot, flotLabel, mapR: MAP_EDGE_R * SCALE, beyondR: BEYOND_R * SCALE };
 }
 
 const norm = (d: number) => ((d % 360) + 360) % 360;
