@@ -47,7 +47,7 @@ function adjustSectors(doc:Doc,old:Doc):void {
 function validOrders(doc:Doc):void {
   const main=new Set<string>();
   for(const order of doc.orders){
-    const source=doc.units.find(u=>u.id===order.from);if(!source)continue;
+    const source=doc.units.find(u=>u.id===order.from);if(!source||order.type==='support')continue;
     const target=order.to.startsWith('hq:')?{sectorId:order.to.slice(3)}:doc.units.find(u=>u.id===order.to)??doc.measures.find(m=>m.id===order.to);
     if(target?.sectorId&&target.sectorId!==source.sectorId&&!source.taskForce)throw new CommandError('Cross-sector orders require a task force');
     if(order.type==='attack'&&order.role==='main'){if(main.has(source.sectorId))order.role='support';else main.add(source.sectorId);}
@@ -63,7 +63,7 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
     const cancelBoundary=(moved:Unit[],measureIds:string[]=[]):string=>{
       const ids=new Set([...moved.map(u=>u.id),...measureIds]);
       const cancelled=doc.orders.filter(o=>{
-        if(!ids.has(o.from)&&!ids.has(o.to))return false;
+        if(o.type==='support'||!ids.has(o.from)&&!ids.has(o.to))return false;
         const source=doc.units.find(x=>x.id===o.from);
         const target=o.to.startsWith('hq:')?{sectorId:o.to.slice(3)}:doc.units.find(x=>x.id===o.to)??doc.measures.find(x=>x.id===o.to);
         return source&&!source.taskForce&&target?.sectorId&&source.sectorId!==target.sectorId;
@@ -184,11 +184,25 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
       case 'due': {const u=unit();if(a.dueAt===null){delete u.dueAt;delete u.posOverride;}else {u.dueAt=date(a.dueAt);u.pos.r=radiusForDate(u.dueAt,now,doc.settings.tz);delete u.posOverride;u.pos=resolvePlacement(doc,u.sectorId,u.pos,u.id);}changed(u);log=`${u.designation} DUE ${u.dueAt??'NONE'}`;break;}
       case 'note': {const u=unit();requireThat(typeof a.note==='string','Expected note');u.note=a.note;changed(u);log=`${u.designation} NOTE ${u.note}`;break;}
       case 'rate': {const u=unit();requireThat(typeof a.rating==='string'&&/^[A-F][1-6]$/i.test(a.rating),'Rating must be A–F followed by 1–6');u.rating=a.rating.toUpperCase();changed(u);log=`${u.designation} RATED ${u.rating}`;break;}
+      case 'support': {
+        // A friendly backs another friendly, typically one in contact; sector boundaries do not apply.
+        const u=unit(),other=item(doc.units,a.target,'unit');
+        const friendly=(x:Unit)=>x.affiliation==='friend'||x.affiliation==='assumed';
+        requireThat(u.id!==other.id,'A unit cannot support itself');
+        requireThat(friendly(u),'Only friendly units can support');
+        requireThat(friendly(other),'Support a friendly unit; to act against a threat use /attack');
+        requireThat(unresolved(u)&&unresolved(other),'Support needs two unresolved units');
+        requireThat(!doc.orders.some(o=>o.type==='support'&&o.from===other.id&&o.to===u.id),`${other.designation} already supports ${u.designation}`);
+        doc.orders=doc.orders.filter(o=>!(o.from===u.id&&o.type==='support'));
+        doc.orders.push({id:uniqueId('o',doc.orders),type:'support',from:u.id,to:other.id,createdAt:at});changed(u);
+        const sector=(x:Unit)=>doc.sectors.find(s=>s.id===x.sectorId)?.name.toUpperCase()??'';
+        log=`${label(u)} SUPPORTS ${label(other)}${u.sectorId!==other.sectorId?` (${sector(u)} → ${sector(other)})`:''}`;break;
+      }
       case 'halt': {
         // Cancel the unit's own orders: one by id (the inspector's ✕), one kind, or all of them.
         const u=unit();
-        const kinds=['advance','move','attack','axis','link'];
-        requireThat(a.kind===undefined||kinds.includes(String(a.kind)),'Expected advance, move, attack, axis or link');
+        const kinds=['advance','move','attack','axis','link','support'];
+        requireThat(a.kind===undefined||kinds.includes(String(a.kind)),'Expected advance, move, attack, axis, link or support');
         const mine=doc.orders.filter(o=>o.from===u.id&&(a.order===undefined||o.id===a.order)&&(a.kind===undefined||o.type===a.kind));
         requireThat(mine.length,a.order!==undefined?'Unknown order':`${u.designation} has no ${a.kind===undefined?'orders':`${a.kind} order`}`);
         const ids=new Set(mine.map(o=>o.id));

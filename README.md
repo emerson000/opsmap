@@ -47,6 +47,8 @@ Clearing orders: `/halt <unit>` cancels all of a unit's own orders, and `/halt <
 
 Task forces: a unit becomes a task force (TF bracket) when another unit is attached to it, `/attach <unit> to <tf>`. Only the task force itself may hold orders that cross a sector boundary, e.g. `/attack <tf> <hostile in another sector>`; its attached units may not.
 
+Support between friendlies: `/support <unit> <engaged unit>` (alias `/spt`) has one friendly back another, in any sector, without a task force. It draws a dashed arrow with an open head and SPT from the supporter to the supported unit (Staff and Detail, or in Commander when either is selected), adds the supporter's weight to the force ratio of the attacks the supported unit makes, and is cleared with `/halt <unit> support` or the inspector's ✕. It is not an attack: the supporter takes no order against the hostile.
+
 Sector HQs as targets: `/advancing <hostile> on sector hq` (its own sector's HQ) or `on <sector> hq`, and `/moving <unit> to sector hq` for a friendly falling back. The targeted sector HQ then shows in every view. Moving the unit to another sector cancels the order; removing the sector drops it, or retargets it to the receiving sector's HQ with `reassign`. Plain `hq` is still the center.
 
 Headquarters of any identity: `/new hostile bn hq "Their legal team" as LEGAL` (or long-press open ground → New hostile HQ), `/attach <unit> to LEGAL` for each unit it controls, and optionally `/cp LEGAL main`. The HQ staff follows the symbol standard, so on a hostile diamond it hangs from the left corner rather than forming a flag. Dashed command lines join attached units to their HQ or task force, in the HQ's color: always in Staff and Detail, and in Commander for the selected HQ or member.

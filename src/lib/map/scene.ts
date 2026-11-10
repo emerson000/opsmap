@@ -27,7 +27,7 @@ export interface SceneSector {
 }
 export interface SceneRing { key: Ring; r: number; label: string; date: string; paths: string[]; /** Arc center of each label path, degrees (screen, 270 = up). */ centers: number[] }
 export interface SceneOrder {
-  id: string; kind: 'main' | 'support' | 'axis' | 'advance' | 'move' | 'link'; planned: boolean; fromId: string; toId: string;
+  id: string; kind: 'main' | 'support' | 'axis' | 'advance' | 'move' | 'link' | 'assist'; planned: boolean; fromId: string; toId: string;
   /** Link orders: linkup-point position and dependency/handoff kind. */
   linkup?: Pt; linkKind?: 'dependency' | 'handoff';
   shaft?: string; head?: string; width?: number; outline?: string;
@@ -199,6 +199,8 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
   const visibleOrder = (ord: Order) => {
     if (!anchors.has(ord.from) || !anchors.has(ord.to)) return false;
     if (staffPlus || o.showOrders?.includes(ord.id)) return true;
+    // Support between friendlies: in Commander only for the selected supporter or supported unit.
+    if (ord.type === 'support') return o.selectedId === ord.from || o.selectedId === ord.to;
     return (ord.type === 'attack' && ord.role === 'main') || ord.type === 'advance';
   };
   // Command lines: each attached unit to its parent, in Staff and Detail, or for the selected HQ or member.
@@ -228,7 +230,7 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
   const orders: SceneOrder[] = [];
   for (const ord of shown) {
     const a = anchors.get(ord.from)!, b = anchors.get(ord.to)!;
-    const kind: SceneOrder['kind'] = ord.type === 'attack' ? (ord.role === 'main' ? 'main' : 'support') : ord.type;
+    const kind: SceneOrder['kind'] = ord.type === 'attack' ? (ord.role === 'main' ? 'main' : 'support') : ord.type === 'support' ? 'assist' : ord.type;
     const bend = kind === 'link' ? 0 : kind === 'advance' ? 0.12 : kind === 'axis' ? 0.1 : 0.18;
     const curve: Curve | null = bentCurve(a, b, { startClear: a.clear, endClear: b.clear, bend });
     if (!curve) continue;
@@ -240,6 +242,9 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
     } else if (kind === 'main') Object.assign(out, attackArrow(curve, { width: 4.5 * scale, headLen: 18 * scale, headHalf: 10 * scale }));
     else if (kind === 'support') {
       Object.assign(out, attackArrow(curve, { width: 2 * scale, headLen: 14 * scale, headHalf: 7 * scale }));
+      out.label = { ...labelAt(curve, 0.5, 9 * scale), text: 'SPT' };
+    } else if (kind === 'assist') {
+      Object.assign(out, attackArrow(curve, { width: 1.6 * scale, headLen: 12 * scale, headHalf: 6 * scale }));
       out.label = { ...labelAt(curve, 0.5, 9 * scale), text: 'SPT' };
     } else if (kind === 'advance') Object.assign(out, attackArrow(curve, { width: 3 * scale, headLen: 16 * scale, headHalf: 9 * scale }));
     else if (kind === 'move') Object.assign(out, moveArrow(curve, 10 * scale), { width: 1.5 * scale });

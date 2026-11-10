@@ -26,7 +26,7 @@ describe('/halt', () => {
     const doc = run(seeded, '/stop ESCALATION advancing');
     expect(doc.orders.some(o => o.from === 'escalation')).toBe(false);
     expect(doc.orders.some(o => o.from === 'q4rpt' && o.to === 'escalation')).toBe(true);
-    expect(tryRun(seeded, '/halt ESCALATION retreat')).toBe('Expected advance, move, attack, axis or link');
+    expect(tryRun(seeded, '/halt ESCALATION retreat')).toBe('Expected advance, move, attack, axis, link or support');
     expect(suggest('/halt MOVE ', 11, seeded).items.map(i => i.insert)).toEqual(['axis']);
   });
 

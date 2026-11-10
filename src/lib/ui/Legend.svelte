@@ -47,6 +47,7 @@
     { label: 'Planned: dashed', cls: 'planned' },
     { label: 'Hostile advance', cls: 'advance' },
     { label: 'Move', cls: 'move' },
+    { label: 'Support a friendly (SPT, any sector)', cls: 'assist' },
   ];
 </script>
 
@@ -119,7 +120,7 @@
           <div class="item">
             <svg width="64" height="16" viewBox="0 0 64 16" aria-hidden="true" class="arrow {a.cls}">
               {#if a.cls === 'move'}<path d="M2 8 H54" /><path d="M48 3 L58 8 L48 13" class="open" />
-              {:else}<path d="M2 8 H50" /><polygon points="48,2 62,8 48,14" class:open={a.cls === 'support'} />{/if}
+              {:else}<path d="M2 8 H50" /><polygon points="48,2 62,8 48,14" class:open={a.cls === 'support' || a.cls === 'assist'} />{/if}
             </svg>
             <span>{a.label}</span>
           </div>
@@ -180,6 +181,7 @@
   .arrow polygon { fill: var(--friend); stroke: var(--friend); stroke-width: 1.2; }
   .arrow.main path { stroke-width: 4.5; }
   .arrow .open { fill: none; }
+  .arrow.assist path { stroke-width: 1.6; stroke-dasharray: 9 4; }
   .arrow.planned path { stroke-dasharray: 5 3; }
   .arrow.advance path { stroke: var(--hostile); stroke-width: 3; }
   .arrow.advance polygon { fill: var(--hostile); stroke: var(--hostile); }

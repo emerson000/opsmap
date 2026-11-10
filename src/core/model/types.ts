@@ -38,7 +38,8 @@ export interface Unit {
 }
 export interface Order {
   id: string;
-  type: 'attack'|'axis'|'advance'|'move'|'link';
+  /** `support`: a friendly backing another friendly (allowed across sectors). */
+  type: 'attack'|'axis'|'advance'|'move'|'link'|'support';
   from: string;
   to: string | 'hq';
   role?: 'main'|'support';

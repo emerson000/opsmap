@@ -51,7 +51,7 @@ export function orderLine(doc: Doc, o: Order, unitId: string): { text: string; o
   const outgoing = o.from === unitId;
   const otherId = outgoing ? o.to : o.from;
   const verb = o.type === 'attack' ? (o.role === 'main' ? 'Main attack' : 'Supporting attack')
-    : o.type === 'advance' ? 'Advancing' : o.type === 'axis' ? 'Axis of advance' : o.type === 'move' ? 'Moving' : `Linkup${o.kind ? ` (${o.kind})` : ''}`;
+    : o.type === 'advance' ? 'Advancing' : o.type === 'axis' ? 'Axis of advance' : o.type === 'move' ? 'Moving' : o.type === 'support' ? (outgoing ? 'Supporting' : 'Supported by') : `Linkup${o.kind ? ` (${o.kind})` : ''}`;
   const text = outgoing ? `${verb} → ${name(o.to)}` : `${verb} ← ${name(o.from)}`;
   const ratio = o.type === 'attack' ? forceRatio(doc, o.to) ?? undefined : undefined;
   return { text: `${text}${o.planned ? ' · planned' : ''}`, otherId: otherId === 'hq' || otherId.startsWith('hq:') || !doc.units.some(u => u.id === otherId) ? null : otherId, ratio };

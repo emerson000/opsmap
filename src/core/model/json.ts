@@ -64,9 +64,9 @@ export function importJson(text:string):Doc {
   const placed=new Set<string>();
   for(const m of measures)for(const id of (m.members as string[]|undefined)??[]){requireValid(m.type!=='pl'&&!placed.has(id),'area members: a unit belongs to at most one area');placed.add(id);}
   for(const o of orders) {
-    if(o.type==='link') requireValid(unitIds.has(o.from)&&unitIds.has(o.to),'link endpoints must be unit IDs');
+    if(o.type==='link'||o.type==='support') requireValid(unitIds.has(o.from)&&unitIds.has(o.to),'link and support endpoints must be unit IDs');
     optional(o,'kind',v=>oneOf(v,['dependency','handoff']));
-    requireValid(oneOf(o.type,['attack','axis','advance','move','link'])&&unitIds.has(o.from)&&(o.to==='hq'||typeof o.to==='string'&&o.to.startsWith('hq:')&&sectorIds.has(o.to.slice(3))||unitIds.has(o.to)||measureIds.has(o.to))&&date(o.createdAt),'order');
+    requireValid(oneOf(o.type,['attack','axis','advance','move','link','support'])&&unitIds.has(o.from)&&(o.to==='hq'||typeof o.to==='string'&&o.to.startsWith('hq:')&&sectorIds.has(o.to.slice(3))||unitIds.has(o.to)||measureIds.has(o.to))&&date(o.createdAt),'order');
     optional(o,'role',v=>oneOf(v,['main','support']));optional(o,'planned',v=>typeof v==='boolean');
     optional(o,'via',v=>Array.isArray(v)&&v.every(id=>measures.some(m=>m.id===id&&m.type==='pl')));
   }

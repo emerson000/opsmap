@@ -59,7 +59,7 @@
         {#if o.kind === 'move'}
           <polyline points={o.head} class="head open" />
         {:else}
-          <polygon points={o.head} class="head" class:open={o.kind === 'support'} />
+          <polygon points={o.head} class="head" class:open={o.kind === 'support' || o.kind === 'assist'} />
         {/if}
       {/if}
       {#if o.obstacle}<path d={o.obstacle} class="obstacle" />{/if}
@@ -109,6 +109,8 @@
   .axis { fill: var(--om-axis-fill); stroke: var(--c); stroke-width: 1.6; stroke-linejoin: round; }
   .planned .axis { stroke-dasharray: 8 5; }
   .order.link .shaft { stroke: var(--om-ink-soft); stroke-dasharray: 2 3; }
+  /* Support between friendlies: long dashes, open head, SPT. */
+  .order.assist .shaft { stroke-dasharray: 9 4; }
   .obstacle { fill: none; stroke: var(--om-hostile); stroke-width: 1.8; stroke-linejoin: round; }
   .tag { fill: var(--c); font-family: var(--om-font); font-weight: 700; letter-spacing: 0.06em; paint-order: stroke; stroke: var(--om-halo); stroke-width: 2.5px; }
   .order.link .tag { fill: var(--om-ink-soft); }
