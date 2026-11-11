@@ -1,8 +1,8 @@
 <script lang="ts">
   // Phone tier: the inspector (or situation summary) and the order log share one bottom sheet.
-  // Three heights: peek, half, full. Tapping the open tab steps peek → half → full → peek; tapping the
-  // other tab switches to it. Or drag the header and let go: it snaps to the nearest height (a flick
-  // goes one step in its direction). Landscape phones get `side`: a full-height right-hand column, so the
+  // Three heights: peek, half, full. One tap on the open tab or the grab bar opens the sheet from peek
+  // (to the height it last had open, half at first) or closes it to peek; tapping the other tab switches
+  // to it. Or drag the header and let go: it snaps to the nearest height (a flick goes one step in its direction). Landscape phones get `side`: a full-height right-hand column, so the
   // map keeps the whole height; there the tabs only switch.
   import type { Doc } from '../../core/model/types';
   import { selection } from '../model/store.svelte';
@@ -30,10 +30,14 @@
   const height = $derived(liveH ?? heights[ui.sheet]);
   $effect(() => { shown = ui.barFocused || side ? 0 : heights[ui.sheet]; });
 
+  /** The open height to come back to: whatever it last had open (by tap or drag), half at first. */
+  let lastOpen: 'half' | 'full' = 'half';
+  $effect(() => { if (ui.sheet !== 'peek') lastOpen = ui.sheet; });
+  function toggle() { ui.sheet = ui.sheet === 'peek' ? lastOpen : 'peek'; }
   function open(tab: 'info' | 'log') {
     if (side) { ui.sheetTab = tab; return; }
-    if (ui.sheetTab !== tab) { ui.sheetTab = tab; if (ui.sheet === 'peek') ui.sheet = 'half'; return; }
-    ui.sheet = ui.sheet === 'peek' ? 'half' : ui.sheet === 'half' ? 'full' : 'peek';
+    if (ui.sheetTab !== tab) { ui.sheetTab = tab; if (ui.sheet === 'peek') ui.sheet = lastOpen; return; }
+    toggle();
   }
 
   // Header drag. A press that moves under 6 px stays a tap, so the tab buttons keep working.
@@ -75,7 +79,7 @@
 <section class="sheet {ui.sheet}" class:side class:dragging={liveH !== null} class:hidden={ui.barFocused && !side} style={side ? `width:${sideW}px` : `height:${height}px`} aria-label="Details sheet" data-testid="sheet" data-size={ui.sheet} data-tab={ui.sheetTab}>
   <!-- svelte-ignore a11y_no_static_element_interactions -->
   <div class="head" onpointerdown={down} onpointermove={move} onpointerup={up} onpointercancel={cancel}>
-    <span class="grab" aria-hidden="true"><span></span></span>
+    <button class="grab" aria-label={ui.sheet === 'peek' ? 'Open the sheet' : 'Close the sheet'} aria-expanded={ui.sheet !== 'peek'} data-testid="sheet-grab" onclick={guard(toggle)}><span></span></button>
     <div class="tabs" role="tablist">
       <button role="tab" class="tab" aria-selected={ui.sheetTab === 'info'} class:on={ui.sheetTab === 'info'} onclick={guard(() => open('info'))} data-testid="sheet-tab-info">
         {#if unit && sym}<img src={sym.href} alt="" width={Math.min(sym.width, 30)} height={Math.min(sym.height, 18)} /><span class="t-main">{unit.designation}</span>
@@ -113,8 +117,11 @@
   .side .grab { display: none; }
   .side .head { height: 44px; touch-action: pan-x pan-y; }
   .head { flex: none; height: 52px; display: flex; flex-direction: column; touch-action: none; border-bottom: 1px solid var(--rule); }
-  .grab { flex: none; height: 8px; display: grid; place-items: center; }
+  /* The grab bar is a tap target too: its hit area reaches above the sheet's edge without taking room from the tabs. */
+  .grab { flex: none; height: 8px; position: relative; display: grid; place-items: center; width: 100%; padding: 0; border: 0; background: none; cursor: pointer; }
+  .grab::before { content: ''; position: absolute; inset: -12px 0 0; }
   .grab span { margin-top: 4px; width: 40px; height: 4px; border-radius: 2px; background: var(--rule); }
+  .grab:focus-visible span { background: var(--ink); }
   .tabs { flex: 1; display: flex; }
   .tab {
     flex: 1; display: flex; align-items: center; justify-content: center; gap: var(--s2); min-height: 44px; border: 0; background: none;

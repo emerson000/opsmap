@@ -153,6 +153,34 @@ test('sends a /new order from the docked bar', async ({ page }) => {
   await expect(page.getByTestId('command-preview')).toContainText('✓');
 });
 
+test('one tap opens and closes the sheet, from its tab or its grab bar', async ({ page, browserName }) => {
+  const sheet = page.getByTestId('sheet');
+  const tab = page.getByTestId('sheet-tab-info'), grab = page.getByTestId('sheet-grab');
+  await expect(sheet).toHaveAttribute('data-size', 'peek');
+  await tab.click();
+  await expect(sheet).toHaveAttribute('data-size', 'half');
+  await tab.click();
+  await expect(sheet).toHaveAttribute('data-size', 'peek');
+  await grab.click();
+  await expect(sheet).toHaveAttribute('data-size', 'half');
+  await expect(grab).toHaveAttribute('aria-expanded', 'true');
+  await grab.click();
+  await expect(sheet).toHaveAttribute('data-size', 'peek');
+  // Opened at full (a double-tap on a unit), it reopens at full next time.
+  const t = await touchFor(page, browserName);
+  const p = await unitAt(page, 'knee');
+  await tap(t, p); await page.waitForTimeout(60); await tap(t, p);
+  await expect(sheet).toHaveAttribute('data-size', 'full');
+  await tab.click();
+  await expect(sheet).toHaveAttribute('data-size', 'peek');
+  await tab.click();
+  await expect(sheet).toHaveAttribute('data-size', 'full');
+  // The other tab switches without closing.
+  await page.getByTestId('sheet-tab-log').click();
+  await expect(sheet).toHaveAttribute('data-size', 'full');
+  await expect(sheet).toHaveAttribute('data-tab', 'log');
+});
+
 test('tap opens the inspector at peek; double-tap and long-press-release open it full', async ({ page, browserName }) => {
   const t = await touchFor(page, browserName);
   const sheet = page.getByTestId('sheet');
