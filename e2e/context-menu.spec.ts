@@ -20,6 +20,21 @@ test('right-click menus on desktop', async ({ browser, baseURL }) => {
   await expect(menu).toHaveCount(0);
   await expect(page.getByTestId('inspector')).toContainText('IRSRSP');   // right-click also selects
 
+  // Each item shows its command; Attack… opens the order composer with Attack chosen, Shift+click fills the bar.
+  await symbol('irsrsp').click({ button: 'right' });
+  await expect(menu.locator('[data-action="attack"]')).toContainText('/attack');
+  await expect(menu.locator('[data-action="inspect"]')).toBeVisible();
+  await menu.locator('[data-action="attack"]').click();
+  await expect(page.getByTestId('composer-preview')).toContainText('/attack IRSRSP');
+  await expect(page.getByTestId('composer').locator('[data-verb="attack"]')).toHaveAttribute('aria-checked', 'true');
+  await page.getByTestId('composer').getByRole('button', { name: 'Cancel' }).click();
+  await expect(page.getByTestId('composer')).toHaveCount(0);
+  await symbol('irsrsp').click({ button: 'right' });
+  await menu.locator('[data-action="attack"]').click({ modifiers: ['Shift'] });
+  await expect(input).toHaveValue('/attack IRSRSP ');
+  await input.fill('');
+  await input.blur();
+
   // A prompt item fills the command bar with the caret inside the quotes.
   await symbol('passport').click({ button: 'right' });
   await menu.locator('[data-action="note"]').click();
@@ -32,7 +47,8 @@ test('right-click menus on desktop', async ({ browser, baseURL }) => {
   // A direct action runs at once. Threats read Destroyed and Bypassed, and have no Attack.
   await symbol('leak').click({ button: 'right' });
   await expect(menu.locator('[data-action="attack"]')).toHaveCount(0);
-  await expect(menu.locator('[data-action="done"]')).toHaveText('Destroyed');
+  await expect(menu.locator('[data-action="done"] .cm-label')).toHaveText('Destroyed');
+  await expect(menu.locator('[data-action="reopen"]')).toHaveCount(0);
   await menu.locator('[data-action="done"]').click();
   await expect(menu).toHaveCount(0);
   await expect(page.getByTestId('toasts')).toContainText('LEAK');
@@ -47,7 +63,7 @@ test('right-click menus on desktop', async ({ browser, baseURL }) => {
     for (let r = 60; r < 260; r += 20) for (let a = 0; a < 360; a += 15) {
       const x = cx + r * Math.cos(a * Math.PI / 180), y = cy + r * Math.sin(a * Math.PI / 180);
       const el = document.elementFromPoint(x, y);
-      if (el?.closest('svg.map-svg') && !el.closest('[data-interactive], [data-unit-id], [data-measure-id], [data-beyond]')) return { x, y };
+      if (el?.closest('svg.map-svg') && !el.closest('[data-interactive], [data-unit-id], [data-measure-id], [data-beyond], [data-sector-id]')) return { x, y };
     }
     return null;
   });

@@ -121,7 +121,7 @@ describe('shared server',()=>{
     };
     expect((await rpc('tools/list',{},'invalid')).status).toBe(401);
     expect((await rpc('initialize',{protocolVersion:'2025-11-25',capabilities:{},clientInfo:{name:'test',version:'1'}})).body.result.serverInfo.name).toBe('opsmap');
-    const tools=await rpc('tools/list');expect(tools.body.result.tools.map((t:any)=>t.name)).toEqual(['opsmap_maps','opsmap_command','opsmap_query','opsmap_sitrep','opsmap_help']);
+    const tools=await rpc('tools/list');expect(tools.body.result.tools.map((t:any)=>t.name)).toEqual(['opsmap_maps','opsmap_command','opsmap_query','opsmap_sitrep','opsmap_help','opsmap_map_create','opsmap_map_rename','opsmap_map_delete','opsmap_import']);
     const call=async(name:string,args:unknown={})=>JSON.parse((await rpc('tools/call',{name,arguments:args})).body.result.content[0].text);
     expect(await call('opsmap_command',{text:'/new pending "MCP capture" as MCP'})).toMatchObject({ok:true});
     expect(runtime.hub.since(0)[0]).toMatchObject({source:'mcp',userId:'dev:alice'});

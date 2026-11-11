@@ -8,8 +8,9 @@
   import { selection } from '../model/store.svelte';
   import { isArchived } from '../map/scene';
   import { miniSymbol } from './mini';
-  import { ui, type SheetSize, type Theme } from './shell.svelte';
+  import { ui, pick, type SheetSize, type Theme } from './shell.svelte';
   import Inspector from './Inspector.svelte';
+  import PickBanner from './PickBanner.svelte';
   import OrderLog from './OrderLog.svelte';
 
   let { doc, now, theme, avail, onfocus, shown = $bindable(0), side = false, sideW = 320 }: { doc: Doc; now: Date; theme: Theme; avail: number; onfocus: (id: string) => void; shown?: number; side?: boolean; sideW?: number } = $props();
@@ -23,7 +24,11 @@
   /** Peek shows the tabs; with a unit selected it also shows the unit card and quick actions. */
   /** A pending or unknown unit's card adds the identity and effort chips. */
   const triage = $derived(unit !== undefined && (unit.affiliation === 'pending' || unit.affiliation === 'unknown') && unit.lifecycle !== 'done' && unit.lifecycle !== 'dropped');
-  const peekH = $derived(ui.sheetTab === 'info' && (unit || ui.beyondSector) ? Math.min(HEAD + 128 + (triage ? 108 : 0), avail) : HEAD);
+  const measure = $derived(selection.sel?.kind === 'measure' ? doc.measures.find(m => m.id === selection.sel?.id) : undefined);
+  const sector = $derived(selection.sel?.kind === 'sector' ? doc.sectors.find(s => s.id === selection.sel?.id) : undefined);
+  /** Peek: the header, a status line and one action row, 52 + 124 = 176 px for every kind (plus 108 for the triage chips). */
+  const PEEK_BODY = 124, TRIAGE = 108;
+  const peekH = $derived(pick.current && !side ? Math.min(HEAD + PEEK_BODY, avail) : ui.sheetTab === 'info' && (unit || measure || sector) ? Math.min(HEAD + PEEK_BODY + (triage ? TRIAGE : 0), avail) : HEAD);
   // Full stops short of the top so a strip of map (with the selected unit) stays visible.
   const heights = $derived({ peek: peekH, half: Math.max(peekH, Math.round(avail * 0.5)), full: Math.max(peekH, Math.round(avail * 0.85)) });
   let liveH = $state<number | null>(null);
@@ -74,6 +79,8 @@
   function cancel() { drag = null; liveH = null; }
   const guard = (fn: () => void) => () => { if (!swallow) fn(); };
   const sym = $derived(unit ? miniSymbol(unit, theme, 12) : null);
+  /** Portrait: map pick shows its banner in the sheet (landscape shows it over the map). */
+  const picking = $derived(pick.current !== null && !side);
 </script>
 
 <section class="sheet {ui.sheet}" class:side class:dragging={liveH !== null} class:hidden={ui.barFocused && !side} style={side ? `width:${sideW}px` : `height:${height}px`} aria-label="Details sheet" data-testid="sheet" data-size={ui.sheet} data-tab={ui.sheetTab}>
@@ -83,7 +90,8 @@
     <div class="tabs" role="tablist">
       <button role="tab" class="tab" aria-selected={ui.sheetTab === 'info'} class:on={ui.sheetTab === 'info'} onclick={guard(() => open('info'))} data-testid="sheet-tab-info">
         {#if unit && sym}<img src={sym.href} alt="" width={Math.min(sym.width, 30)} height={Math.min(sym.height, 18)} /><span class="t-main">{unit.designation}</span>
-        {:else if ui.beyondSector}<span class="t-main">Beyond</span>
+        {:else if measure}<span class="kind">{measure.type.toUpperCase()}</span><span class="t-main">{measure.name}</span>
+        {:else if sector}<span class="kind">SEC</span><span class="t-main">{sector.name}</span>
         {:else}<span class="t-main">Situation</span>{#if unopposed}<b class="threat" title="Unopposed threats inside PL WEEK">{unopposed}</b>{/if}{/if}
       </button>
       <button role="tab" class="tab" aria-selected={ui.sheetTab === 'log'} class:on={ui.sheetTab === 'log'} onclick={guard(() => open('log'))} data-testid="sheet-tab-log">
@@ -92,11 +100,15 @@
     </div>
   </div>
   <div class="body" class:locked={!side && ui.sheet === 'peek' && liveH === null}>
-    {#if ui.sheetTab === 'info'}
-      <Inspector {doc} {now} {theme} {onfocus} />
-    {:else}
-      <OrderLog {doc} onfocus={onfocus} embedded />
-    {/if}
+    <!-- Map pick: the banner takes the sheet; the view stays mounted underneath, so the composer keeps its draft. -->
+    {#if picking}<PickBanner {doc} />{/if}
+    <div class="pane" class:gone={picking}>
+      {#if ui.sheetTab === 'info'}
+        <Inspector {doc} {now} {theme} {onfocus} />
+      {:else}
+        <OrderLog {doc} onfocus={onfocus} embedded />
+      {/if}
+    </div>
   </div>
 </section>
 
@@ -129,10 +141,13 @@
   }
   .tab.on { color: var(--ink); box-shadow: inset 0 -3px 0 var(--accent); }
   .tab img { object-fit: contain; }
+  .tab .kind { padding: 0 3px; border: 1px solid var(--rule-strong); font: 700 11px/14px var(--font-mono); letter-spacing: 0.04em; color: var(--ink); }
   .tab b { font: 700 12px/1 var(--font-mono); padding: 2px 5px; border: 1px solid var(--rule); }
   .tab b.threat { color: var(--hostile); border-color: var(--hostile); }
   .t-main { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40vw; }
   .body { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .pane { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+  .pane.gone { display: none; }
   .body.locked { overflow: hidden; }
   .body :global(.inspector), .body :global(.log) { border: 0; background: var(--panel); }
 </style>

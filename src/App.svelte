@@ -5,7 +5,7 @@
   import { cueFor } from './core/model/cues';
   import { play } from './lib/ui/sound.svelte';
   import type { Ring } from './lib/model/types';
-  import { getDoc, selection } from './lib/model/store.svelte';
+  import { getDoc, select, selection } from './lib/model/store.svelte';
   import { commandEvents, dispatch, type CommandEvent } from './lib/commands/dispatch';
   import { turnDetails } from './core/commands/turn';
   import OpsMap from './lib/map/OpsMap.svelte';
@@ -19,7 +19,8 @@
   import Toasts from './lib/ui/Toasts.svelte';
   import Login from './lib/ui/Login.svelte';
   import Sheet from './lib/ui/Sheet.svelte';
-  import { ui, env, toast, prefill, write } from './lib/ui/shell.svelte';
+  import PickBanner from './lib/ui/PickBanner.svelte';
+  import { ui, env, toast, prefill, write, pick, cancelPick } from './lib/ui/shell.svelte';
   import { resolveTheme, THEME_COLOR } from './lib/ui/theme';
   import { boot, session, live, isAdmin, importShared, localMapText, markLocalImported, others, setSelection, color, initials, nameOf, currentMap } from './lib/sync/sync.svelte';
   import { copyText, download, pickFile, stamp } from './lib/ui/files';
@@ -84,12 +85,48 @@
 
   /** Touch gestures on a unit: tap = card (peek), double-tap or long-press = every field (full). */
   function inspect(id: string, size: 'peek' | 'full') {
-    ui.beyondSector = null;
     ui.sheetTab = 'info';
     ui.sheet = size;
   }
 
   function focus(id: string) { map?.focusUnit(id); }
+
+  // ui.compose opens the order composer: select its unit (its Orders section opens) and, on a phone, the sheet at full.
+  $effect(() => {
+    const c = ui.compose;
+    if (!c) return;
+    untrack(() => {
+      if (!doc.units.some(u => u.id === c.unit)) { ui.compose = null; return; }
+      if (selection.sel?.kind !== 'unit' || selection.sel.id !== c.unit) select({ kind: 'unit', id: c.unit });
+      if (phone) { ui.sheetTab = 'info'; if (!side) ui.sheet = 'full'; }
+    });
+  });
+  // Selecting another object closes the composer, and ends a map pick.
+  $effect(() => {
+    const s = selection.sel;
+    untrack(() => {
+      if (ui.compose && (s?.kind !== 'unit' || s.id !== ui.compose.unit)) ui.compose = null;
+    });
+  });
+  $effect(() => { void selection.sel; untrack(cancelPick); });
+
+  /** F6 (Shift+F6 back): map → sidebar → command bar. */
+  function cycleRegion(back: boolean) {
+    const regions = [
+      document.querySelector<HTMLElement>('svg.map-svg'),
+      document.querySelector<HTMLElement>('[data-testid="inspector"]'),
+      document.querySelector<HTMLElement>('[data-testid="command-input"]'),
+    ];
+    const at = regions.findIndex(r => r?.contains(document.activeElement));
+    for (let step = 1; step <= regions.length; step++) {
+      const next = regions[((at < 0 ? (back ? 0 : -1) : at) + (back ? -step : step) + regions.length * 2) % regions.length];
+      if (next && next.getClientRects().length) {
+        if (phone && next.dataset.testid === 'inspector') { ui.sheetTab = 'info'; if (ui.sheet === 'peek') ui.sheet = 'half'; }
+        next.focus();
+        return;
+      }
+    }
+  }
 
   // Other users' selections, outlined on the map in their color.
   const remote = $derived(others().filter(p => p.selectedId).map(p => ({ unitId: p.selectedId!, userId: p.userId, color: color(p.userId), initials: initials(p.userId), name: nameOf(p.userId) })));
@@ -101,7 +138,7 @@
     if (!id || id === shownMap) return;
     const first = !shownMap; shownMap = id;
     if (first) return;
-    selection.selectedId = null; selection.hoveredId = null; ui.beyondSector = null;
+    selection.selectedId = null; selection.hoveredId = null;
     map?.fitView();
   });
 
@@ -111,7 +148,7 @@
     const target = live.mapId;
     toast(`${label}: this replaces the map ${currentMap()?.name ?? ''} for everyone.`, 'prompt', { label: 'Replace map', run: () => {
       if (live.mapId !== target) { toast('Import cancelled: you opened another map'); return; }
-      void importShared(text, target).then(ok => { if (ok) { selection.selectedId = null; ui.beyondSector = null; after?.(); map?.fitView(); } });
+      void importShared(text, target).then(ok => { if (ok) { selection.selectedId = null; after?.(); map?.fitView(); } });
     } }, 15000);
   }
   function importLocal() {
@@ -132,9 +169,9 @@
       if (!isAdmin(session.me)) { toast('Only the administrator can import a map'); return; }
       const text = typeof args.text === 'string' ? args.text : await pickFile();
       if (text !== null) confirmImport(text, 'Import file');
-    } else if (verb === 'find' && ev.unitId) {
-      ui.beyondSector = null;
-      focus(ev.unitId);
+    } else if (verb === 'find') {
+      if (ev.unitId) focus(ev.unitId);
+      else if (typeof args.measure === 'string') map?.focusMeasure(args.measure);
     } else if (verb === 'help') {
       ui.legendOpen = true; ui.legendTab = 'commands';
     }
@@ -142,6 +179,7 @@
 
   function onGlobalKey(e: KeyboardEvent) {
     if (e.defaultPrevented) return;
+    if (e.key === 'F6') { e.preventDefault(); cycleRegion(e.shiftKey); return; }
     const typing = (e.target as HTMLElement | null)?.closest?.('input, textarea, select');
     if (e.key === 'Escape') {
       if (ui.legendOpen) { ui.legendOpen = false; e.preventDefault(); }
@@ -205,7 +243,6 @@
   <div class="map-layer">
     <OpsMap bind:this={map} {theme} {insets} {now} {trails} {remote}
       {focusInsets} touch={phone || env.coarse} compact={phone}
-      onselect={(id) => { if (id) ui.beyondSector = null; }}
       oninspect={inspect}
       oncommandtext={(text: string, caret?: number) => prefill(text, caret)}
       oncontextnew={(ctx: { sectorId: string; ring: Ring }, identity?: string) => {
@@ -213,7 +250,8 @@
         const head = `/new ${identity ? identity + ' ' : ''}"`;
         prefill(`${head}" in ${quoteName(name)} ${ctx.ring}`, head.length);
       }}
-      onbeyond={(sectorId) => { selection.selectedId = null; ui.beyondSector = sectorId; if (phone) { ui.sheetTab = 'info'; ui.sheet = 'half'; } }}
+      oncreate={(kind, ctx) => { select(null); ui.create = { kind, sectorId: ctx.sectorId, ring: ctx.ring }; if (phone) { ui.sheetTab = 'info'; ui.sheet = 'full'; } }}
+      onbeyond={(sectorId) => { select({ kind: 'sector', id: sectorId }, 'beyond'); if (phone) { ui.sheetTab = 'info'; ui.sheet = 'half'; } }}
       onerror={(message) => toast(message)}
       onnotice={(message) => toast(message, 'info', { label: 'Undo', run: () => { const r = dispatch({ verb: 'undo', args: {} }); if (!r.ok) toast(r.error, 'info'); } }, 6000)} />
   </div>
@@ -222,7 +260,11 @@
 
   {#if phone}
     <Sheet {doc} {now} {theme} avail={sheetAvail} onfocus={focus} bind:shown={sheetH} {side} {sideW} />
-  {:else}
+  {/if}
+  {#if pick.current && phone && side}
+    <div class="pick-layer"><PickBanner {doc} /></div>
+  {/if}
+  {#if !phone}
     <div class="left"><OrderLog {doc} onfocus={focus} /></div>
     <div class="right"><Inspector {doc} {now} {theme} onfocus={focus} /></div>
   {/if}
@@ -235,6 +277,8 @@
       <button class="btn" onclick={()=>{prefill('/new "Fix sink"');dismissOrientation();}}>Try: /new "Fix sink"</button>
       <button class="btn" aria-label="Dismiss orientation" onclick={dismissOrientation}>✕</button></div>
     </div>{/if}
+    <!-- Desktop and tablet: map pick docks as one line just above the command bar, clear of the map's top. -->
+    {#if pick.current && !phone}<div class="pick-dock"><PickBanner {doc} line /></div>{/if}
     <CommandBar {doc} {theme} /></div></div>
 
   <div class="toast-layer"><Toasts /></div>
@@ -252,7 +296,7 @@
 {/if}
 
 <style>
-  .app { position: relative; width: 100%; height: 100dvh; overflow: hidden; }
+  .app { position: relative; width: 100%; height: 100dvh; overflow: hidden; overflow: clip; }
   .probe { position: absolute; top: 0; left: 0; width: 0; height: env(safe-area-inset-top); visibility: hidden; pointer-events: none; }
   .map-layer { position: absolute; inset: 0; }
   .left { position: absolute; top: var(--bar-h); bottom: 0; left: 0; width: var(--left-w); z-index: 10; }
@@ -268,6 +312,12 @@
   .toast-layer { position: absolute; top: calc(var(--bar-h) + 8px); left: calc(var(--left-w) + 16px); right: calc(var(--right-w) + 16px); z-index: 30; }
   .sitrep-layer { position: absolute; top: calc(var(--bar-h) + 16px); left: calc(var(--left-w) + 16px); right: calc(var(--right-w) + 16px); z-index: 25; display: flex; justify-content: center; }
   .vk-layer { z-index: 27; }
+  .pick-layer { position: absolute; top: calc(var(--bar-h) + 8px); left: calc(var(--left-w) + 16px); right: calc(var(--right-w) + 16px); z-index: 24; display: flex; justify-content: center; pointer-events: none; }
+  .pick-layer > :global(*) { width: min(440px, 100%); pointer-events: auto; }
+  /* Out of flow, so the dock height (and the map's insets) stay the same while picking. */
+  .bar-wrap { position: relative; }
+  .pick-dock { position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); }
+  .app.phone .pick-layer { top: calc(var(--top-h) + 8px); left: 8px; right: calc(var(--right-w) + 8px); }
   .legend-layer { position: absolute; top: calc(var(--bar-h) + 6px); right: 12px; z-index: 26; }
 
   /* Phone: the map fills the screen; the command bar docks at the bottom (above the keyboard),

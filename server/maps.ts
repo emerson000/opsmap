@@ -4,6 +4,7 @@ import { DEFAULT_MAP, type MapInfo, type Store } from './db';
 import { importJson } from '../src/core/model/json';
 import { zonedDay } from './scheduler';
 import { DEFAULT_TZ } from '../src/core/model/time';
+import { resolveMap } from '../src/core/commands/resolve';
 
 export const MAX_MAPS=50, MAX_MAP_NAME=60;
 export type MapEvent={kind:'op';mapId:string;op:Op}|{kind:'maps';maps:MapInfo[];deleted?:string};
@@ -36,16 +37,19 @@ export class Maps {
   /** A map by id, or by name ignoring case. Without a reference, the default map. */
   resolve(ref?:string):Hub {
     if(ref===undefined||ref==='')return this.default;
-    const byId=this.hubs.get(ref);if(byId)return byId;
-    const match=this.list().find(m=>m.name.toLowerCase()===ref.trim().toLowerCase());
-    if(!match)throw new Error(`Unknown map: ${ref}`);
-    return this.hubs.get(match.id)!;
+    return this.hubs.get(resolveMap(ref,this.list()).id)!;
+  }
+  /** `base`, or `base 2`, `base 3`… when a map already has that name (as the map switcher names a duplicate). */
+  uniqueName(base:string):string {
+    const taken=new Set(this.list().map(m=>m.name.toLowerCase()));
+    if(!taken.has(base.toLowerCase()))return base;
+    for(let n=2;;n++)if(!taken.has(`${base} ${n}`.toLowerCase()))return `${base} ${n}`;
   }
   private assertUnique(name:string,except?:string) {
     if(this.list().some(m=>m.id!==except&&m.name.toLowerCase()===name.toLowerCase()))throw new Error(`A map named ${name} already exists`);
   }
   /** Creates an empty map (five standard sectors) or one that starts from an imported document. */
-  create(userId:string,rawName:unknown,doc?:unknown,now=new Date()):MapInfo {
+  create(userId:string,rawName:unknown,doc?:unknown,now=new Date(),source:Op['source']='web',agent?:{id:string;name:string}):MapInfo {
     const name=mapName(rawName);this.assertUnique(name);
     const maps=this.list();if(maps.length>=MAX_MAPS)throw new Error(`At most ${MAX_MAPS} maps`);
     const validated=doc===undefined?undefined:importJson(JSON.stringify(doc));
@@ -55,7 +59,7 @@ export class Maps {
     // A new map takes its first morning turn tomorrow, not on the next scheduler tick.
     this.store.setLastTurn(id,zonedDay(now,this.tz).day);
     const hub=this.attach(new Hub(this.store,id,this.tz));
-    if(validated){try{hub.import(userId,validated,now);}catch(error){this.hubs.delete(id);this.store.deleteMap(id);throw error;}}
+    if(validated){try{hub.import(userId,validated,now,source,agent);}catch(error){this.hubs.delete(id);this.store.deleteMap(id);throw error;}}
     this.emit({kind:'maps',maps:this.list()});
     return info;
   }

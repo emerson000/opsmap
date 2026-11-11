@@ -24,7 +24,7 @@
   });
   function pick(text: string) {
     const id = unitInLine(doc, text);
-    if (id) { selection.selectedId = id; ui.beyondSector = null; onfocus(id); }
+    if (id) { selection.selectedId = id; onfocus(id); }
   }
 </script>
 

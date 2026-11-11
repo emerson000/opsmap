@@ -45,3 +45,9 @@ export function nearestHostile(doc:Doc,source:Unit):Unit {
   if(!candidates.length)throw new CommandError('No unresolved hostile in this sector');
   return candidates[0];
 }
+/** A map by id, or by name ignoring case and outer spaces (the server's maps, the browser's map list). */
+export function resolveMap<T extends {id:string;name:string}>(ref:string,maps:readonly T[]):T {
+  const found=maps.find(m=>m.id===ref)??maps.find(m=>m.name.toLowerCase()===ref.trim().toLowerCase());
+  if(!found)throw new Error(`Unknown map: ${ref}`);
+  return found;
+}

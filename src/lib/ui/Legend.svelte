@@ -3,7 +3,7 @@
   import { VERBS, SYNTAX } from '../commands/grammar';
   import { features } from '../model/features.svelte';
   import { sidcSymbol, type Theme } from '../map/symbols';
-  import { ui } from './shell.svelte';
+  import { ui, setSingleKeys } from './shell.svelte';
   import { AFFILIATIONS, RINGS } from './words';
 
   let { theme }: { theme: Theme } = $props();
@@ -30,20 +30,40 @@
     ['Long-press a symbol, let go', 'Open every field (full sheet)'],
     ['Long-press a symbol, drag', 'Move it: the symbol lifts, drop to commit'],
     ['Drag the round handle', 'Under a selected friendly: drop on a hostile or suspect to attack'],
-    ['Long-press ground', 'Capture a new unit there'],
+    ['Long-press ground', 'Capture a new unit, area or phase line there'],
+    ['Tap an area, a phase line or a sector name', 'Open its view in the sheet'],
+    ['Long-press an area, let go', 'Its card: size, members, join, near, attack'],
     ['Second finger during a move', 'Cancels the move and pinches'],
     ['Tab tap or drag the sheet top', 'Peek, half or full sheet'],
   ];
   const mouse: [string, string][] = [
     ['Drag ground / wheel', 'Pan / zoom'],
     ['Click a symbol', 'Inspect it'],
+    ['Click an area, a phase line or a sector name', 'Open its view in the sidebar'],
     ['Drag a symbol', 'Move it'],
     ['Drag the handle', 'Attack a hostile or suspect'],
     ['Double-click ground', 'Capture a new unit there'],
     ['Right-click a symbol', 'Its menu: attack, move, due, note, block, done… (also the menu key or Shift+F10)'],
-    ['Right-click ground / area', 'Capture menu / the area’s card'],
+    ['Right-click ground / area', 'Capture menu / the area’s card (also a double-click)'],
     ['/  ·  0  ·  Ctrl+Z', 'Command bar · fit map · undo (Shift: redo)'],
     ['Arrows or WASD  ·  +  −', 'Pan (Shift: farther) · zoom in, out'],
+  ];
+  const keysAll: [string, string][] = [
+    ['F6  ·  Shift+F6', 'Next region: map, sidebar, command bar (Shift: back)'],
+    ['/', 'Command bar'],
+    ['0', 'Fit the map'],
+    ['Arrows or WASD  ·  +  −', 'Pan (Shift: farther) · zoom in, out'],
+    ['Ctrl+Z  ·  Ctrl+Shift+Z', 'Undo · redo'],
+    ['Menu key or Shift+F10', 'The focused unit’s menu'],
+    ['Esc', 'Close the composer, a menu or the selection; cancel a map pick'],
+    ['Tab  ·  Enter (map pick)', 'Next valid target · pick it'],
+    ['Enter  ·  Shift+Enter (composer)', 'Run the order · put it in the command bar'],
+  ];
+  const keysSidebar: [string, string][] = [
+    ['N', 'New order for the open unit'],
+    ['C', 'Show every command (/CMD)'],
+    ['F', 'Find the open object on the map'],
+    ['[  ·  ]', 'Collapse · expand every section'],
   ];
   const arrows = [
     { label: 'Main attack (one per sector)', cls: 'main' },
@@ -62,6 +82,7 @@
       <button role="tab" class="btn" class:on={ui.legendTab === 'symbols'} aria-selected={ui.legendTab === 'symbols'} onclick={() => (ui.legendTab = 'symbols')}>Symbols</button>
       <button role="tab" class="btn" class:on={ui.legendTab === 'commands'} aria-selected={ui.legendTab === 'commands'} onclick={() => (ui.legendTab = 'commands')}>Commands</button>
       <button role="tab" class="btn" class:on={ui.legendTab === 'gestures'} aria-selected={ui.legendTab === 'gestures'} onclick={() => (ui.legendTab = 'gestures')}>Gestures</button>
+      <button role="tab" class="btn" class:on={ui.legendTab === 'keys'} aria-selected={ui.legendTab === 'keys'} onclick={() => (ui.legendTab = 'keys')}>Keys</button>
     </div>
     <button class="btn" onclick={() => (ui.legendOpen = false)} aria-label="Close legend">✕</button>
   </header>
@@ -144,6 +165,24 @@
           {#each mouse as [g, what] (g)}<tr><td class="g">{g}</td><td>{what}</td></tr>{/each}
         </tbody></table>
       </section>
+    {:else if ui.legendTab === 'keys'}
+      <section data-testid="keys">
+        <div class="cap">Everywhere</div>
+        <table class="gest"><tbody>
+          {#each keysAll as [g, what] (g)}<tr><td class="g">{g}</td><td>{what}</td></tr>{/each}
+        </tbody></table>
+      </section>
+      <section>
+        <div class="cap">In the sidebar</div>
+        <div class="switch">
+          <button type="button" role="switch" aria-checked={ui.singleKeys} aria-labelledby="single-keys-label" data-testid="single-keys" onclick={() => setSingleKeys(!ui.singleKeys)}><span class="knob"></span></button>
+          <span id="single-keys-label">Single-key shortcuts</span>
+        </div>
+        <p class="note">They work only while focus is in the sidebar, and never while you type in a field. Turn them off if they get in your way or your speech or switch software sends letters.</p>
+        <table class="gest" class:off={!ui.singleKeys}><tbody>
+          {#each keysSidebar as [g, what] (g)}<tr><td class="g">{g}</td><td>{what}</td></tr>{/each}
+        </tbody></table>
+      </section>
     {:else}
       <p class="note">Verb first, then the unit by designation, quoted title or #id. Press / anywhere to type. Tab completes.</p>
       <table class="cmds">
@@ -177,6 +216,16 @@
   .gest td { padding: 4px var(--s1); vertical-align: top; }
   .gest .g { font-weight: 700; width: 45%; }
   .body { overscroll-behavior: contain; touch-action: pan-y; }
+  .switch { display: flex; align-items: center; gap: var(--s2); margin-top: var(--s1); font-weight: 600; }
+  .switch button { position: relative; width: 36px; height: 20px; padding: 0; border: 1px solid var(--rule-strong); border-radius: 10px; background: var(--panel-2); }
+  .switch .knob { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--ink-3); transition: left 120ms ease-out; }
+  .switch button[aria-checked='true'] { background: var(--accent-bg); border-color: var(--accent); }
+  .switch button[aria-checked='true'] .knob { left: 18px; background: var(--accent); }
+  @media (prefers-reduced-motion: reduce) { .switch .knob { transition: none; } }
+  .gest.off { opacity: 0.5; }
+  :global([data-tier='phone']) .switch button { width: 52px; height: 32px; border-radius: 16px; }
+  :global([data-tier='phone']) .switch .knob { width: 24px; height: 24px; top: 3px; left: 3px; }
+  :global([data-tier='phone']) .switch button[aria-checked='true'] .knob { left: 23px; }
   :global([data-tier='phone']) .legend { width: 100%; max-height: 100%; }
   :global([data-tier='phone']) .legend header .btn { height: 44px; padding: 0 var(--s3); }
   @media (max-width: 479px) { .grid { grid-template-columns: 1fr; } }

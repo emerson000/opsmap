@@ -9,7 +9,8 @@ import { DEFAULT_TZ } from '../src/core/model/time';
 export interface Op {seq:number;opId:string;userId:string;source:'web'|'mcp'|'system';at:string;cmd:Command;log:string;via?:string;}
 interface Row {map_id:string;seq:number;op_id:string;user_id:string;source:Op['source'];at:string;cmd:string;log:string;inverse:string;undone_by:number|null;reverts:number|null;principal:string|null;via:string|null;}
 const toOp=(r:Row):Op=>({seq:r.seq,opId:r.op_id,userId:r.user_id,source:r.source,at:r.at,cmd:JSON.parse(r.cmd),log:r.log,...(r.via?{via:r.via}:{})});
-const mutationVerbs=new Set(['new','id','size','fn','rename','move','attack','moving','axis','advancing','bda','block','unblock','unpin','reopen','done','drop','reinforce','reduce','attach','detach','link','due','note','rate','key','cp','halt','support','sector','pl','obj','ea','nai','intent','sidc','vk']);
+/** Verbs a user (browser or MCP) may submit as an op; the rest are answered by the browser shell or the MCP server. */
+export const MUTATION_VERBS:ReadonlySet<string>=new Set(['new','id','size','fn','rename','move','attack','moving','axis','advancing','bda','block','unblock','unpin','reopen','done','drop','reinforce','reduce','attach','detach','link','due','note','rate','key','cp','halt','support','sector','pl','obj','ea','nai','intent','sidc','vk']);
 function overlaps(a:InversePatch,b:InversePatch):boolean {
   return (['units','orders','measures','sectors'] as const).some(k=>a[k].some(x=>b[k].some(y=>x.id===y.id)))||Object.keys(a.top).some(k=>Object.hasOwn(b.top,k));
 }
@@ -42,7 +43,7 @@ export class Hub {
   submit(userId:string,source:Op['source'],opId:string,cmd:Command,now=new Date(),agent?:{id:string;name:string}):Op {
     if(source!=='system'&&opId.startsWith('turn:'))throw new Error('Reserved operation id');
     const old=this.existing(opId,userId);if(old)return old;
-    if(!cmd||typeof cmd.verb!=='string'||!cmd.args||typeof cmd.args!=='object'||Array.isArray(cmd.args)||!(mutationVerbs.has(cmd.verb)||source==='system'&&userId==='system'&&cmd.verb==='turn'))throw new Error('Invalid or privileged command');
+    if(!cmd||typeof cmd.verb!=='string'||!cmd.args||typeof cmd.args!=='object'||Array.isArray(cmd.args)||!(MUTATION_VERBS.has(cmd.verb)||source==='system'&&userId==='system'&&cmd.verb==='turn'))throw new Error('Invalid or privileged command');
     // Of /vk, users submit only unbind; the sync service records everything else through internal().
     if(cmd.verb==='vk'&&cmd.args.action!=='unbind')throw new Error('Invalid or privileged command');
     const safe={verb:cmd.verb,args:cmd.args,...(typeof cmd.raw==='string'&&cmd.raw.startsWith('/')?{raw:cmd.raw.slice(0,512)}:{})};
@@ -54,11 +55,11 @@ export class Hub {
   internal(userId:string,source:Op['source'],cmd:Command,via:string,now=new Date()):Op {
     return this.commit(userId,source,randomUUID(),cmd,now,undefined,undefined,undefined,via);
   }
-  import(userId:string,doc:unknown,now=new Date()):Op {
+  import(userId:string,doc:unknown,now=new Date(),source:Op['source']='web',agent?:{id:string;name:string}):Op {
     const validated=this.zoned(importJson(JSON.stringify(doc)));
     // A Vikunja binding names whose token syncs it: only /vk bind on this server may set one, never a document.
     delete validated.settings.vikunja;for(const s of validated.sectors)delete s.vk;for(const u of validated.units)delete u.vk;
-    return this.commit(userId,'web',randomUUID(),{verb:'import',args:{doc:validated}},now);
+    return this.commit(userId,source,randomUUID(),{verb:'import',args:{doc:validated}},now,undefined,undefined,agent);
   }
   private commit(userId:string,source:Op['source'],opId:string,cmd:Command,now:Date,reverts?:number,redoOriginal?:number,agent?:{id:string;name:string},viaOverride?:string):Op {
     if(typeof opId!=='string'||!opId.length||opId.length>128)throw new Error('Invalid operation id');

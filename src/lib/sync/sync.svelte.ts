@@ -195,6 +195,8 @@ function connect(map: string | undefined): void {
     submit: cmd => engine!.submit(cmd),
     request: kind => { engine!.request(kind); return { ok: true, log: `${kind.toUpperCase()} SENT` }; },
     setView: view => { prefs.view = view as View; write(VIEW_KEY, view); present(); },
+    maps: () => live.maps,
+    openMap: id => switchMap(id),
     vk: args => {
       void engine!.vk(args).then(r => {
         if (r.ok) { lastResult.text = r.log; lastResult.ok = true; lastResult.seq++; toast(r.log, 'info'); }

@@ -37,7 +37,7 @@
   function act(fn: () => void) { return () => { ui.menuOpen = false; fn(); }; }
   /** Situation at half height, scrolled to the inbox list. */
   function openInbox() {
-    selection.selectedId = null; ui.beyondSector = null; ui.sheetTab = 'info'; ui.sheet = 'half';
+    selection.selectedId = null; ui.sheetTab = 'info'; ui.sheet = 'half';
     void tick().then(() => document.querySelector('[data-testid="situation-inbox"]')?.scrollIntoView({ block: 'start' }));
   }
   function setView(key: string) { if (doc.settings.view !== key) run({ verb: 'view', args: { view: key } }); }

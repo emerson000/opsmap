@@ -13,6 +13,8 @@ export interface SuggestOptions {
  recent?:readonly string[];
  /** The server has Vikunja sync: offer /vk. */
  vikunja?:boolean;
+ /** The shared maps' names, for /map. */
+ maps?:readonly string[];
 }
 export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={}):{items:Suggestion[];ghost:string} {
  const prefix=input.slice(0,Math.max(0,Math.min(input.length,cursor)));
@@ -80,8 +82,8 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
  else if(verb==='sector'&&previous.length===1)candidates=['add','rename','remove','width','size'].map(s=>keyword(s));
  else if(verb==='sector'&&previous.length===2&&previous[1].value.toLowerCase()==='size')candidates=['small','medium','large','xl'].map(s=>keyword(s));
  else if(verb==='sector'&&previous.length===2)candidates=sectors();
- else if(['obj','ea','nai','pl'].includes(verb)&&previous.length===1)candidates=(verb==='pl'?['add','date','remove']:['add','move','join','leave','size','remove']).map(s=>keyword(s));
- else if(['obj','ea','nai','pl'].includes(verb)&&previous.length===2&&['remove','move','date','join','leave','size'].includes(previous[1].value.toLowerCase()))
+ else if(['obj','ea','nai','pl'].includes(verb)&&previous.length===1)candidates=(verb==='pl'?['add','date','rename','remove']:['add','move','join','leave','size','rename','remove']).map(s=>keyword(s));
+ else if(['obj','ea','nai','pl'].includes(verb)&&previous.length===2&&['remove','move','date','join','leave','size','rename'].includes(previous[1].value.toLowerCase()))
   candidates=doc.measures.filter(m=>m.type===verb).map(m=>({insert:/\s/.test(m.name)?JSON.stringify(m.name):m.name,label:`${verb.toUpperCase()} ${m.name}`,kind:'keyword' as const}));
  else if(['obj','ea','nai'].includes(verb)&&previous[1]?.value.toLowerCase()==='move'&&previous.length>=3&&before!=='near')candidates=[...(previous.length===3?[keyword('to')]:[]),...['hq','near','mid','far'].map(s=>keyword(s))];
  else if(['obj','ea','nai'].includes(verb)&&previous[1]?.value.toLowerCase()==='move'&&before==='near')candidates=units();
@@ -92,6 +94,8 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
   candidates=units().filter(c=>!c.unitId||(leaving?inside.has(c.unitId):!inside.has(c.unitId)));
  }
  else if(verb==='pl'&&previous[1]?.value.toLowerCase()==='date'&&previous.length===3)candidates=dates();
+ else if(['obj','ea','nai','pl'].includes(verb)&&previous[1]?.value.toLowerCase()==='rename'&&previous.length>=3){candidates=[];hint='Type the new name in quotes';}
+ else if(verb==='find'&&previous.length===2&&['obj','ea','nai','pl'].includes(previous[1].value.toLowerCase())){const type=previous[1].value.toLowerCase();candidates=doc.measures.filter(m=>m.type===type).map(m=>({insert:/\s/.test(m.name)?JSON.stringify(m.name):m.name,label:`${type.toUpperCase()} ${m.name}`,kind:'keyword' as const}));}
  else if(verb==='bda'&&previous.length===2){
   const conditions:Record<string,string>={fc:'fully capable',dmg:'damaged (slash)',des:'destroyed (X)',full:'full to capacity'};
   candidates=['100%','75%','50%','25%','0%','fc','dmg','des','full'].map(s=>({...keyword(s),label:conditions[s]?`${s} · ${conditions[s]}`:s}));
@@ -108,9 +112,11 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
   else candidates=[keyword('via')];
  }
  else if(verb==='sitrep')candidates=[keyword('copy')];
+ else if(verb==='map')candidates=previous.length===1?(opts.maps??[]).map(name=>({insert:/\s/.test(name)?JSON.stringify(name):name,label:name,detail:'map',kind:'keyword' as const})):[];
+ else if(verb==='help')candidates=previous.length===1?VERBS.filter(v=>v!=='vk'||opts.vikunja).map(v=>({insert:v,label:`/${v}`,detail:SYNTAX[v],kind:'keyword' as const})):[];
  else if(verb==='attack'&&previous.length>=3)candidates=['main','support','planned'].map(s=>keyword(s));
  else if(['note','rename','intent'].includes(verb)&&((verb==='intent')||previous.length>=2))candidates=[];
- else if(['turn','undo','redo','export','import','help'].includes(verb))candidates=[];
+ else if(['turn','undo','redo','export','import'].includes(verb))candidates=[];
  else {
   candidates=units();
   if(previous.length===1){
@@ -128,6 +134,7 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
   if(['attack','axis','moving'].includes(verb)&&previous.length>=2)candidates.push(...doc.measures.filter(m=>m.type==='obj').map(m=>({insert:JSON.stringify(m.name),label:`${m.type.toUpperCase()} ${m.name}`,kind:'keyword' as const})));
   if(verb==='moving'&&before==='to')candidates.push(keyword('hq'));
   if(verb==='move'&&previous.length===2)candidates.push(...['to','hq','near','mid','far','beyond'].map(s=>keyword(s)));
+  if(verb==='find'&&previous.length===1)candidates.push(...['obj','ea','nai','pl','sector'].map(s=>keyword(s)));
   if(verb==='moving'&&previous.length===2)candidates=[keyword('to')];
   if(verb==='moving'&&before==='to')candidates.push(keyword('nearest hostile'));
   if(verb==='attach'&&previous.length===2)candidates=[keyword('to')];

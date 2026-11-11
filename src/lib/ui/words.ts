@@ -5,6 +5,7 @@ import { ECHELONS } from '../../core/model/echelon';
 import { forceRatio } from '../../core/model/forceRatio';
 import { localDay } from '../../core/model/time';
 import { shortDate } from '../map/scene';
+import { formatDtg } from '../../core/model/sidc';
 
 export const AFFILIATIONS: { key: Affiliation; label: string; digit: string; meaning: string }[] = [
   { key: 'pending', label: 'Pending', digit: '0', meaning: 'Captured, not looked at' },
@@ -47,8 +48,17 @@ export function unitLabel(u: Unit): string {
   return `${u.designation} (${AFF_SHORT[u.affiliation]}${u.echelon ? ` ${u.echelon.toUpperCase()}` : ''})`;
 }
 
-/** One line per order, from the point of view of `unitId`. */
-export function orderLine(doc: Doc, o: Order, unitId: string, now: Date = new Date()): { text: string; otherId: string | null; ratio?: { text: string; under: boolean } } {
+/** The object at the other end of an order: a unit, a control measure, or a sector (its HQ); null for the center HQ. */
+export type OrderEnd = { kind: 'unit' | 'measure' | 'sector'; id: string } | null;
+export function orderEnd(doc: Doc, id: string): OrderEnd {
+  if (id.startsWith('hq:')) return doc.sectors.some(s => s.id === id.slice(3)) ? { kind: 'sector', id: id.slice(3) } : null;
+  if (doc.units.some(u => u.id === id)) return { kind: 'unit', id };
+  if (doc.measures.some(m => m.id === id)) return { kind: 'measure', id };
+  return null;
+}
+
+/** One line per order, from the point of view of `unitId` (or of the measure it targets). */
+export function orderLine(doc: Doc, o: Order, unitId: string, now: Date = new Date()): { text: string; otherId: string | null; other: OrderEnd; ratio?: { text: string; under: boolean } } {
   const name = (id: string) => id === 'hq' ? 'HQ' : id.startsWith('hq:') ? `${doc.sectors.find(s => s.id === id.slice(3))?.name.toUpperCase() ?? ''} HQ` : doc.units.find(u => u.id === id)?.designation ?? doc.measures.find(m => m.id === id)?.name ?? id;
   const outgoing = o.from === unitId;
   const otherId = outgoing ? o.to : o.from;
@@ -61,7 +71,7 @@ export function orderLine(doc: Doc, o: Order, unitId: string, now: Date = new Da
   }).join(', ')}` : '';
   const text = outgoing ? `${verb} → ${name(o.to)}${via}` : `${verb} ← ${name(o.from)}`;
   const ratio = o.type === 'attack' ? forceRatio(doc, o.to) ?? undefined : undefined;
-  return { text: `${text}${o.planned ? ' · planned' : ''}`, otherId: otherId === 'hq' || otherId.startsWith('hq:') || !doc.units.some(u => u.id === otherId) ? null : otherId, ratio };
+  return { text: `${text}${o.planned ? ' · planned' : ''}`, other: orderEnd(doc, otherId), otherId: otherId === 'hq' || otherId.startsWith('hq:') || !doc.units.some(u => u.id === otherId) ? null : otherId, ratio };
 }
 
 /** The first unit designation that appears in a log line (for click-to-select). */
@@ -76,5 +86,8 @@ export function unitInLine(doc: Doc, text: string): string | null {
   }
   return best?.id ?? null;
 }
+
+/** 26DEC: the day and month of a DTG. */
+export const dayMonth = (iso: string) => { const d = formatDtg(iso); return d.slice(0, 2) + d.slice(7, 10); };
 
 export const quoteName = (name: string) => (/\s/.test(name) ? JSON.stringify(name) : name);

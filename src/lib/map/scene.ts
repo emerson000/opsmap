@@ -11,7 +11,9 @@ import { hashSeed, mulberry32, smoothPath } from './terrain';
 export interface Trail { unitId: string; from: { r: number; theta: number } }
 export interface SceneOptions { view: View; now: Date; selectedId?: string | null; trails?: Trail[]; symbolScale?: number; /** World font size of phase-line labels (sizes their arcs). */ plFont?: number;
   /** Phones at the fitted zoom: one staggered label per line, none on PL TODAY, custom lines low. */ compactPl?: boolean;
-  /** Orders drawn even where the view would hide them (a just-made attack). */ showOrders?: string[] }
+  /** Orders drawn even where the view would hide them (a just-made attack). */ showOrders?: string[];
+  /** The control measure open in the sidebar: orders onto it (or, for a phase line, axes through it) show in every view. */ selectedMeasureId?: string | null;
+  /** The sector open in the sidebar: orders on its HQ show in every view. */ selectedSectorId?: string | null }
 
 export interface SceneUnit {
   id: string; unit: Unit; x: number; y: number; ring: Ring; symbolView: View;
@@ -28,6 +30,7 @@ export interface SceneSector {
 export interface SceneRing { key: Ring; r: number; label: string; date: string; paths: string[]; /** Arc center of each label path, degrees (screen, 270 = up). */ centers: number[] }
 export interface SceneOrder {
   id: string; kind: 'main' | 'support' | 'axis' | 'advance' | 'move' | 'link' | 'assist'; planned: boolean; fromId: string; toId: string;
+  /** Axis of advance: the phase lines it names with `via`. */ via?: string[];
   /** Axis of advance: where it crosses each phase line named with `via` (world space). */ checkpoints?: Pt[];
   /** Link orders: linkup-point position and dependency/handoff kind. */
   linkup?: Pt; linkKind?: 'dependency' | 'handoff';
@@ -221,6 +224,8 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
   const visibleOrder = (ord: Order) => {
     if (!anchors.has(ord.from) || !anchors.has(ord.to)) return false;
     if (staffPlus || o.showOrders?.includes(ord.id)) return true;
+    if (o.selectedMeasureId && (ord.to === o.selectedMeasureId || ord.via?.includes(o.selectedMeasureId))) return true;
+    if (o.selectedSectorId && ord.to === `hq:${o.selectedSectorId}`) return true;
     // Support between friendlies: in Commander only for the selected supporter or supported unit.
     if (ord.type === 'support') return o.selectedId === ord.from || o.selectedId === ord.to;
     if (ord.type === 'attack' && ord.role !== 'main') {
@@ -263,6 +268,7 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
     const curve: Curve | null = bentCurve(a, b, { startClear: a.clear, endClear: b.clear, bend });
     if (!curve) continue;
     const out: SceneOrder = { id: ord.id, kind, planned: Boolean(ord.planned), fromId: ord.from, toId: ord.to };
+    if (ord.via?.length) out.via = [...ord.via];
     if (kind === 'link') {
       out.shaft = curvePath(curve); out.width = 1.2 * scale;
       out.linkup = { x: r2((a.x + b.x) / 2), y: r2((a.y + b.y) / 2) };

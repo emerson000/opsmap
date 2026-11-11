@@ -21,6 +21,7 @@
   --hostile: #b3121f;
   --hostile-bg: rgba(196, 20, 43, 0.1);
   --ok: #2d6a2d;
+  --pl: #7a4b9a;            /* custom phase lines, as on the map */
   --k-green: #2d7a2d; --k-amber: #b07800; --k-red: #b3121f; --k-black: #23211c;
   --shadow: 0 1px 0 rgba(35, 33, 28, 0.08), 0 4px 16px rgba(35, 33, 28, 0.12);
   color-scheme: light;
@@ -41,6 +42,7 @@
   --hostile: #ff6464;
   --hostile-bg: rgba(255, 93, 93, 0.12);
   --ok: #7fcf7f;
+  --pl: #c49ae0;
   --k-green: #6fcf6f; --k-amber: #f0b43c; --k-red: #ff6464; --k-black: #c9d4c4;
   --shadow: 0 1px 0 rgba(0, 0, 0, 0.4), 0 6px 24px rgba(0, 0, 0, 0.45);
   color-scheme: dark;
@@ -51,8 +53,9 @@
    zoom is the map's own (touch-action: none on the map). Everywhere else touch-action is pan-x pan-y:
    panels still scroll, but a pinch or double-tap does nothing. touch-action is intersected along the
    ancestors, so setting it on html/body covers every control. The viewport also sets
-   maximum-scale=1, user-scalable=no, and App blocks iOS gesture* events, which Safari uses for page zoom. */
-html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; touch-action: pan-x pan-y; }
+   maximum-scale=1, user-scalable=no, and App blocks iOS gesture* events, which Safari uses for page zoom.
+   overflow: clip, not only hidden: hidden still lets focus or scrollIntoView scroll the shell. */
+html, body { margin: 0; height: 100%; overflow: hidden; overflow: clip; overscroll-behavior: none; touch-action: pan-x pan-y; }
 body { position: fixed; inset: 0; height: 100dvh; }
 body { background: var(--ground); color: var(--ink); font: 12px/1.4 var(--font-mono); -webkit-font-smoothing: antialiased; }
 #app { height: 100%; }

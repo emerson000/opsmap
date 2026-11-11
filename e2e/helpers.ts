@@ -48,6 +48,40 @@ export async function command(page: Page, text: string) {
   await expect(page.getByTestId('command-preview')).toContainText('✓');
 }
 
+/** A screen point on a sector's rim name (its hit arc) that nothing else covers, for clicks and taps. */
+export function rimPoint(page: Page, sectorId: string): Promise<{ x: number; y: number }> {
+  return page.evaluate(id => {
+    const path = document.querySelector(`g.rim[data-sector-id="${id}"] path.rim-hit`) as SVGPathElement;
+    const len = path.getTotalLength(), m = path.getScreenCTM()!;
+    for (const f of [0.5, 0.4, 0.6, 0.3, 0.7, 0.2, 0.8]) {
+      const p = path.getPointAtLength(len * f).matrixTransform(m);
+      if (document.elementFromPoint(p.x, p.y)?.closest('[data-sector-id]')?.getAttribute('data-sector-id') === id) return { x: p.x, y: p.y };
+    }
+    throw new Error(`No clickable point on the ${id} rim name`);
+  }, sectorId);
+}
+
+/**
+ * Use a sidebar control, then check it ran exactly `text` (the echo line shows the command it ran), undo it, run `text`
+ * in the command bar, and check the bar gives the same log line. Returns that line.
+ */
+export async function sameAsBar(page: Page, use: () => Promise<void>, text: string): Promise<string> {
+  const preview = page.getByTestId('command-preview');
+  const before = (await preview.innerText()).trim();
+  await use();
+  await expect(preview).not.toHaveText(before);
+  await expect(preview).toContainText('✓');
+  // Pointer and focus off the sidebar: the echo line shows the command that ran, not the one under the pointer.
+  await page.mouse.move(0, 400);
+  await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+  await expect(page.getByTestId('echo-line')).toContainText(text);
+  const line = (await preview.innerText()).trim();
+  await command(page, '/undo');
+  await command(page, text);
+  await expect(preview).toHaveText(line);
+  return line;
+}
+
 export async function openLog(page: Page) {
   await page.getByRole('button', { name: 'Open order log', exact: true }).click();
 }

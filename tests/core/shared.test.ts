@@ -104,6 +104,14 @@ describe('attribution and touched entities',()=>{
     expect(importJson(JSON.stringify(second.doc))).toEqual(second.doc);
     expect(apply(first.doc,{verb:'note',args:{unit:'u1',note:'Ready'}},now,'')).toHaveProperty('error');
   });
+  it('keeps creators through an import: the exported one, else the replaced unit\'s, else the importer',()=>{
+    const made=success(apply(emptyDoc(),{verb:'new',args:{title:'Review'}},now,'alice')).doc;
+    const exported=importJson(JSON.stringify(made));
+    expect(success(apply(emptyDoc(),{verb:'import',args:{doc:exported}},now,'bob')).doc.units[0].createdBy).toBe('alice');
+    const bare=structuredClone(exported);delete bare.units[0].createdBy;bare.units[0].note='Changed';
+    expect(success(apply(made,{verb:'import',args:{doc:bare}},now,'bob')).doc.units[0]).toMatchObject({createdBy:'alice',updatedBy:'bob'});
+    expect(success(apply(emptyDoc(),{verb:'import',args:{doc:bare}},now,'bob')).doc.units[0].createdBy).toBe('bob');
+  });
   it('includes main-effort demotions and boundary cancellation of orders',()=>{
     const doc=seedDoc(now);
     const attack=success(apply(doc,command('/attack RECORDS IRS main',doc),now,'bob'));

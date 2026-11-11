@@ -23,6 +23,16 @@ describe('buildScene from the seed', () => {
     expect(commander.customPls[0].label).toBe('PL LAUNCH');
     expect(commander.customPls[0].r).toBeGreaterThan(300); expect(commander.customPls[0].r).toBeLessThan(400);
   });
+  it('keeps orders onto the open area, through the open phase line, or on the open sector HQ in Commander', () => {
+    expect(commander.orders.some(o => o.id === 'o-move-axis')).toBe(false);
+    const area = buildScene(doc, { view: 'commander', now, selectedMeasureId: 'obj-settled' });
+    expect(area.orders.find(o => o.id === 'o-move-axis')?.via).toEqual(['pl-launch']);
+    expect(buildScene(doc, { view: 'commander', now, selectedMeasureId: 'pl-launch' }).orders.some(o => o.id === 'o-move-axis')).toBe(true);
+    const onHq = structuredClone(doc);
+    onHq.orders.push({ id: 'o-hq', type: 'move', from: 'records', to: 'hq:household', createdAt: now.toISOString() });
+    expect(buildScene(onHq, { view: 'commander', now }).orders.some(o => o.id === 'o-hq')).toBe(false);
+    expect(buildScene(onHq, { view: 'commander', now, selectedSectorId: 'household' }).orders.some(o => o.id === 'o-hq')).toBe(true);
+  });
   it('shows every seed unit (none are beyond or archived)', () => {
     expect(commander.units).toHaveLength(20);
     expect(commander.sectors.reduce((n, s) => n + s.beyondCount, 0)).toBe(0);

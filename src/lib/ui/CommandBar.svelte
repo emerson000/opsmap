@@ -7,13 +7,13 @@
   import { recentIds, touchUnit } from '../commands/recent.svelte';
   import { selection } from '../model/store.svelte';
   import { features } from '../model/features.svelte';
+  import { live } from '../sync/sync.svelte';
   import { tokenize } from '../../core/commands/tokenize';
   import { miniSymbol } from './mini';
-  import { barRequest, lastResult, assessPrompt, write, ui, env, type Theme } from './shell.svelte';
+  import { barRequest, lastResult, assessPrompt, history, remember, ui, env, type Theme } from './shell.svelte';
 
   let { doc, theme }: { doc: Doc; theme: Theme } = $props();
 
-  const HISTORY_KEY = 'opsmap.ui.history';
   let input: HTMLInputElement;
   let value = $state('');
   let cursor = $state(0);
@@ -22,13 +22,12 @@
   let active = $state(0);
   let navigated = $state(false);
   let scrollLeft = $state(0);
-  let history: string[] = (() => { try { return JSON.parse(localStorage.getItem(HISTORY_KEY) ?? '[]'); } catch { return []; } })();
   let historyAt = -1;
   let draft = '';
 
   const isCommand = $derived(value.trimStart().startsWith('/'));
   const result = $derived(isCommand && value.trim().length > 1 ? parse(value, doc) : null);
-  const sug = $derived(isCommand && focused ? suggest(value, cursor, doc, { recent: recentIds(doc), vikunja: features.vikunja !== null }) : { items: [] as Suggestion[], ghost: '' });
+  const sug = $derived(isCommand && focused ? suggest(value, cursor, doc, { recent: recentIds(doc), vikunja: features.vikunja !== null, maps: live.maps.map(m => m.name) }) : { items: [] as Suggestion[], ghost: '' });
   const items = $derived(sug.items);
   const showPop = $derived(open && focused && items.length > 0);
 
@@ -98,8 +97,7 @@
     if (!text) return;
     const res = dispatchText(text);
     if (res.ok) {
-      history = [text, ...history.filter(h => h !== text)].slice(0, 50);
-      write(HISTORY_KEY, JSON.stringify(history));
+      remember(text);
       historyAt = -1;
       value = ''; cursor = 0; open = false;
       lastResult.text = res.log; lastResult.ok = !res.log.includes('already ran') && !res.log.includes('after 0400'); lastResult.seq++;

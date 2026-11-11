@@ -3,6 +3,7 @@
   // encrypted. The token is never sent back; the panel shows only whether one is set and for which user.
   import { onMount } from 'svelte';
   import { ui, toast } from './shell.svelte';
+  import { vkAccount } from './vikunja.svelte';
 
   type Account = { configured: boolean; url?: string; connected?: boolean; username?: string; savedAt?: string; error?: string };
   let account = $state<Account | null>(null);
@@ -19,6 +20,7 @@
     });
     const data = await res.json().catch(() => ({ error: `HTTP ${res.status}` })) as Account;
     if (!res.ok) throw new Error(data.error ?? `HTTP ${res.status}`);
+    vkAccount.connected = Boolean(data.connected);
     return data;
   }
   onMount(async () => {

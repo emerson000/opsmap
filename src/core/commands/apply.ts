@@ -9,6 +9,7 @@ import { cloneDoc } from '../model/clone';
 import { advanceDay } from './turn';
 import { CommandError, localDay } from './tokenize';
 import { unresolved } from './resolve';
+import { helpText } from './syntax';
 import { restoreInverse, touchedEntities } from '../model/patch';
 export type ApplyResult = {doc:Doc;log:string;touched:Touched}|{error:string};
 type MutationResult = {doc:Doc;log:string}|{error:string};
@@ -337,13 +338,19 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
         }else if(a.action==='date'){
           const m=item(doc.measures,a.measure,'control measure');requireThat(m.type==='pl'&&type==='pl','Only phase lines have a date');
           m.date=date(a.date);log=`PL ${m.name} DATED ${m.date.slice(0,10)}`;
+        }else if(a.action==='rename'){
+          const m=item(doc.measures,a.measure,'control measure');requireThat(m.type===type,'Wrong control measure type');
+          const name=text(a.name,'name').trim().toUpperCase(),old=m.name;
+          requireThat(name!==old.toUpperCase(),`${type.toUpperCase()} ${old} is already named ${name}`);
+          requireThat(!doc.measures.some(x=>x.id!==m.id&&x.type===type&&x.name.toUpperCase()===name),'Control measure already exists');
+          m.name=name;log=`${type.toUpperCase()} ${old} RENAMED → ${name}`;
         }else if(a.action==='remove'){
           const m=item(doc.measures,a.measure,'control measure');requireThat(m.type===type,'Wrong control measure type');
           // Released members count as changed, so undoing the removal conflicts with their later moves.
           for(const id of m.members??[]){const u=doc.units.find(x=>x.id===id);if(u)changed(u);}
           doc.measures=doc.measures.filter(x=>x.id!==m.id);doc.orders=doc.orders.filter(o=>o.to!==m.id).map(o=>o.via?{...o,via:o.via.filter(id=>id!==m.id)}:o);log=`${type.toUpperCase()} ${m.name} REMOVED`;
         }else{
-          requireThat(a.action==='add','Expected add, move, join, leave, size, date, or remove');const name=text(a.name,'name').toUpperCase();requireThat(!doc.measures.some(m=>m.type===type&&m.name.toUpperCase()===name),'Control measure already exists');
+          requireThat(a.action==='add','Expected add, move, join, leave, size, date, rename, or remove');const name=text(a.name,'name').toUpperCase();requireThat(!doc.measures.some(m=>m.type===type&&m.name.toUpperCase()===name),'Control measure already exists');
           const m:ControlMeasure={id:uniqueId(type,doc.measures),type,name};
           if(type==='pl')m.date=date(a.date);
           else {const sector=item(doc.sectors,a.sectorId,'sector'),ring=(a.ring??'mid') as Ring;requireThat(rings.includes(ring),'Invalid ring');m.sectorId=sector.id;m.pos=freeSpot(doc,sector.id,ring);m.size=0.35;}
@@ -359,8 +366,15 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
         return {doc:restoreInverse(original,a.inverse),log:`REVERT OP ${a.seq}`};
       }
       case 'import': {if(a.doc!==undefined)return {doc:importJson(JSON.stringify(a.doc)),log:'DOCUMENT IMPORTED'};if(a.text!==undefined)return {doc:importJson(text(a.text,'JSON document')),log:'DOCUMENT IMPORTED'};return {doc:original,log:'IMPORT'};}
-      case 'find': {const u=unit();return {doc:original,log:`LOCATE ${u.designation}`};}
-      case 'sitrep':case 'export':case 'help':case 'undo':case 'redo':return {doc:original,log:cmd.verb.toUpperCase()};
+      case 'find': {
+        if(a.measure!==undefined){const m=item(doc.measures,a.measure,'control measure');return {doc:original,log:`LOCATE ${m.type.toUpperCase()} ${m.name}`};}
+        if(a.sectorId!==undefined){const sector=item(doc.sectors,a.sectorId,'sector');return {doc:original,log:`LOCATE SECTOR ${sector.name.toUpperCase()}`};}
+        const u=unit();return {doc:original,log:`LOCATE ${u.designation}`};
+      }
+      case 'help':return {doc:original,log:typeof a.verb==='string'?helpText(a.verb):'HELP'};
+      // The map list lives on the server: the shell (browser) or the MCP server names the maps.
+      case 'map':return {doc:original,log:a.name===undefined?'MAPS':`MAP ${String(a.name).toUpperCase()}`};
+      case 'sitrep':case 'export':case 'undo':case 'redo':return {doc:original,log:cmd.verb.toUpperCase()};
       default:throw new CommandError(`Unknown command: ${cmd.verb}`);
     }
     doc.log.push({id:`log${1+Math.max(0,...doc.log.map(l=>Number(l.id.replace(/^log/,''))||0))}`,at,text:log,...(cmd.raw?{cmd:cmd.raw}:{})});
@@ -465,7 +479,10 @@ export function apply(original:Doc,cmd:Command,now:Date=new Date(),actor?:string
     for(const u of result.doc.units) {
       const previous=before.get(u.id);
       if(JSON.stringify(previous)===JSON.stringify(u))continue;
-      if(!previous&&(cmd.verb!=='revert'||u.createdBy===undefined))u.createdBy=actor;
+      // A revert or an import keeps the creator it carries; an import without one keeps the replaced unit's.
+      const restores=cmd.verb==='revert'||cmd.verb==='import';
+      if(!previous&&(!restores||u.createdBy===undefined))u.createdBy=actor;
+      else if(previous&&u.createdBy===undefined&&previous.createdBy!==undefined)u.createdBy=previous.createdBy;
       u.updatedBy=actor;
     }
   }

@@ -6,8 +6,10 @@
   import { mapLabels, visibleWorld } from './maplabels';
   import { band } from '../ui/words';
   import { formatDtg } from '../../core/model/sidc';
-  import { getDoc, selection } from '../model/store.svelte';
+  import { getDoc, select, selection, type Sel } from '../model/store.svelte';
   import { dispatch } from '../commands/dispatch';
+  import { pick, finishPick, cancelPick, runCommand, ui, type AreaFlow } from '../ui/shell.svelte';
+  import { enabledFor, menuEntry, slotFor, tryFormat, verbCode, type VerbSlot } from '../ui/verbs';
   import { touchUnit } from '../commands/recent.svelte';
   import { buildScene, type Trail } from './scene';
   import { buildTerrain } from './terrain';
@@ -31,6 +33,8 @@
     oncommandtext?: (text: string, caret?: number) => void;
     /** A sector's beyond chevron was clicked. */
     onbeyond?: (sectorId: string) => void;
+    /** Capture menu: open the sidebar's create form for an area or a phase line, with the press point's sector and ring. */
+    oncreate?: (kind: 'area' | 'pl', ctx: { sectorId: string; ring: Ring }) => void;
     /** Errors from drag commands. Without it the map shows its own toast. */
     onerror?: (message: string) => void;
     /** Confirmation of a drag-made order (e.g. "PACKING ATTACKS LEAK"), offered with undo by the shell. */
@@ -52,7 +56,7 @@
     /** Other users' selections (v2 presence), outlined in their color. */
     remote?: { unitId: string; userId: string; color: string; initials: string; name: string }[];
   }
-  let { onselect, oninspect, oncontextnew, oncommandtext, onbeyond, onerror, onnotice, trails, insets = NO_INSETS, focusInsets, touch = false, compact = false, now: nowProp, theme: themeProp, remote = [] }: Props = $props();
+  let { onselect, oninspect, oncontextnew, oncommandtext, onbeyond, oncreate, onerror, onnotice, trails, insets = NO_INSETS, focusInsets, touch = false, compact = false, now: nowProp, theme: themeProp, remote = [] }: Props = $props();
 
   const uid = `om${Math.random().toString(36).slice(2, 8)}`;
   const terrain = buildTerrain(TERRAIN_SEED, TERRAIN_BOUNDS, 22);
@@ -87,7 +91,10 @@
   const ls = $derived(Math.max(1, MIN_TEXT / (10.5 * s * zk)));
   /** Phone at about the fitted zoom: compact phase-line labels (staggered, no dates, none on PL TODAY). */
   const compactPl = $derived(compact && zk < fitK * 1.6);
-  const scene = $derived(buildScene(doc, { view: doc.settings.view, now, selectedId: selection.selectedId, trails, symbolScale: s, plFont: Math.max(8.5 * s, mt), compactPl, showOrders: freshOrder ? [freshOrder] : [] }));
+  /** The control measure or sector open in the sidebar (drawn selected; orders onto it stay visible). */
+  const selMeasureId = $derived(selection.sel?.kind === 'measure' ? selection.sel.id : null);
+  const selSectorId = $derived(selection.sel?.kind === 'sector' ? selection.sel.id : null);
+  const scene = $derived(buildScene(doc, { view: doc.settings.view, now, selectedId: selection.selectedId, selectedMeasureId: selMeasureId, selectedSectorId: selSectorId, trails, symbolScale: s, plFont: Math.max(8.5 * s, mt), compactPl, showOrders: freshOrder ? [freshOrder] : [] }));
   const selectedUnit = $derived(doc.units.find(u => u.id === selection.selectedId));
   /**
    * Touch commander view at (about) fitted zoom: label only what needs a name at a glance —
@@ -158,6 +165,14 @@
     flashTimer = setTimeout(() => (flashId = null), 1800);
     return true;
   }
+  /** Center an OBJ, EA or NAI (phase lines and sectors have no single point). */
+  export function focusMeasure(id: string): boolean {
+    const sm = scene.measures.find(m => m.id === id);
+    if (!sm) return false;
+    userMoved = true;
+    animateTo(focusTransform(sm, Math.max(view2d.k, fitK * 1.8), container.clientWidth, container.clientHeight, focusInsets ?? insets));
+    return true;
+  }
 
   onMount(() => {
     fitView();
@@ -207,6 +222,43 @@
     if (id) touchUnit({ id });
     onselect?.(id);
   }
+  /** Select a control measure or a sector (its sidebar view opens). */
+  function selectObject(sel: Sel) {
+    select(sel);
+    unitMenu = null;
+  }
+  const isPl = (id: string | null) => id !== null && doc.measures.find(m => m.id === id)?.type === 'pl';
+
+  // ---------- map pick (shell startPick) ----------
+  // Accepted objects get an amber ring and the rest dim; a click or tap picks, Tab and Enter cycle and pick, Esc cancels.
+  const picking = $derived(pick.current);
+  const pickUnit = (id: string) => picking ? picking.accept({ kind: 'unit', id }) : null;
+  const pickMeasure = $derived(picking ? (id: string) => picking.accept({ kind: 'measure', id }) : null);
+  /** What the press in pick mode landed on. */
+  let pickPress: Sel | null = null;
+  /** The objects a pick accepts, in drawing order, for Tab. */
+  function pickTargets(): Sel[] {
+    if (!picking) return [];
+    const all: Sel[] = [...scene.units.map(u => ({ kind: 'unit' as const, id: u.id })), ...scene.measures.map(m => ({ kind: 'measure' as const, id: m.id }))];
+    return all.filter(s => picking.accept(s));
+  }
+  function pickKey(e: KeyboardEvent) {
+    if (!picking) return;
+    if (e.key === 'Escape') { e.preventDefault(); e.stopPropagation(); cancelPick(); return; }
+    if (e.key === 'Tab' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const all = pickTargets();
+      if (!all.length) return;
+      e.preventDefault(); e.stopPropagation();
+      const at = all.findIndex(s => s.kind === picking.cursor?.kind && s.id === picking.cursor?.id);
+      const next = all[((at < 0 ? (e.shiftKey ? 0 : -1) : at) + (e.shiftKey ? -1 : 1) + all.length) % all.length];
+      picking.cursor = next;
+      return;
+    }
+    if (e.key === 'Enter' && picking.cursor && !(e.target as Element | null)?.closest?.('[data-testid="pick-banner"]')) {
+      e.preventDefault(); e.stopPropagation();
+      finishPick(picking.cursor);
+    }
+  }
 
   // ---------- pointer interaction ----------
   // Every active pointer is tracked. One pointer pans (or drags a unit / the attack handle); a
@@ -218,7 +270,7 @@
   type Drag = { id: string; kind: 'unit' | 'measure'; pointerId: number; sx: number; sy: number; moved: boolean; x: number; y: number; wx: number; wy: number; lifted: boolean };
   type Link = { fromId: string; pointerId: number; x: number; y: number; targetId: string | null; valid: boolean };
   type Gesture =
-    | { kind: 'pan'; id: number; sx: number; sy: number; view: View2D; moved: boolean; touch: boolean; unitId: string | null; measureId: string | null }
+    | { kind: 'pan'; id: number; sx: number; sy: number; view: View2D; moved: boolean; touch: boolean; unitId: string | null; measureId: string | null; sectorId: string | null }
     | { kind: 'pinch'; a: number; b: number; a0: P; b0: P; view: View2D };
   let drag = $state<Drag | null>(null);
   let link = $state<Link | null>(null);
@@ -226,7 +278,9 @@
   let gesture: Gesture | null = null;
   const pointers = new Map<number, P>();
   let pressTimer: ReturnType<typeof setTimeout> | undefined;
-  let lastTap: { t: number; x: number; y: number; unitId: string | null; measureId: string | null } | null = null;
+  let lastTap: { t: number; x: number; y: number; unitId: string | null; measureId: string | null; sectorId: string | null; sel: string } | null = null;
+  /** The selection as one string, so a double-tap can check that nothing else changed it between the taps. */
+  const selKey = () => (selection.sel ? `${selection.sel.kind}:${selection.sel.id}` : '');
   let lastPointerType = 'mouse';
   let captureMenu = $state<{ x: number; y: number; py: number; ctx: { sectorId: string; ring: Ring } } | null>(null);
   /** Small inspector for an OBJ, EA or NAI (long-press and let go, double-tap, or double-click). */
@@ -237,6 +291,10 @@
     const limit = mapH - (insets?.bottom ?? 0) - 8;
     return m.y + menuH <= limit ? m.y : Math.max(8, m.py - 16 - menuH);
   }
+  /** The card stays between the top bar and whatever covers the bottom right now (the phone sheet); it scrolls when taller. */
+  const cardBottom = $derived(mapH - ((focusInsets ?? insets)?.bottom ?? 0) - 8);
+  const cardMax = $derived(Math.max(160, cardBottom - insets.top - 8));
+  const cardTop = (y: number) => Math.max(insets.top, Math.min(y, cardBottom - cardH));
   const cardMeasure = $derived(measureCard ? doc.measures.find(x => x.id === measureCard?.id) : undefined);
   const cardSector = $derived(cardMeasure ? doc.sectors.find(x => x.id === cardMeasure.sectorId) : undefined);
   const captureSector = $derived(captureMenu ? doc.sectors.find(x => x.id === captureMenu?.ctx.sectorId) : undefined);
@@ -267,11 +325,21 @@
   const moving = $derived(drag?.kind === 'measure' && drag.moved ? { id: drag.id, dx: drag.x - drag.wx, dy: drag.y - drag.wy } : null);
   /** Units that travel with the area being dragged. */
   const movingMembers = $derived(new Set(moving ? doc.measures.find(m => m.id === moving.id)?.members ?? [] : []));
+  /**
+   * The card can open under the finger (a phone, where it is clamped above the sheet): the click that ends that
+   * press must not run the card button now under it. Cleared by the next press on the card; keyboard clicks pass.
+   */
+  let cardFresh = false;
   function openMeasure(id: string) {
     const m = scene.measures.find(x => x.id === id);
     if (!m) return;
-    const sx = view2d.x + m.x * view2d.k, sy = view2d.y + m.y * view2d.k;
-    measureCard = { id, x: Math.max(8, Math.min(sx - 120, container.clientWidth - 248)), y: Math.max(8, Math.min(sy + 24, container.clientHeight - 300)) };
+    cardFresh = true;
+    const sx = view2d.x + m.x * view2d.k, sy = view2d.y + m.y * view2d.k, sr = m.r * view2d.k, w = container.clientWidth;
+    // Beside the area (right, else left), so the card does not hide it; below it when neither side has room.
+    const right = sx + sr + 12, left = sx - sr - 12 - 240;
+    measureCard = right + 240 <= w - insets.right - 8 ? { id, x: right, y: Math.max(8, sy - 90) }
+      : left >= insets.left + 8 ? { id, x: left, y: Math.max(8, sy - 90) }
+      : { id, x: Math.max(8, Math.min(sx - 120, w - 248)), y: Math.max(8, Math.min(sy + 24, container.clientHeight - 300)) };
   }
   function unitUnder(e: { clientX: number; clientY: number }): string | null {
     const el = document.elementFromPoint(e.clientX, e.clientY);
@@ -296,6 +364,8 @@
     if (captureMenu) captureMenu = null;
     if (measureCard) measureCard = null;
     if (unitMenu) unitMenu = null;
+    // The chevron's own click opens its sector; capturing the pointer here would send that click to the map.
+    if (target.closest?.('[data-beyond]')) return;
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     cancelAnimationFrame(anim);
     if (pointers.size === 2) { capture(e); startPinch(); return; }
@@ -307,22 +377,31 @@
       link = { fromId: selectedUnit.id, pointerId: e.pointerId, x: w.x, y: w.y, targetId: null, valid: false };
       return;
     }
-    if (target.closest?.('[data-beyond]')) return; // the chevron's click opens the list
     let unitId = target.closest?.('[data-unit-id]')?.getAttribute('data-unit-id') ?? null;
     let measureId = unitId ? null : target.closest?.('[data-measure-id]')?.getAttribute('data-measure-id') ?? null;
     // A press on an OBJ/EA/NAI outline or label beats a unit *label* drawn over it (not a unit symbol):
     // look through the stack under the point. Touch adjustment can also retarget a finger to a nearby label.
     if (!measureId && (!unitId || target.closest?.('.unit-labels'))) {
       const stack = document.elementsFromPoint?.(e.clientX, e.clientY) ?? [];
-      const m = stack.find(el => el.closest?.('[data-measure-id]'))?.closest('[data-measure-id]')?.getAttribute('data-measure-id');
+      // Areas only: a unit label beats a phase line ring under it.
+      const m = stack.find(el => el.closest?.('g.measure [data-measure-id]'))?.closest('[data-measure-id]')?.getAttribute('data-measure-id');
       if (m && !stack.some(el => el.closest?.('g.unit'))) { measureId = m; unitId = null; }
     }
-    if ((unitId || measureId) && !isTouch) {
+    // A phase line ring and a sector's rim name select on a click or tap; they never drag.
+    const plPress = isPl(measureId);
+    const sectorId = !unitId && !measureId ? target.closest?.('[data-sector-id]')?.getAttribute('data-sector-id') ?? null : null;
+    if (picking) {
+      // Map pick: a press only pans or picks; nothing drags, lifts or opens a menu.
+      pickPress = unitId ? { kind: 'unit', id: unitId } : measureId ? { kind: 'measure', id: measureId } : sectorId ? { kind: 'sector', id: sectorId } : null;
+      gesture = { kind: 'pan', id: e.pointerId, sx: e.clientX, sy: e.clientY, view: { ...view2d }, moved: false, touch: isTouch, unitId, measureId, sectorId };
+      return;
+    }
+    if ((unitId || (measureId && !plPress)) && !isTouch) {
       const w = toWorld(e);
       drag = { id: (unitId ?? measureId)!, kind: unitId ? 'unit' : 'measure', pointerId: e.pointerId, sx: e.clientX, sy: e.clientY, moved: false, x: w.x, y: w.y, wx: w.x, wy: w.y, lifted: false };
       return;
     }
-    const g: Gesture = { kind: 'pan', id: e.pointerId, sx: e.clientX, sy: e.clientY, view: { ...view2d }, moved: false, touch: isTouch, unitId, measureId };
+    const g: Gesture = { kind: 'pan', id: e.pointerId, sx: e.clientX, sy: e.clientY, view: { ...view2d }, moved: false, touch: isTouch, unitId, measureId, sectorId };
     gesture = g;
     if (!isTouch) return;
     endPress();
@@ -330,7 +409,11 @@
       if (gesture !== g || g.moved) return;
       gesture = null;
       buzz();
-      if (unitId || measureId) {
+      if (plPress || sectorId) {
+        // Long-press on a phase line or a sector name: its view, every field.
+        selectObject(plPress ? { kind: 'measure', id: measureId! } : { kind: 'sector', id: sectorId! });
+        oninspect?.((measureId ?? sectorId)!, 'full');
+      } else if (unitId || measureId) {
         // Lifted: drag to move, or let go to open the inspector.
         const w = worldFromClient(g.sx, g.sy, svg.getBoundingClientRect(), view2d);
         drag = { id: (unitId ?? measureId)!, kind: unitId ? 'unit' : 'measure', pointerId: g.id, sx: g.sx, sy: g.sy, moved: false, x: w.x, y: w.y, wx: w.x, wy: w.y, lifted: true };
@@ -342,7 +425,7 @@
           captureMenu = { x: Math.max(8, Math.min(p.x - 110, container.clientWidth - 228)), y: p.y + 16, py: p.y, ctx };
         } catch { /* no sectors */ }
       }
-    }, unitId || measureId ? LONG_PRESS : LONG_PRESS_GROUND);
+    }, unitId || measureId || sectorId ? LONG_PRESS : LONG_PRESS_GROUND);
   }
 
   function onPointerMove(e: PointerEvent) {
@@ -350,7 +433,8 @@
     if (!p) return;
     p.x = e.clientX; p.y = e.clientY;
     if (drag && e.pointerId === drag.pointerId) {
-      if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > (drag.lifted ? 2 : 4)) drag.moved = true;
+      // An area pressed and moved less than 6 px is a click (it selects); a unit lifts sooner.
+      if (!drag.moved && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) > (drag.lifted ? 2 : drag.kind === 'measure' ? 6 : 4)) drag.moved = true;
       if (drag.moved) { const w = toWorld(e); drag.x = w.x; drag.y = w.y; }
     } else if (link && e.pointerId === link.pointerId) {
       const w = toWorld(e);
@@ -371,10 +455,24 @@
   }
 
   function tap(g: Extract<Gesture, { kind: 'pan' }>, e: PointerEvent) {
-    const double = lastTap !== null && e.timeStamp - lastTap.t < DOUBLE_TAP_MS && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < DOUBLE_TAP_PX && lastTap.unitId === g.unitId && lastTap.measureId === g.measureId;
-    lastTap = double ? null : { t: e.timeStamp, x: e.clientX, y: e.clientY, unitId: g.unitId, measureId: g.measureId };
+    if (picking) {
+      // A tap on a ringed object picks it; anything else does nothing (the selection stays).
+      const p = pickPress; pickPress = null;
+      if (p) finishPick(p);
+      return;
+    }
+    const double = lastTap !== null && e.timeStamp - lastTap.t < DOUBLE_TAP_MS && Math.hypot(e.clientX - lastTap.x, e.clientY - lastTap.y) < DOUBLE_TAP_PX && lastTap.unitId === g.unitId && lastTap.measureId === g.measureId && lastTap.sectorId === g.sectorId
+      // Not when the selection changed in between (the sidebar closed it, say): that is two single taps.
+      && lastTap.sel === selKey();
+    lastTap = double ? null : { t: e.timeStamp, x: e.clientX, y: e.clientY, unitId: g.unitId, measureId: g.measureId, sectorId: g.sectorId, sel: '' };
     if (g.measureId) {
-      if (double) openMeasure(g.measureId);
+      // Tap an area or phase line: its view (the sheet at peek). Double-tap: an area's card, a phase line's every field.
+      selectObject({ kind: 'measure', id: g.measureId });
+      if (double && !isPl(g.measureId)) openMeasure(g.measureId);
+      else oninspect?.(g.measureId, double ? 'full' : 'peek');
+    } else if (g.sectorId) {
+      selectObject({ kind: 'sector', id: g.sectorId });
+      oninspect?.(g.sectorId, double ? 'full' : 'peek');
     } else if (g.unitId) {
       selectUnit(g.unitId);
       oninspect?.(g.unitId, double ? 'full' : 'peek');
@@ -382,6 +480,7 @@
       userMoved = true;
       animateTo(zoomAround(view2d, rel(e), 2), 220);
     } else selectUnit(null);
+    if (lastTap) lastTap.sel = selKey();
   }
 
   function onPointerUp(e: PointerEvent) {
@@ -392,6 +491,8 @@
       if (d.moved) {
         try { run(d.kind === 'measure' ? measureDropCommand(doc, d.id, measureAt(d), { x: d.x - d.wx, y: d.y - d.wy }) : dropCommand(doc, d.id, d, scene.measures)); } catch (err) { toast(err instanceof Error ? err.message : String(err)); }
       } else if (d.kind === 'measure') {
+        // A click (or a long-press and let go) selects the area; the long-press also opens its card.
+        selectObject({ kind: 'measure', id: d.id });
         if (d.lifted) openMeasure(d.id);
       } else {
         selectUnit(d.id);
@@ -414,7 +515,7 @@
     } else if (gesture?.kind === 'pinch') {
       // One finger left: keep panning with it (never a tap).
       const rest = [...pointers.entries()][0];
-      gesture = rest ? { kind: 'pan', id: rest[0], sx: rest[1].x, sy: rest[1].y, view: { ...view2d }, moved: true, touch: true, unitId: null, measureId: null } : null;
+      gesture = rest ? { kind: 'pan', id: rest[0], sx: rest[1].x, sy: rest[1].y, view: { ...view2d }, moved: true, touch: true, unitId: null, measureId: null, sectorId: null } : null;
     } else if (gesture?.kind === 'pan' && e.pointerId === gesture.id) {
       const g = gesture;
       gesture = null; endPress();
@@ -427,15 +528,15 @@
   }
   function onDblClick(e: MouseEvent) {
     // Touch double-tap is handled from pointer events (zoom); the dblclick that some browsers add is ignored.
-    if (lastPointerType !== 'mouse' && lastPointerType !== 'pen') return;
+    if (picking || (lastPointerType !== 'mouse' && lastPointerType !== 'pen')) return;
     const measureId = (e.target as Element).closest('[data-measure-id]')?.getAttribute('data-measure-id');
-    if (measureId) { openMeasure(measureId); return; }
-    if ((e.target as Element).closest('[data-interactive]')) return;
+    if (measureId) { selectObject({ kind: 'measure', id: measureId }); if (!isPl(measureId)) openMeasure(measureId); return; }
+    if ((e.target as Element).closest('[data-interactive], [data-sector-id]')) return;
     try { oncontextnew?.(contextAt(doc, toWorld(e))); } catch { /* no sectors */ }
   }
   function onMapKey(e: KeyboardEvent) {
     if (e.key === 'Escape' && (captureMenu || measureCard || unitMenu)) { captureMenu = null; measureCard = null; unitMenu = null; return; }
-    if (e.key === 'Escape' && selection.selectedId) selectUnit(null);
+    if (e.key === 'Escape' && selection.sel) selectUnit(null);
   }
   function unitKey(e: KeyboardEvent, id: string) {
     if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); selectUnit(id); }
@@ -449,16 +550,17 @@
 
   // ---------- right-click (desktop) ----------
   // A unit: its menu. An OBJ/EA/NAI: its card. Open ground: the capture menu. Touch keeps long-press.
-  type MenuItem = { key: string; label: string; act: () => void; warn?: boolean; sep?: boolean };
+  /** A menu item: `code` is its short command (right-aligned); `shift` runs on Shift+click instead (fill the bar). */
+  type MenuItem = { key: string; label: string; act: () => void; warn?: boolean; sep?: boolean; code?: string; shift?: () => void };
   let unitMenu = $state<{ id: string; x: number; y: number; py: number } | null>(null);
   let unitMenuEl = $state<HTMLDivElement | undefined>();
   let unitMenuH = $state(0);
-  const MENU_W = 220;
+  const MENU_W = 248;
   const menuX = (x: number) => Math.max(8, Math.min(x, (container?.clientWidth ?? 0) - MENU_W - 8));
   const menuUnit = $derived(unitMenu ? doc.units.find(u => u.id === unitMenu?.id) : undefined);
   function onContextMenu(e: MouseEvent) {
     e.preventDefault();
-    if (lastPointerType === 'touch') return;
+    if (lastPointerType === 'touch' || picking) return;
     captureMenu = null; measureCard = null; unitMenu = null;
     const t = e.target as Element;
     if (t.closest('[data-beyond]') || t.closest('.handle')) return;
@@ -466,7 +568,9 @@
     const unitId = t.closest('[data-unit-id]')?.getAttribute('data-unit-id');
     if (unitId && doc.units.some(u => u.id === unitId)) { openUnitMenu(unitId, p); return; }
     const measureId = t.closest('[data-measure-id]')?.getAttribute('data-measure-id');
-    if (measureId) { openMeasure(measureId); return; }
+    if (measureId) { selectObject({ kind: 'measure', id: measureId }); if (!isPl(measureId)) openMeasure(measureId); return; }
+    const sectorId = t.closest('[data-sector-id]')?.getAttribute('data-sector-id');
+    if (sectorId) { selectObject({ kind: 'sector', id: sectorId }); return; }
     try { captureMenu = { x: menuX(p.x), y: p.y + 2, py: p.y, ctx: contextAt(doc, toWorld(e)) }; } catch { /* no sectors */ }
   }
   function openUnitMenu(id: string, p: P) {
@@ -483,31 +587,49 @@
     try { const res = dispatch(cmd); if (res.ok) onnotice?.(res.log); else toast(res.error); }
     catch (e) { toast(`Could not ${verb}: ${e instanceof Error ? e.message : String(e)}`); }
   };
+  /** Open the unit's view and move focus into the sidebar. */
+  const inspect = (id: string) => () => {
+    select({ kind: 'unit', id });
+    oninspect?.(id, 'full');
+    void tick().then(() => document.querySelector<HTMLElement>('[data-testid="inspector"]')?.focus());
+  };
+  /**
+   * The unit's menu, built from VERB_SLOTS: an item shows when its table entry applies to the unit (`enabled`),
+   * with its short command. Attack… opens the order composer (Shift+click fills the command bar instead).
+   */
   function unitMenuItems(u: Unit): MenuItem[] {
     const d = u.designation, items: MenuItem[] = [];
     const threat = u.affiliation === 'hostile' || u.affiliation === 'suspect';
+    const applies = (e: VerbSlot | undefined): e is VerbSlot => e !== undefined && enabledFor(e, { kind: 'unit', unit: u }, doc) === true;
+    const add = (key: string, label: string, run: () => void, extra: Partial<MenuItem> = {}) => {
+      const e = menuEntry(key);
+      if (applies(e)) items.push({ key, label, act: run, code: verbCode(e), ...extra });
+    };
+    const note = ask(`/note ${d} ""`, `/note ${d} "`.length);
     if (u.lifecycle === 'done' || u.lifecycle === 'dropped') {
-      items.push({ key: 'note', label: 'Note…', act: ask(`/note ${d} ""`, `/note ${d} "`.length) });
+      add('reopen', 'Reopen', act('reopen'));
+      add('note', 'Note…', note);
+      add('inspect', 'Inspect', inspect(u.id), { sep: true });
       return items;
     }
-    if (canAttack(u)) items.push({ key: 'attack', label: 'Attack…', act: ask(`/attack ${d} `) });
-    items.push({ key: 'move', label: 'Move…', act: ask(`/move ${d} to `) });
-    items.push({ key: 'due', label: 'Due date…', act: ask(`/due ${d} `) });
-    items.push({ key: 'note', label: 'Note…', act: ask(`/note ${d} ""`, `/note ${d} "`.length) });
+    add('attack', 'Attack…', () => { ui.compose = { unit: u.id, verb: 'attack' }; }, { shift: ask(`/attack ${d} `) });
+    add('move', 'Move…', ask(`/move ${d} to `));
+    add('due', 'Due date…', ask(`/due ${d} `));
+    add('note', 'Note…', note);
     const first = items.length;
-    if (!threat) items.push(u.lifecycle === 'blocked'
-      ? { key: 'unblock', label: 'Unblock', act: act('unblock') }
-      : { key: 'block', label: 'Block…', act: ask(`/block ${d} by ""`, `/block ${d} by "`.length) });
-    if (u.posOverride) items.push({ key: 'unpin', label: 'Unpin', act: act('unpin') });
-    if (doc.orders.some(o => o.from === u.id)) items.push({ key: 'halt', label: 'Halt orders', act: act('halt') });
-    items.push({ key: 'key', label: u.keyTerrain ? 'Clear key terrain' : 'Mark key terrain', act: act('key') });
+    add('unblock', 'Unblock', act('unblock'));
+    add('block', 'Block…', ask(`/block ${d} by ""`, `/block ${d} by "`.length));
+    add('unpin', 'Unpin', act('unpin'));
+    if (doc.orders.some(o => o.from === u.id)) add('halt', 'Halt orders', act('halt'));
+    add('key', u.keyTerrain ? 'Clear key terrain' : 'Mark key terrain', act('key'));
     if (items[first]) items[first].sep = true;
-    items.push({ key: 'done', label: threat ? 'Destroyed' : 'Done', act: act('done'), sep: true });
-    items.push({ key: 'drop', label: threat ? 'Bypassed' : 'Drop', act: act('drop', threat ? { bypassed: true } : {}), warn: true });
+    add('done', threat ? 'Destroyed' : 'Done', act('done'), { sep: true });
+    add('drop', threat ? 'Bypassed' : 'Drop', act('drop', threat ? { bypassed: true } : {}), { warn: true, code: threat ? '/drop … bypassed' : '/drop' });
+    add('inspect', 'Inspect', inspect(u.id), { sep: true });
     return items;
   }
-  function chooseUnitItem(item: MenuItem) {
-    item.act();
+  function chooseUnitItem(item: MenuItem, e?: MouseEvent) {
+    if (e?.shiftKey && item.shift) item.shift(); else item.act();
     unitMenu = null;
   }
   function unitMenuKey(e: KeyboardEvent) {
@@ -524,6 +646,36 @@
     const m = captureMenu;
     captureMenu = null;
     if (m) oncontextnew?.(m.ctx, identity);
+  }
+  function chooseCreate(kind: 'area' | 'pl') {
+    const m = captureMenu;
+    captureMenu = null;
+    if (m) oncreate?.(kind, m.ctx);
+  }
+
+  // ---------- the area card: shortcuts into the area's sidebar view ----------
+  type CardItem = { key: string; label: string; code: string; why: string | null; act: () => void };
+  function cardItems(m: NonNullable<typeof cardMeasure>): CardItem[] {
+    const o = { kind: 'area' as const, measure: m };
+    const join = slotFor(m.type, 'join', 'area'), near = slotFor(m.type, 'near', 'area'), attack = slotFor('attack', undefined, 'area');
+    const why = (e: typeof join) => { const r = e ? enabledFor(e, o, doc) : true; return r === true ? null : r; };
+    // Join, Near and Attack open the area's view and start the same flow as its sidebar control.
+    const flow = (f: AreaFlow['flow']) => () => { selectObject({ kind: 'measure', id: m.id }); oninspect?.(m.id, 'full'); ui.areaFlow = { measure: m.id, flow: f }; };
+    return [
+      { key: 'inspect', label: 'Open in sidebar', code: '', why: null, act: () => { selectObject({ kind: 'measure', id: m.id }); oninspect?.(m.id, 'full'); } },
+      { key: 'join', label: 'Join units…', code: join ? verbCode(join) : '', why: why(join), act: flow('join') },
+      { key: 'near', label: 'Near…', code: near ? verbCode(near) : '', why: why(near), act: flow('near') },
+      { key: 'attack', label: 'Attack it…', code: attack ? verbCode(attack) : '', why: why(attack), act: flow('order') },
+    ];
+  }
+  /** Remove drops the orders onto the area: with any, it asks first and names how many. */
+  let cardConfirm = $state(false);
+  $effect(() => { void measureCard?.id; cardConfirm = false; });
+  const cardTargeting = $derived(cardMeasure ? doc.orders.filter(o => o.to === cardMeasure.id) : []);
+  function cardRemove(id: string, type: string) {
+    if (cardTargeting.length && !cardConfirm) { cardConfirm = true; return; }
+    measureCard = null;
+    runCommand({ verb: type, args: { action: 'remove', measure: id } });
   }
 
   // ---------- withdraw animation (dropped friendlies return to HQ) ----------
@@ -554,7 +706,7 @@
 </script>
 
 <!-- A press outside the map (sidebars, bars) closes its right-click menus; the map's own presses close them too. -->
-<svelte:window onpointerdown={(e) => {
+<svelte:window onkeydowncapture={pickKey} onpointerdown={(e) => {
   const t = e.target as Element;
   if (!t.isConnected || t.closest?.('.capture-menu') || container?.contains(t)) return;
   unitMenu = null; if (!touch) captureMenu = null;
@@ -563,14 +715,15 @@
 <div class="opsmap" data-theme={theme} bind:this={container} bind:clientHeight={mapH}>
   <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
   <svg bind:this={svg} class="map-svg" role="application" aria-label="Tactical map" tabindex="-1" data-zoom={view2d.k.toFixed(4)}
-    class:dragging={drag?.moved || link}
+    class:dragging={drag?.moved || link} class:picking={picking !== null}
     onpointerdown={onPointerDown} onpointermove={onPointerMove} onpointerup={onPointerUp} onpointercancel={onPointerCancel}
     ondblclick={onDblClick} onkeydown={onMapKey} oncontextmenu={onContextMenu}>
     <g transform="translate({view2d.x} {view2d.y}) scale({view2d.k})">
       <TerrainLayer {terrain} {uid} {s} {mt} />
-      <FrameworkLayer {scene} {uid} {s} {mt} declutter={compactPl} {theme} view={doc.settings.view} activeSectorId={preview?.sectorId ?? selectedUnit?.sectorId ?? null} {onbeyond} />
+      <FrameworkLayer {scene} {uid} {s} {mt} declutter={compactPl} {theme} view={doc.settings.view} activeSectorId={preview?.sectorId ?? selectedUnit?.sectorId ?? null}
+        selectedMeasureId={selMeasureId} selectedSectorId={selSectorId} hitW={(touch ? 22 : 12) / view2d.k} {onbeyond} />
       {#if preview}<path d={preview.band} class="snap-band" />{/if}
-      <OrderLayer {scene} {s} {mt} {declutter} {moving} freshId={freshOrder} liftedId={drag?.kind === 'measure' ? lifted : null} hitW={(touch ? 24 : 12) / view2d.k} {theme} selectedId={selection.selectedId} />
+      <OrderLayer {scene} {s} {mt} {declutter} {moving} freshId={freshOrder} liftedId={drag?.kind === 'measure' ? lifted : null} hitW={(touch ? 24 : 12) / view2d.k} {theme} selectedId={selection.selectedId} pickable={pickMeasure} pickCursor={picking?.cursor?.kind === 'measure' ? picking.cursor.id : null} selectedMeasureId={selMeasureId} selectedSectorId={selSectorId} />
 
       <!-- Ghosts and trails from the last auto-advance -->
       <g class="ghosts" aria-hidden="true">
@@ -593,7 +746,8 @@
           {@const carried = moving && movingMembers.has(su.id)}
           {@const x = dragging && drag ? drag.x : carried ? su.x + moving!.dx : su.x}
           {@const y = dragging && drag ? drag.y : carried ? su.y + moving!.dy : su.y}
-          <g class="unit" class:dragging class:lifted={drag?.kind === 'unit' && lifted === su.id} class:selected={su.selected} class:link-target={link?.targetId === su.id}
+          {@const pk = pickUnit(su.id)}
+          <g class="unit" class:pick-dim={pk === false} class:pick-ok={pk === true} class:dragging class:lifted={drag?.kind === 'unit' && lifted === su.id} class:selected={su.selected} class:link-target={link?.targetId === su.id}
             class:link-valid={link?.targetId === su.id && link.valid} class:complete={su.unit.lifecycle === 'done' && su.unit.affiliation === 'friend'}
             data-unit-id={su.id} data-interactive transform="translate({x} {y})"
             role="button" tabindex="0" aria-label="{su.unit.designation}: {su.unit.title}"
@@ -611,6 +765,7 @@
               {/each}
               {#if flashId === su.id}<circle r={24 * s} class="flash" />{/if}
               {#if link?.targetId === su.id}<circle r={23 * s} class="target-ring" />{/if}
+              {#if pk}<circle r={24 * s} class="target-ring pick-ring" class:cursor={picking?.cursor?.kind === 'unit' && picking.cursor.id === su.id} />{/if}
               <rect x={-20*s} y={-24*s} width={40*s} height={48*s} fill="transparent" />
               <!-- Placed by the frame center, so an HQ's frame sits on its spot and its staff hangs below. -->
               <image pointer-events="none" href={sym.href} x={-sym.center.x * s} y={-sym.center.y * s} width={sym.width * s} height={sym.height * s} />
@@ -636,7 +791,7 @@
           {@const ex=Math.max(b.x,Math.min(b.x+b.width,su.x))}
           {@const ey=Math.max(b.y,Math.min(b.y+b.height,su.y))}
           {@const dl=Math.hypot(ex-su.x,ey-su.y)}
-          <g data-unit-id={su.id} data-interactive role="button" tabindex="-1" aria-label="{su.unit.designation} label"
+          <g data-unit-id={su.id} data-interactive class:pick-dim={pickUnit(su.id) === false} role="button" tabindex="-1" aria-label="{su.unit.designation} label"
              ondblclick={(e)=>e.stopPropagation()} onkeydown={(e)=>unitKey(e,su.id)}>
             {#if dl>22*s}
               {@const sx0=su.x+(ex-su.x)*(20*s/dl)}
@@ -657,7 +812,7 @@
       </g>
 
       <!-- Edge handle: drag onto a hostile to attack. Touch: a 44 px target below the symbol. -->
-      {#if selectedUnit && canAttack(selectedUnit) && !drag?.moved && !lifted}
+      {#if selectedUnit && canAttack(selectedUnit) && !drag?.moved && !lifted && !picking}
         {@const su = scene.units.find(u => u.id === selectedUnit.id)}
         {#if su}
           {@const dot = touch ? 11 / view2d.k : 6 * s}
@@ -694,7 +849,9 @@
   {#if measureCard && cardMeasure}
     {@const mm = cardMeasure}
     {@const sec = cardSector}
-      <div class="capture-menu measure-card" role="dialog" aria-label="{mm.type.toUpperCase()} {mm.name}" data-testid="measure-card" bind:offsetHeight={cardH} style="left:{measureCard.x}px; top:{Math.max(8, Math.min(measureCard.y, mapH - (insets?.bottom ?? 0) - cardH - 8))}px">
+      <div class="capture-menu measure-card" role="dialog" aria-label="{mm.type.toUpperCase()} {mm.name}" data-testid="measure-card" tabindex="-1" bind:offsetHeight={cardH}
+        onpointerdowncapture={() => (cardFresh = false)} onclickcapture={(e) => { if (cardFresh && e.detail > 0) { e.preventDefault(); e.stopPropagation(); } cardFresh = false; }}
+        onkeydown={(e) => { if (e.key === 'Escape') { e.stopPropagation(); measureCard = null; svg?.focus(); } }} style="left:{measureCard.x}px; top:{cardTop(measureCard.y)}px; max-height:{cardMax}px">
         <div class="cm-title"><b>{mm.type.toUpperCase()}</b> {mm.name}</div>
         <div class="cm-meta">{({ obj: 'Objective', ea: 'Engagement area', nai: 'Named area of interest', pl: 'Phase line' })[mm.type]}{sec ? ` · ${sec.name}` : ''}{mm.pos ? ` · ${RING_NAME[ringOfRadius(mm.pos.r)]} ring` : ''}</div>
         <div class="cm-meta">{touch ? 'Long-press and drag to move it.' : 'Drag its outline or label to move it.'} Or: /{mm.type} move {mm.name} ‹ring›</div>
@@ -704,12 +861,26 @@
           <div class="cm-sizes" role="radiogroup" aria-label="Minimum size">
             {#each AREA_SIZE_NAMES as key (key)}
               <button class="btn" role="radio" aria-checked={areaSizeName(mm.size) === key} class:on={areaSizeName(mm.size) === key} data-size={key}
-                onclick={() => { if (areaSizeName(mm.size) !== key) run({ verb: mm.type, args: { action: 'size', measure: mm.id, size: key } }); }}>{key === 'xl' ? 'XL' : key[0].toUpperCase() + key.slice(1)}</button>
+                title={tryFormat({ verb: mm.type, args: { action: 'size', measure: mm.id, size: key } }, doc)}
+                onclick={() => { if (areaSizeName(mm.size) !== key) runCommand({ verb: mm.type, args: { action: 'size', measure: mm.id, size: key } }); }}>{key === 'xl' ? 'XL' : key[0].toUpperCase() + key.slice(1)}</button>
+            {/each}
+          </div>
+          <div class="cm-items">
+            {#each cardItems(mm) as item (item.key)}
+              <button class="btn cm-item" data-action={item.key} aria-disabled={item.why ? 'true' : undefined} title={item.why ?? (item.code || undefined)}
+                onclick={() => { if (item.why) return; measureCard = null; item.act(); }}>
+                <span>{item.label}</span>{#if item.code}<code class="cm-code">{item.code}</code>{/if}
+              </button>
             {/each}
           </div>
         {/if}
-        <button class="btn warn" onclick={() => { const cmd = { verb: mm.type, args: { action: 'remove', measure: mm.id } }; measureCard = null; run(cmd); }}>Remove</button>
-        <button class="btn" onclick={() => (measureCard = null)}>Close</button>
+        {#if cardConfirm}
+          <div class="cm-meta cm-confirm" role="alert">Remove it? It drops {cardTargeting.length} order{cardTargeting.length === 1 ? '' : 's'} on it. Undo (Ctrl+Z) restores them.</div>
+        {/if}
+        <div class="cm-foot">
+          <button class="btn warn" title={tryFormat({ verb: mm.type, args: { action: 'remove', measure: mm.id } }, doc)} onclick={() => cardRemove(mm.id, mm.type)}>Remove</button>
+          <button class="btn" onclick={() => (measureCard = null)}>{cardConfirm ? 'Keep' : 'Close'}</button>
+        </div>
       </div>
   {/if}
   {#if unitMenu && menuUnit}
@@ -721,7 +892,8 @@
       <div class="cm-title"><b>{u.designation}</b> {u.title}</div>
       {#each unitMenuItems(u) as item (item.key)}
         {#if item.sep}<div class="cm-sep" role="separator"></div>{/if}
-        <button class="btn" class:warn={item.warn} role="menuitem" tabindex="-1" data-action={item.key} onclick={() => chooseUnitItem(item)}>{item.label}</button>
+        <button class="btn" class:warn={item.warn} role="menuitem" tabindex="-1" data-action={item.key} title={item.shift ? 'Shift+click: fill the command bar instead' : undefined}
+          onclick={(e) => chooseUnitItem(item, e)}><span class="cm-label">{item.label}</span>{#if item.code}<code class="cm-code" aria-hidden="true">{item.code}</code>{/if}</button>
       {/each}
     </div>
   {/if}
@@ -735,6 +907,10 @@
       <button class="btn" role="menuitem" onclick={() => chooseCapture()}>New unit</button>
       <button class="btn" role="menuitem" onclick={() => chooseCapture('hostile')}>New problem (hostile)</button>
       <button class="btn" role="menuitem" onclick={() => chooseCapture('hostile hq')}>New hostile HQ</button>
+      {#if oncreate}
+        <button class="btn" role="menuitem" data-action="new-area" onclick={() => chooseCreate('area')}>New OBJ / EA / NAI here…</button>
+        <button class="btn" role="menuitem" data-action="new-pl" onclick={() => chooseCreate('pl')}>New phase line…</button>
+      {/if}
       <button class="btn" role="menuitem" onclick={() => (captureMenu = null)}>Cancel</button>
     </div>
   {/if}
@@ -830,20 +1006,29 @@
   .capture-menu { position:absolute; z-index:4; width:220px; display:flex; flex-direction:column; gap:4px; padding:8px; background:var(--om-panel); color:var(--om-ink); border:2px solid var(--om-ink); box-shadow:0 4px 16px rgba(0,0,0,0.25); }
   .capture-menu .btn { height:44px; justify-content:center; }
   /* Desktop menus (right-click): compact rows, left-aligned, keyboard focus visible. */
-  .desk-menu { gap:0; padding:4px; }
+  .desk-menu { gap:0; padding:4px; width:248px; }
   .desk-menu .btn { height:28px; justify-content:flex-start; border-color:transparent; background:transparent; padding:0 8px; }
   .desk-menu .btn:hover, .desk-menu .btn:focus-visible { background:var(--om-ink); color:var(--om-panel); outline:none; }
   .desk-menu .btn.warn { color:var(--om-hostile); }
   .desk-menu .btn.warn:hover, .desk-menu .btn.warn:focus-visible { background:var(--om-hostile); color:#fff; }
   .desk-menu .cm-title { padding:4px 8px 6px; border-bottom:1px solid var(--om-ink-soft); margin-bottom:4px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; text-transform:none; letter-spacing:0.02em; }
+  .desk-menu .cm-label { flex:1; text-align:left; }
+  .desk-menu .cm-code { margin-left:12px; font:400 11px/1 var(--om-font); letter-spacing:0; text-transform:none; opacity:0.75; }
   .cm-sep { height:1px; margin:4px 2px; background:var(--om-ink-soft); opacity:0.5; }
   .cm-title { font:600 12px/1.3 var(--om-font-cond); letter-spacing:0.08em; text-transform:uppercase; padding:2px 2px 4px; }
-  .measure-card { width: 240px; }
+  .measure-card { width: 240px; overflow-y: auto; overscroll-behavior: contain; }
+  /* Remove and Close stay in reach at the bottom of a card that scrolls. */
+  .cm-foot { position: sticky; bottom: -8px; display: flex; flex-direction: column; gap: 4px; margin-bottom: -8px; padding: 4px 0 8px; background: var(--om-panel); }
   .cm-meta { font: 12px/1.35 var(--om-font); padding: 0 2px 4px; }
   .cm-sizes { display:flex; margin: 2px 0 6px; }
   .cm-sizes .btn { flex:1; height:32px; padding:0 4px; }
   .cm-sizes .btn + .btn { margin-left:-1px; }
   .cm-sizes .btn.on { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+  .cm-items { display:flex; flex-direction:column; gap:4px; margin-bottom:4px; }
+  .capture-menu .cm-item { height:36px; justify-content:space-between; gap:8px; }
+  .cm-item[aria-disabled='true'] { opacity:0.45; cursor:default; }
+  .cm-code { font:400 11px/1 var(--om-font); text-transform:none; letter-spacing:0; opacity:0.75; }
+  .cm-confirm { border-left:3px solid var(--om-hostile); padding-left:6px; }
   .map-svg { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
   .map-svg:active { cursor: grabbing; }
   .map-svg.dragging { cursor: grabbing; }
@@ -860,6 +1045,11 @@
   .hover-ring { fill: none; stroke: var(--om-select); stroke-width: 1; opacity: 0.6; }
   .target-ring { fill: none; stroke: var(--om-ink-soft); stroke-width: 2; }
   .unit.link-valid .target-ring { stroke: var(--om-hostile); }
+  .unit.pick-dim, .unit-labels .pick-dim { opacity: 0.3; }
+  .unit.pick-ok { cursor: crosshair; }
+  .target-ring.pick-ring { stroke: var(--om-select); stroke-width: 2.5; }
+  .target-ring.pick-ring.cursor { stroke-width: 4.5; }
+  .map-svg.picking { cursor: crosshair; }
   .flash { fill: none; stroke: var(--om-select); stroke-width: 3; transform-box: fill-box; transform-origin: center; animation: flash 0.6s ease-out 3; }
   .pulse { fill: var(--om-hostile); opacity: 0; transform-box: fill-box; transform-origin: center; animation: pulse 2.4s ease-out infinite; pointer-events: none; }
   .pin { fill: none; stroke: var(--om-ink); stroke-width: 1.4; }

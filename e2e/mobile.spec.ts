@@ -303,7 +303,17 @@ test('long-press drags an NAI to new ground, and it stays there after reload', a
   await page.waitForTimeout(300);
   await longPress(page, t, await measurePoint(page, 'nai-benefits'));
   await t.up();
-  await expect(page.getByTestId('measure-card')).toContainText('BENEFITS ENROLLMENT');
+  const card = page.getByTestId('measure-card');
+  await expect(card).toContainText('BENEFITS ENROLLMENT');
+  // The card stays above the sheet: Remove and Close are in reach, not under it.
+  for (const name of ['Remove', 'Close']) {
+    const button = card.getByRole('button', { name, exact: true });
+    await expect(button).toBeInViewport();
+    await expect.poll(async () => {
+      const b = (await button.boundingBox())!, sheet = (await page.getByTestId('sheet').boundingBox())!;
+      return b.y + b.height <= sheet.y;
+    }).toBe(true);
+  }
 });
 
 test('a pinch on the top bar or the command bar never zooms the page (real touch)', async ({ page, browserName }) => {
@@ -361,6 +371,66 @@ test('a pending unit gets identity and effort chips; the menu inbox opens the si
   await expect(page.getByTestId('triage-identity')).toHaveCount(0);
 });
 
+test('the composer opens the sheet at full; a map pick drops it to peek and back; Run matches the bar', async ({ page, browserName }) => {
+  const t = await touchFor(page, browserName);
+  const sheet = page.getByTestId('sheet');
+  await tap(t, await unitAt(page, 'records'));
+  await expect(sheet).toHaveAttribute('data-size', 'peek');
+  await page.getByTestId('unit-order').click();
+  await expect(sheet).toHaveAttribute('data-size', 'full');
+  const composer = page.getByTestId('composer');
+  await expect(composer).toBeVisible();
+  // The preview and Run / To bar / Cancel stay pinned in view, 44 px tall.
+  await expect(composer.getByTestId('composer-preview')).toBeInViewport();
+  const run = composer.getByTestId('composer-run');
+  await expect(run).toBeInViewport();
+  expect((await run.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+
+  // Long-press a control: its command in a bubble, nothing runs.
+  const moving = composer.locator('[data-verb="moving"]');
+  await moving.dispatchEvent('pointerdown', { pointerType: 'touch', button: 0, isPrimary: true });
+  await expect(page.getByTestId('cmd-bubble')).toContainText('/moving');
+  await moving.dispatchEvent('pointerup', { pointerType: 'touch', button: 0, isPrimary: true });
+  await expect(composer.locator('[data-verb="attack"]')).toHaveAttribute('aria-checked', 'true');
+
+  // A control low in the sheet scrolls the sheet body, never the app shell (the top bar stays in place).
+  const appScroll = () => page.locator('.app').evaluate(el => el.scrollTop);
+  const planned = composer.getByTestId('composer-planned');
+  await planned.focus();
+  await page.keyboard.press('Space');
+  await expect(planned).toBeChecked();
+  expect(await appScroll()).toBe(0);
+  await page.keyboard.press('Space');
+  await expect(planned).not.toBeChecked();
+
+  // Map: the sheet drops to the pick banner at peek; a tap on a ringed threat picks it; the sheet returns to full.
+  await composer.getByTestId('composer-pick-map').click();
+  await expect(sheet).toHaveAttribute('data-size', 'peek');
+  const banner = page.getByTestId('pick-banner');
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText('/attack RECORDS');
+  await page.waitForTimeout(250);
+  await tap(t, await unitAt(page, 'leak'));
+  await expect(banner).toHaveCount(0);
+  await expect(sheet).toHaveAttribute('data-size', 'full');
+  await expect(composer.getByTestId('composer-target')).toHaveValue('LEAK');
+  await expect(composer.getByTestId('composer-preview')).toContainText('/attack RECORDS LEAK');
+  await run.click();
+  await expect(composer).toHaveCount(0);
+  expect(await appScroll()).toBe(0);
+  const preview = page.getByTestId('command-preview');
+  await expect(preview).toContainText('✓');
+  const line = (await preview.innerText()).trim();
+  const input = page.getByTestId('command-input');
+  for (const text of ['/undo', '/attack RECORDS LEAK']) {
+    await input.click();
+    await input.fill(text);
+    await page.getByTestId('command-send').click();
+    await expect(input).toHaveValue('');
+  }
+  await expect(preview).toHaveText(line);
+});
+
 test('landscape phone: the sheet is a side column and the map keeps the full height', async ({ page }) => {
   const vp = page.viewportSize()!;
   await page.setViewportSize({ width: vp.height, height: vp.width });
@@ -374,4 +444,122 @@ test('landscape phone: the sheet is a side column and the map keeps the full hei
   expect(svg.height).toBeGreaterThanOrEqual(vh - 1);
   const m = await page.evaluate(() => ({ sw: document.scrollingElement!.scrollWidth, iw: innerWidth }));
   expect(m.sw).toBeLessThanOrEqual(m.iw);
+});
+
+/** Run text in the docked bar, then leave the bar so the sheet shows again. */
+async function bar(page: Page, text: string) {
+  const input = page.getByTestId('command-input');
+  await input.click();
+  await input.fill(text);
+  await expect(page.getByTestId('command-preview')).toContainText('▸');
+  await page.getByTestId('command-send').click();
+  await expect(input).toHaveValue('');
+  await expect(page.getByTestId('command-preview')).toContainText('✓');
+  await input.blur();
+}
+/** The control's log line equals the one the same text gives in the bar. */
+async function sameAsBar(page: Page, text: string) {
+  const preview = page.getByTestId('command-preview');
+  const fromControl = (await preview.innerText()).trim();
+  await bar(page, '/undo');
+  await bar(page, text);
+  await expect(preview).toHaveText(fromControl);
+}
+
+test('peek is 176 px for a unit, an area, a phase line and a sector (284 with triage), with one filled verb and More', async ({ page, browserName }) => {
+  const t = await touchFor(page, browserName);
+  const sheet = page.getByTestId('sheet'), tab = page.getByTestId('sheet-tab-info'), inspector = page.getByTestId('inspector');
+  const height = async () => Math.round((await sheet.boundingBox())!.height);
+  await tap(t, await unitAt(page, 'knee'));
+  await expect(sheet).toHaveAttribute('data-size', 'peek');
+  await expect.poll(height).toBe(176);
+  // A unit: + Order filled, one outlined action, then More; Block and Drop wait under More.
+  const actions = inspector.getByTestId('unit-actions');
+  await expect(actions.getByTestId('unit-order')).toHaveClass(/primary/);
+  await expect(actions.getByTestId('unit-order')).toBeInViewport();
+  await expect(actions.locator('button.btn')).toHaveCount(2);
+  await expect(actions.getByTestId('peek-more')).toBeInViewport();
+
+  // An area: a tap selects it and opens its peek (no card); the tab names it.
+  await tap(t, await measurePoint(page, 'obj-settled'));
+  await expect(inspector).toHaveAttribute('data-kind', 'area');
+  await expect(page.getByTestId('measure-card')).toHaveCount(0);
+  await expect(tab).toContainText('OBJ');
+  await expect(tab).toContainText('SETTLED IN');
+  await expect.poll(height).toBe(176);
+  await expect(inspector.getByTestId('view-status')).toBeInViewport();
+  await expect(inspector.getByTestId('measure-order')).toBeInViewport();
+  await expect(inspector.getByTestId('measure-order')).toHaveClass(/primary/);
+  const more = inspector.getByTestId('peek-more');
+  await expect(more).toBeInViewport();
+  await expect(more).toHaveCSS('border-top-style', 'none');
+  await expect(more).toHaveCSS('text-decoration-line', 'underline');
+
+  await bar(page, '/find pl LAUNCH');
+  await expect(inspector).toHaveAttribute('data-kind', 'pl');
+  await expect(tab).toContainText('PL');
+  await expect.poll(height).toBe(176);
+  await expect(inspector.getByTestId('pl-redate')).toBeInViewport();
+
+  await bar(page, '/find sector Work');
+  await expect(inspector).toHaveAttribute('data-kind', 'sector');
+  await expect(tab).toContainText('SEC');
+  await expect.poll(height).toBe(176);
+  await expect(inspector.getByTestId('new-unit-open')).toBeInViewport();
+
+  // A pending unit adds its triage chips.
+  await tap(t, await unitAt(page, 'tools'));
+  await expect(inspector).toHaveAttribute('data-kind', 'unit');
+  await expect.poll(height).toBe(284);
+  // More opens half, where Block and Drop are back.
+  await actions.getByTestId('peek-more').click();
+  await expect(sheet).toHaveAttribute('data-size', 'half');
+  await expect(actions.getByTestId('unit-drop')).toBeVisible();
+  await expect(actions.getByTestId('peek-more')).toHaveCount(0);
+});
+
+test('phone area view: More opens half with section chips; join two units at once; size it', async ({ page, browserName }) => {
+  const t = await touchFor(page, browserName);
+  const sheet = page.getByTestId('sheet'), inspector = page.getByTestId('inspector');
+  await tap(t, await measurePoint(page, 'obj-settled'));
+  await inspector.getByTestId('peek-more').click();
+  await expect(sheet).toHaveAttribute('data-size', 'half');
+  const chips = inspector.getByTestId('section-index');
+  await expect(chips).toContainText('Place');
+  await expect(chips).toContainText('Manage');
+  await chips.getByRole('button', { name: /Members/ }).click();
+  await expect(inspector.getByTestId('section-members')).toBeInViewport();
+  await inspector.getByTestId('measure-join-open').click();
+  const list = inspector.getByTestId('measure-join-list');
+  await list.getByRole('checkbox', { name: /PACKING/ }).check();
+  await list.getByRole('checkbox', { name: /RECORDS/ }).check();
+  await inspector.getByTestId('measure-join').click();
+  await expect(page.getByTestId('command-preview')).toContainText('JOINED OBJ SETTLED IN');
+  await expect(inspector.getByTestId('area-members')).toContainText('PACKING');
+  await sameAsBar(page, '/obj join "SETTLED IN" PACKING RECORDS');
+  await inspector.getByTestId('measure-size').getByRole('radio', { name: 'XL' }).click();
+  await expect(page.getByTestId('command-preview')).toContainText('OBJ SETTLED IN SIZE XL');
+  await sameAsBar(page, '/obj size "SETTLED IN" xl');
+});
+
+test('phone phase line and sector views: re-date with the ring note, set a width', async ({ page }) => {
+  const sheet = page.getByTestId('sheet'), inspector = page.getByTestId('inspector');
+  const day = (days: number) => new Date(Date.now() + days * 86400000).toISOString().slice(0, 10);
+  await bar(page, '/find pl LAUNCH');
+  await inspector.getByTestId('peek-more').click();
+  await expect(sheet).toHaveAttribute('data-size', 'half');
+  const date = inspector.getByTestId('pl-date');
+  await date.fill(day(5));
+  await expect(inspector.getByTestId('pl-ring')).toHaveText('Lands in the Close ring.');
+  await date.blur();
+  await expect(page.getByTestId('command-preview')).toContainText(`PL LAUNCH DATED ${day(5)}`);
+  await sameAsBar(page, `/pl date LAUNCH ${day(5)}`);
+
+  await bar(page, '/find sector Work');
+  await expect(inspector).toHaveAttribute('data-kind', 'sector');
+  await inspector.getByTestId('sector-width').fill('100');
+  await expect(inspector.getByTestId('sector-width-note')).toContainText('Others scale to share 260°');
+  await inspector.getByTestId('sector-width-set').click();
+  await expect(page.getByTestId('command-preview')).toContainText('SECTOR WIDTH');
+  await sameAsBar(page, '/sector width Work 100');
 });

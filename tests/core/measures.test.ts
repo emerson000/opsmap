@@ -56,10 +56,10 @@ describe('control measure move (/obj, /ea, /nai move)', () => {
   });
   it('suggests move, measure names and rings', () => {
     const doc = seedDoc(now);
-    expect(suggest('/nai ', 5, doc).items.map(i => i.insert)).toEqual(['add', 'move', 'join', 'leave', 'size', 'remove']);
+    expect(suggest('/nai ', 5, doc).items.map(i => i.insert)).toEqual(['add', 'move', 'join', 'leave', 'size', 'rename', 'remove']);
     expect(suggest('/nai move ', 10, doc).items.map(i => i.label)).toEqual(['NAI BENEFITS ENROLLMENT']);
     expect(suggest('/nai move BENEFITS ', 19, doc).items.map(i => i.insert)).toEqual(['to', 'hq', 'near', 'mid', 'far']);
-    expect(suggest('/pl ', 4, doc).items.map(i => i.insert)).toEqual(['add', 'date', 'remove']);
+    expect(suggest('/pl ', 4, doc).items.map(i => i.insert)).toEqual(['add', 'date', 'rename', 'remove']);
   });
 });
 
@@ -107,5 +107,40 @@ describe('plain ring words and attack suggestions', () => {
     const doc = seedDoc(now);
     const first = suggest('/attack ', 8, doc).items.slice(0, 5).map(i => doc.units.find(u => u.id === i.unitId)?.affiliation);
     expect(first.every(a => a === 'friend' || a === 'assumed')).toBe(true);
+  });
+});
+
+describe('control measure rename and find (/obj|ea|nai|pl rename, /find)', () => {
+  it('renames an area or a phase line, keeping its orders', () => {
+    const doc = seedDoc(now);
+    expect(cmd('/obj rename "SETTLED IN" "MOVED IN"', doc).args).toEqual({ action: 'rename', measure: 'obj-settled', name: 'MOVED IN' });
+    const r = ok(apply(doc, cmd('/obj rename "SETTLED IN" "moved in"', doc), now));
+    expect(r.log).toBe('OBJ SETTLED IN RENAMED → MOVED IN');
+    expect(r.doc.measures.find(m => m.id === 'obj-settled')!.name).toBe('MOVED IN');
+    expect(r.doc.orders.find(o => o.id === 'o-move-axis')!.to).toBe('obj-settled');
+    expect(ok(apply(doc, cmd('/pl rename LAUNCH "GO LIVE"', doc), now)).log).toBe('PL LAUNCH RENAMED → GO LIVE');
+  });
+  it('refuses an unquoted, unchanged or taken name and the wrong type', () => {
+    const doc = seedDoc(now);
+    expect(parse('/pl rename LAUNCH LIFTOFF', doc, { now })).toMatchObject({ ok: false, error: 'Quote the new name' });
+    expect(parse('/ea rename SATURDAY "saturday"', doc, { now })).toMatchObject({ ok: false, error: 'EA SATURDAY is already named SATURDAY' });
+    expect(parse('/obj rename SATURDAY "X"', doc, { now }).ok).toBe(false);
+    const two = ok(apply(doc, cmd('/obj add "HOME BASE" in Family', doc), now)).doc;
+    expect(parse('/obj rename "HOME BASE" "SETTLED IN"', two, { now })).toMatchObject({ ok: false, error: 'Control measure already exists' });
+  });
+  it('finds a unit, a control measure or a sector', () => {
+    const doc = seedDoc(now);
+    expect(cmd('/find OBJ "SETTLED IN"', doc).args).toEqual({ measure: 'obj-settled' });
+    expect(cmd('/find pl launch', doc).args).toEqual({ measure: 'pl-launch' });
+    expect(cmd('/find sector Household', doc).args).toEqual({ sectorId: 'household' });
+    expect(cmd('/find IRS', doc).args).toEqual({ unit: 'irs' });
+    expect(parse('/find OBJ "SETTLED IN"', doc, { now })).toMatchObject({ ok: true, preview: 'LOCATE OBJ SETTLED IN' });
+    expect(parse('/find sector work', doc, { now })).toMatchObject({ ok: true, preview: 'LOCATE SECTOR WORK' });
+    expect(parse('/find ea LAUNCH', doc, { now }).ok).toBe(false);
+    expect(suggest('/find ', 6, doc).items.map(s => s.insert)).toEqual(expect.arrayContaining(['obj', 'pl', 'sector', 'IRS']));
+    expect(suggest('/find obj ', 10, doc).items.map(s => s.insert)).toEqual(['"SETTLED IN"']);
+    expect(suggest('/find sector ', 13, doc).items.map(s => s.insert)).toContain('Household');
+    expect(suggest('/pl ', 4, doc).items.map(s => s.insert)).toContain('rename');
+    expect(suggest('/obj rename ', 12, doc).items.map(s => s.insert)).toEqual(['"SETTLED IN"']);
   });
 });

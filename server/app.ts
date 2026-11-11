@@ -68,7 +68,7 @@ export function createApp(config:Config) {
     limit.at=Date.now();if(!limit.bucket.take())return c.json({error:'Rate limit exceeded'},429);
     try {
       const text=await boundedText(c.req.raw,128*1024);
-      return await mcpRequest(new Request(c.req.url,{method:'POST',headers:c.req.raw.headers,body:text}),maps,identity.user,identity,vikunja);
+      return await mcpRequest(new Request(c.req.url,{method:'POST',headers:c.req.raw.headers,body:text}),maps,identity.user,identity,vikunja,auth.admin(identity.user));
     }catch{return c.json({error:'Invalid MCP request'},400);}
   });
   app.all('/mcp',c=>c.text('Method not allowed',405));
