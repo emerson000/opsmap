@@ -4,6 +4,7 @@ import type { Doc } from '../../core/model/types';
 import { importJson } from '../../core/model/json';
 import { setDoc } from '../model/store.svelte';
 import { useRemote } from '../commands/dispatch';
+import { features } from '../model/features.svelte';
 import { clearRecent } from '../commands/recent.svelte';
 import { STORAGE_KEY as V1_KEY } from '../model/persist';
 import { lastResult, toast } from '../ui/shell.svelte';
@@ -88,6 +89,7 @@ function mirror(): void {
   live.online = engine.presence;
   live.users = Object.fromEntries(engine.users);
   if (engine.maps.length) live.maps = engine.maps;
+  if ((engine.vikunja?.url ?? null) !== (features.vikunja?.url ?? null)) features.vikunja = engine.vikunja;
   if (engine.map && engine.map !== live.mapId) { live.mapId = engine.map; remember(engine.map); }
   live.version++;
 }
@@ -193,6 +195,12 @@ function connect(map: string | undefined): void {
     submit: cmd => engine!.submit(cmd),
     request: kind => { engine!.request(kind); return { ok: true, log: `${kind.toUpperCase()} SENT` }; },
     setView: view => { prefs.view = view as View; write(VIEW_KEY, view); present(); },
+    vk: args => {
+      void engine!.vk(args).then(r => {
+        if (r.ok) { lastResult.text = r.log; lastResult.ok = true; lastResult.seq++; toast(r.log, 'info'); }
+        else { lastResult.text = r.error; lastResult.ok = false; lastResult.seq++; toast(r.error); }
+      });
+    },
   });
   mirror(); present();
   engine.start();

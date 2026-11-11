@@ -1,5 +1,10 @@
 import { resolve } from 'node:path';
-export interface Config {port:number;host:string;publicUrl:string;dataDir:string;clientDir:string;devUsers:string[];adminEmails:string[];adminSubs?:string[];issuer?:string;clientId?:string;clientSecret?:string;group:string;tz?:string;}
+import { join } from 'node:path';
+export interface Config {port:number;host:string;publicUrl:string;dataDir:string;clientDir:string;devUsers:string[];adminEmails:string[];adminSubs?:string[];issuer?:string;clientId?:string;clientSecret?:string;group:string;tz?:string;
+  /** Vikunja sync: on when VIKUNJA_URL is set. Each user connects their own API token in the app. */
+  vikunja?:{url:string};
+  /** The 32-byte key that seals stored secrets (users' Vikunja tokens); created there when missing. */
+  secretKeyFile?:string;}
 export function config(env:NodeJS.ProcessEnv=process.env):Config {
   const devUsers=(env.OPSMAP_DEV_USERS??'').split(',').map(x=>x.trim()).filter(Boolean);
   if(devUsers.length&&env.NODE_ENV==='production')throw new Error('Dev users are forbidden in production');
@@ -11,7 +16,10 @@ export function config(env:NodeJS.ProcessEnv=process.env):Config {
   // Calendar zone for maps without settings.tz: OPSMAP_TZ, else the process TZ, else UTC.
   const tz=env.OPSMAP_TZ||env.TZ||'UTC';
   try{new Intl.DateTimeFormat('en',{timeZone:tz});}catch{throw new Error(`Invalid time zone: ${tz}`);}
-  return {tz,port:Number(env.PORT??8080),host:env.HOST??'127.0.0.1',publicUrl,dataDir:env.DATA_DIR??'/data',clientDir:resolve(env.CLIENT_DIR??'dist/client'),devUsers,adminSubs:(env.OPSMAP_ADMIN_SUBS??'').split(',').map(x=>x.trim()).filter(Boolean),adminEmails:(env.OPSMAP_ADMIN_EMAILS??'').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean),issuer:env.OIDC_ISSUER,clientId:env.OIDC_CLIENT_ID,clientSecret:env.OIDC_CLIENT_SECRET,group:env.OIDC_GROUP??'opsmap_users'};
+  let vikunja:Config['vikunja'];
+  if(env.VIKUNJA_URL){const u=new URL(env.VIKUNJA_URL);if(!['https:','http:'].includes(u.protocol))throw new Error('VIKUNJA_URL must be http(s)');vikunja={url:u.origin};}
+  const dataDir=env.DATA_DIR??'/data';
+  return {vikunja,secretKeyFile:env.OPSMAP_SECRET_KEY_FILE||join(dataDir,'secrets','master.key'),tz,port:Number(env.PORT??8080),host:env.HOST??'127.0.0.1',publicUrl,dataDir:env.DATA_DIR??'/data',clientDir:resolve(env.CLIENT_DIR??'dist/client'),devUsers,adminSubs:(env.OPSMAP_ADMIN_SUBS??'').split(',').map(x=>x.trim()).filter(Boolean),adminEmails:(env.OPSMAP_ADMIN_EMAILS??'').split(',').map(x=>x.trim().toLowerCase()).filter(Boolean),issuer:env.OIDC_ISSUER,clientId:env.OIDC_CLIENT_ID,clientSecret:env.OIDC_CLIENT_SECRET,group:env.OIDC_GROUP??'opsmap_users'};
 }
 
 /** Production accepts only PUBLIC_URL. Development (dev users, loopback listener only) also accepts any loopback

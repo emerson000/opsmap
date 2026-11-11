@@ -11,6 +11,8 @@ export interface SuggestOptions {
  /** Units this user commanded or selected recently, most recent first. They lead each unit list, so a chain of
   *  commands on one unit needs no typing; then units in that unit's sector, then the most recently changed. */
  recent?:readonly string[];
+ /** The server has Vikunja sync: offer /vk. */
+ vikunja?:boolean;
 }
 export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={}):{items:Suggestion[];ghost:string} {
  const prefix=input.slice(0,Math.max(0,Math.min(input.length,cursor)));
@@ -41,7 +43,9 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
  const dates=()=>['today','tmw','mon','tue','wed','thu','fri','sat','sun','eow','eom','+3d'].map(s=>keyword(s,'date'));
  let hint='';
 
- if(previous.length===0)candidates=VERBS.map(v=>({insert:v,label:`/${v}`,detail:SYNTAX[v],kind:'verb'}));
+ if(previous.length===0)candidates=VERBS.filter(v=>v!=='vk'||opts.vikunja).map(v=>({insert:v,label:`/${v}`,detail:SYNTAX[v],kind:'verb'}));
+ else if(verb==='vk'&&previous.length===1)candidates=opts.vikunja?['bind','unbind','sync','status'].map(s=>keyword(s)):[];
+ else if(verb==='vk')candidates=[];
  else if(before==='due'||(verb==='due'&&previous.length===2)||(verb==='pl'&&previous.length===3&&previous[1]?.value.toLowerCase()==='add'))candidates=dates();
  else if(before==='in'||before==='sector'||(before==='to'&&(verb==='move'||['obj','ea','nai'].includes(verb)))||before==='reassign')candidates=sectors();
  else if(verb==='size'&&previous.length===2)candidates=sizes();
@@ -103,6 +107,7 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
   if(previous.length===1){
    if(verb==='unblock')candidates=units(doc.units.filter(u=>u.lifecycle==='blocked'));
    if(verb==='unpin')candidates=units(doc.units.filter(u=>u.posOverride));
+   if(verb==='reopen')candidates=units(doc.units.filter(u=>u.lifecycle==='done'||u.lifecycle==='dropped'));
    // The attacker slot: own units first (friend, then assumed), unresolved only.
    if(verb==='attack'||verb==='moving'){const rank=(a:string)=>a==='friend'?0:a==='assumed'?1:2;candidates=units(doc.units.filter(unresolved),u=>rank(u.affiliation),true);}
    if(verb==='bda')candidates=units(doc.units.filter(unresolved),u=>-(Number(['hostile','suspect'].includes(u.affiliation))*2+Number(doc.orders.some(o=>o.to===u.id&&o.type==='attack'))));

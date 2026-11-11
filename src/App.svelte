@@ -12,6 +12,7 @@
   import OrderLog from './lib/ui/OrderLog.svelte';
   import SitrepPanel from './lib/ui/SitrepPanel.svelte';
   import Legend from './lib/ui/Legend.svelte';
+  import VikunjaAccount from './lib/ui/VikunjaAccount.svelte';
   import Toasts from './lib/ui/Toasts.svelte';
   import Login from './lib/ui/Login.svelte';
   import Sheet from './lib/ui/Sheet.svelte';
@@ -216,6 +217,9 @@
   {#if ui.sitrepOpen}
     <div class="sitrep-layer"><SitrepPanel {doc} {now} /></div>
   {/if}
+  {#if ui.vikunjaOpen}
+    <div class="sitrep-layer vk-layer"><VikunjaAccount /></div>
+  {/if}
   {#if ui.legendOpen}
     <div class="legend-layer"><Legend {theme} /></div>
   {/if}
@@ -238,6 +242,7 @@
   .bar-wrap { width: 100%; max-width: 760px; pointer-events: auto; }
   .toast-layer { position: absolute; top: calc(var(--bar-h) + 8px); left: calc(var(--left-w) + 16px); right: calc(var(--right-w) + 16px); z-index: 30; }
   .sitrep-layer { position: absolute; top: calc(var(--bar-h) + 16px); left: calc(var(--left-w) + 16px); right: calc(var(--right-w) + 16px); z-index: 25; display: flex; justify-content: center; }
+  .vk-layer { z-index: 27; }
   .legend-layer { position: absolute; top: calc(var(--bar-h) + 6px); right: 12px; z-index: 26; }
 
   /* Phone: the map fills the screen; the command bar docks at the bottom (above the keyboard),
@@ -250,7 +255,7 @@
   .app.phone.kb .bottom { padding-bottom: 8px; }
   .app.phone .bar-wrap { max-width: none; }
   .app.phone .toast-layer { top: calc(var(--top-h) + 8px); left: 8px; right: 8px; }
-  .app.phone .sitrep-layer, .app.phone .legend-layer { top: calc(var(--top-h) + 8px); left: 8px; right: 8px; bottom: calc(var(--dock-h) + 8px); display: flex; justify-content: center; align-items: stretch; }
+  .app.phone .sitrep-layer, .app.phone .legend-layer, .app.phone .vk-layer { top: calc(var(--top-h) + 8px); left: 8px; right: 8px; bottom: calc(var(--dock-h) + 8px); display: flex; justify-content: center; align-items: stretch; }
   .app.phone .sitrep-layer > :global(*), .app.phone .legend-layer > :global(*) { max-height: 100%; }
   .app.phone .orientation { font-size: 13px; }
   .gest-hint { display: block; margin-top: 4px; font-weight: 600; }

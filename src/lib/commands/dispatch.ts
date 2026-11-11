@@ -3,7 +3,7 @@ import type { Command } from '../model/types';
 import { getDoc, setDoc, selection } from '../model/store.svelte';
 import { exportJson } from '../model/persist';
 import { apply } from './apply';
-import { parse } from './grammar';
+import { parse, VK_REQUESTS } from './grammar';
 import { undo, redo, record, cloneDoc, undoLabel } from './undo';
 import { sitrepText } from './sitrep';
 import { turnDetails, turnState } from './turn';
@@ -18,6 +18,8 @@ export interface Remote {
  submit(cmd:Command):{ok:true;log:string;local:boolean}|{ok:false;error:string};
  request(kind:'undo'|'redo'):{ok:true;log:string}|{ok:false;error:string};
  setView(view:string):void;
+ /** /vk bind, sync, status: answered later; the remote shows the answer. */
+ vk?(args:Record<string,unknown>):void;
 }
 let remote:Remote|null=null;
 export function useRemote(next:Remote|null):void {remote=next;}
@@ -27,6 +29,11 @@ function dispatchRemote(r:Remote,cmd:Command):DispatchResult {
  if(cmd.verb==='view'){
   if(!['commander','staff','detail'].includes(String(cmd.args.view)))return {ok:false,error:'Invalid view'};
   r.setView(String(cmd.args.view));emit();return {ok:true,log:`VIEW ${String(cmd.args.view).toUpperCase()}`};
+ }
+ if(cmd.verb==='vk'&&(VK_REQUESTS as readonly string[]).includes(String(cmd.args.action))){
+  if(!r.vk)return {ok:false,error:'Vikunja sync is not configured on this server'};
+  r.vk(cmd.args);emit();
+  return {ok:true,log:`VIKUNJA ${String(cmd.args.action).toUpperCase()}${cmd.args.name?` ${String(cmd.args.name).toUpperCase()}`:''} — asking Vikunja…`};
  }
  // Import is an admin HTTP call (POST /api/import); the shell handles both forms.
  if(cmd.verb==='import'){emit();return {ok:true,log:'IMPORT'};}

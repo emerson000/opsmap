@@ -7,7 +7,9 @@ import { sitrepText } from '../src/core/commands/sitrep';
 import { ringForRadius } from '../src/core/model/geometry';
 import type { Maps } from './maps';
 import type { User } from './db';
-export async function mcpRequest(request:Request,maps:Maps,user:User,agent?:{id:string;name:string}):Promise<Response> {
+import type { VikunjaSync } from './vikunja/sync';
+import { VK_REQUESTS } from '../src/core/commands/apply';
+export async function mcpRequest(request:Request,maps:Maps,user:User,agent?:{id:string;name:string},vikunja?:VikunjaSync):Promise<Response> {
   const server=new McpServer({name:'opsmap',version:'2.0.0'},{instructions:'There can be several shared maps; opsmap_maps lists them. Every tool takes an optional map (id or name) and uses the default (first) map without one. Use unit designations in commands. Prefer /new pending when identity is uncertain. All writes affect the shared map and are attributed to your token user.'});
   const result=(value:unknown)=>({content:[{type:'text' as const,text:JSON.stringify(value)}]});
   const map=z.string().max(128).optional().describe('Map id or name; the default map when omitted');
@@ -15,8 +17,9 @@ export async function mcpRequest(request:Request,maps:Maps,user:User,agent?:{id:
   server.registerTool('opsmap_maps',{description:'List the shared maps. The first one is the default.',inputSchema:{}},async()=>result(maps.list().map((m,i)=>({id:m.id,name:m.name,default:i===0,units:maps.get(m.id)?.doc.units.length??0}))));
   server.registerTool('opsmap_command',{description:'Execute a strict slash command on a shared map.',inputSchema:{text:z.string().min(1).max(16384),map}},async({text,map})=>{
     let hub;try{hub=maps.resolve(map);}catch(error){return failure(error);}
-    const now=new Date(),parsed=parse(text,hub.doc,{now});if(!parsed.ok)return result(parsed);
+    const now=new Date(),parsed=parse(text,hub.doc,{now,vikunja:Boolean(vikunja)});if(!parsed.ok)return result(parsed);
     try {
+      if(parsed.cmd.verb==='vk'&&vikunja&&(VK_REQUESTS as readonly string[]).includes(String(parsed.cmd.args.action)))return result({ok:true,log:await vikunja.request(hub.mapId,parsed.cmd.args,user,'mcp')});
       if(['sitrep','help','find','export'].includes(parsed.cmd.verb)) {
         if(parsed.cmd.verb==='sitrep')return result({ok:true,text:sitrepText(hub.doc,now)});
         if(parsed.cmd.verb==='help')return result(SYNTAX);

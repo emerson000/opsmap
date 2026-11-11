@@ -12,6 +12,7 @@
   import { annotate, initials, color, nameOf } from '../sync/sync.svelte';
   import { isArchived } from '../map/scene';
   import { AO_SIZES, aoScale, aoSizeName, type AoSize } from '../../core/model/geometry';
+  import { features } from '../model/features.svelte';
   import { ui, env, run, toast, type Theme } from './shell.svelte';
   import { AFFILIATIONS, AFF_LABEL, CONDITIONS, LIFECYCLE_LABEL, RINGS, band, echelonRange, orderLine, ringOf, unitLabel } from './words';
 
@@ -135,6 +136,7 @@
         <div class="desig">{unit.designation}</div>
         <div class="ttl">{unit.title}</div>
         <div class="sub">{AFF_LABEL[unit.affiliation]}{unit.cp ? ` · ${unit.cp.toUpperCase()} CP` : unit.fn === 'hq' ? ' · HQ' : ''} · {unit.presence === 'planned' ? 'planned (dashed)' : 'present'} · {LIFECYCLE_LABEL[unit.lifecycle]}</div>
+        {#if unit.vk && features.vikunja}<a class="vk-link" data-testid="vk-link" href="{features.vikunja.url}/tasks/{unit.vk}" target="_blank" rel="noopener noreferrer">Vikunja task #{unit.vk} ↗</a>{/if}
       </div>
       <button class="btn close" onclick={() => { selection.selectedId = null; }} aria-label="Close inspector">✕</button>
     </header>
@@ -362,6 +364,7 @@
 
 <style>
   .hist .by, .meta .by { display: inline-block; margin: 0 4px; padding: 0 3px; font: 700 12px/1.4 var(--font-mono); color: #fff; background: var(--who); border-radius: 2px; }
+  .vk-link { display: inline-block; margin-top: 2px; font-size: 12px; color: var(--ink); }
   .ao .seg { display: flex; margin-top: var(--s1); }
   .ao .seg .btn { flex: 1; }
   .ao .seg .btn + .btn { margin-left: -1px; }

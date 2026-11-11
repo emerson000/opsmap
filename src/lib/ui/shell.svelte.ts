@@ -19,6 +19,8 @@ export const ui = $state({
   logOpen: read(LOG_KEY) === 'open' || (read(LOG_KEY) !== 'closed' && (typeof window === 'undefined' || window.innerWidth >= 1440)),
   sitrepOpen: false,
   legendOpen: false,
+  /** The Vikunja account panel (connect an API token). */
+  vikunjaOpen: false,
   legendTab: 'symbols' as 'symbols' | 'commands' | 'gestures',
   beyondSector: null as string | null,
   /** System unless this browser chose Day or Night. */

@@ -1,23 +1,25 @@
 import type { Command, Doc, Unit } from '../model/types';
-import { apply, functions, identities, sizes } from './apply';
+import { apply, functions, identities, sizes, VK_REQUESTS } from './apply';
+export { VK_REQUESTS };
 import { AO_SIZES, AREA_SIZES } from '../model/geometry';
 import { nearestHostile, resolveMeasure, resolveSector, resolveTarget, resolveUnit } from './resolve';
 import { CommandError, parseDate, tokenize, type Token } from './tokenize';
 export type ParseResult={ok:true;cmd:Command;preview:string}|{ok:false;error:string;at:number};
-export const VERBS=['new','id','size','fn','rename','move','attack','moving','axis','advancing','bda','block','unblock','unpin','done','drop','reinforce','reduce','attach','detach','link','due','note','rate','key','cp','halt','support','sector','pl','obj','ea','nai','find','sitrep','intent','turn','view','undo','redo','export','import','sidc','help'] as const;
+export const VERBS=['new','id','size','fn','rename','move','attack','moving','axis','advancing','bda','block','unblock','unpin','reopen','done','drop','reinforce','reduce','attach','detach','link','due','note','rate','key','cp','halt','support','sector','pl','obj','ea','nai','find','sitrep','intent','turn','view','undo','redo','export','import','sidc','vk','help'] as const;
 export const aliases:Record<string,string>={n:'new','+':'new',aff:'id',ech:'size',mv:'move',atk:'attack',mov:'moving',adv:'advancing',str:'bda',x:'done',reinf:'reinforce',dtg:'due',g:'note',ao:'sector',commandpost:'cp',stop:'halt',cancel:'halt',spt:'support'};
 export const SYNTAX:Record<string,string>={
  new:'[identity] [size] [function] "‹title›" [in ‹sector›] [ring] [due ‹date›] [as ‹designation›]',
  id:'‹unit› ‹identity› [confirm]',size:'‹unit› ‹echelon›',fn:'‹unit› ‹function›',rename:'‹unit› "‹title›" [as ‹designation›]',
  move:'‹unit› [to ‹sector›] ‹ring› | ‹unit› near ‹unit›',attack:'‹unit› ‹target› [main|support] [planned]',moving:'‹unit› to ‹target|nearest hostile|hq|sector hq|‹sector› hq›',axis:'‹unit› to OBJ ‹name› [via PL ‹name›, ...]',advancing:'‹hostile› on ‹hq|sector hq|‹sector› hq|unit›',
- cp:'‹unit› ‹main|tac|alt|rear|none›',halt:'‹unit› [advance|move|attack|axis|link|support]',support:'‹friendly› ‹friendly› (any sector)',bda:'‹unit› ‹0–100%|fc|dmg|des|full›',block:'‹unit› [by "‹reason›"]',unblock:'‹unit›',unpin:'‹pinned unit›',done:'‹unit›',drop:'‹unit› [bypassed]',reinforce:'‹unit› [with ‹unit›]',reduce:'‹unit› ["‹scope cut›"]',attach:'‹unit› to ‹task force›',detach:'‹unit›',link:'‹unit› ‹unit› [as dependency|handoff]',due:'‹unit› ‹date|none›',note:'‹unit› "‹text›"',rate:'‹unit› ‹A–F›‹1–6›',key:'‹unit›',sector:'add ‹name› | rename ‹name› ‹new name› | remove ‹name› [reassign ‹sector›] | width ‹name› ‹degrees› | size ‹small|medium|large|xl›',pl:'add "‹name›" ‹date› | date ‹name› ‹date› | remove ‹name›',obj:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | join ‹name› ‹unit›… | leave ‹name› ‹unit›… | size ‹name› ‹small|medium|large|xl› | remove ‹name›',ea:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | join ‹name› ‹unit›… | leave ‹name› ‹unit›… | size ‹name› ‹small|medium|large|xl› | remove ‹name›',nai:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | join ‹name› ‹unit›… | leave ‹name› ‹unit›… | size ‹name› ‹small|medium|large|xl› | remove ‹name›',find:'‹unit›',sitrep:'[copy]',intent:'"‹one line›"',turn:'',view:'commander|staff|detail',undo:'',redo:'',export:'',import:'',sidc:'‹unit› ‹20 digits›',help:'',
+ cp:'‹unit› ‹main|tac|alt|rear|none›',halt:'‹unit› [advance|move|attack|axis|link|support]',support:'‹friendly› ‹friendly› (any sector)',bda:'‹unit› ‹0–100%|fc|dmg|des|full›',block:'‹unit› [by "‹reason›"]',unblock:'‹unit›',unpin:'‹pinned unit›',reopen:'‹done or dropped unit›',vk:'bind "‹Vikunja project›" | unbind | sync | status',done:'‹unit›',drop:'‹unit› [bypassed]',reinforce:'‹unit› [with ‹unit›]',reduce:'‹unit› ["‹scope cut›"]',attach:'‹unit› to ‹task force›',detach:'‹unit›',link:'‹unit› ‹unit› [as dependency|handoff]',due:'‹unit› ‹date|none›',note:'‹unit› "‹text›"',rate:'‹unit› ‹A–F›‹1–6›',key:'‹unit›',sector:'add ‹name› | rename ‹name› ‹new name› | remove ‹name› [reassign ‹sector›] | width ‹name› ‹degrees› | size ‹small|medium|large|xl›',pl:'add "‹name›" ‹date› | date ‹name› ‹date› | remove ‹name›',obj:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | join ‹name› ‹unit›… | leave ‹name› ‹unit›… | size ‹name› ‹small|medium|large|xl› | remove ‹name›',ea:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | join ‹name› ‹unit›… | leave ‹name› ‹unit›… | size ‹name› ‹small|medium|large|xl› | remove ‹name›',nai:'add "‹name›" in ‹sector› [ring] | move ‹name› [to ‹sector›] ‹ring› | move ‹name› near ‹unit› | join ‹name› ‹unit›… | leave ‹name› ‹unit›… | size ‹name› ‹small|medium|large|xl› | remove ‹name›',find:'‹unit›',sitrep:'[copy]',intent:'"‹one line›"',turn:'',view:'commander|staff|detail',undo:'',redo:'',export:'',import:'',sidc:'‹unit› ‹20 digits›',help:'',
 };
 const rings=['hq','near','mid','far','beyond'];
 /** The inspector's plain ring words, accepted as aliases. */
 export const ringAliases:Record<string,string>={close:'near',deep:'mid',aoi:'far'};
 const ringWord=(v:string)=>ringAliases[v.toLowerCase()]??v.toLowerCase();
 const RING_HELP='hq, near (close), mid (deep), far (aoi) or beyond';
-export interface ParseContext { selectedId?:string|null; now?:Date; }
+export interface ParseContext { selectedId?:string|null; now?:Date; /** The server has Vikunja sync configured: /vk is available. */ vikunja?:boolean; }
+
 export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult {
  const now=context.now??new Date();
  let at=0;
@@ -83,7 +85,7 @@ export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult 
    case 'advancing':{const u=subject();expect('on');a.target=target(u);break;}
    case 'bda': {subject();const t=take('strength or condition'),key=t.value.toLowerCase();if(/^\d+(?:\.\d+)?%$/.test(key))a.strength=Number(key.slice(0,-1));else{const conditions:Record<string,string>={fc:'fully-capable',dmg:'damaged',des:'destroyed',full:'full',ftc:'full',none:'none',destroyed:'destroyed',damaged:'damaged','fully-capable':'fully-capable'};a.condition=conditions[key];if(!a.condition)throw new CommandError('Expected 0–100%, fc, dmg, des, or full',t.start);}break;}
    case 'block':subject();if(eat('by'))a.note=quoted('reason');break;
-   case 'unblock':case 'unpin':case 'done':case 'detach':case 'key':case 'find':subject();break;
+   case 'unblock':case 'unpin':case 'reopen':case 'done':case 'detach':case 'key':case 'find':subject();break;
    case 'drop':subject();a.bypassed=eat('bypassed');break;
    case 'reinforce':subject();if(eat('with')){const t=take('unit');a.with=resolveUnit(t.value,doc,t.start,selected?.sectorId).id;}break;
    case 'reduce':subject();if(peek())a.note=quoted('scope cut');break;
@@ -129,6 +131,13 @@ export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult 
     }
     else throw new CommandError(`Expected ${actions}`,at);break;
    }
+   case 'vk': {
+    if(!context.vikunja)throw new CommandError('Vikunja sync is not configured on this server',first.start+1);
+    const t=take('bind, unbind, sync or status'),action=t.value.toLowerCase();a.action=action;
+    if(action==='bind')a.name=take('Vikunja project name').value;
+    else if(!['unbind','sync','status'].includes(action))throw new CommandError('Expected bind, unbind, sync or status',t.start);
+    break;
+   }
    case 'intent':a.text=quoted('intent');break;
    case 'view':a.view=take('view').value.toLowerCase();break;
    case 'sidc':subject();a.sidc=take('20-digit SIDC').value;break;
@@ -140,6 +149,11 @@ export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult 
   let canonical=verb;
   if(verb==='moving'&&doc.units.some(u=>u.id===a.target&&(u.affiliation==='hostile'||u.affiliation==='suspect')))canonical='attack';
   const cmd:Command={verb:canonical,args:a,raw:input};
+  if(verb==='vk'&&(VK_REQUESTS as readonly string[]).includes(String(a.action))){
+   if(a.action==='bind'&&doc.settings.vikunja&&doc.settings.vikunja.title.toLowerCase()!==String(a.name).toLowerCase())throw new CommandError(`Bound to ${doc.settings.vikunja.title}: /vk unbind first`,at);
+   if(a.action!=='bind'&&!doc.settings.vikunja)throw new CommandError('This map is not bound to Vikunja: /vk bind "‹project›"',at);
+   return {ok:true,cmd,preview:a.action==='bind'?`VIKUNJA BIND ${String(a.name).toUpperCase()}`:`VIKUNJA ${String(a.action).toUpperCase()}`};
+  }
   const validation=apply(doc,cmd,now);
   if('error'in validation)throw new CommandError(validation.error,at);
   return {ok:true,cmd,preview:validation.log};

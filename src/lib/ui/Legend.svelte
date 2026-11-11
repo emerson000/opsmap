@@ -1,6 +1,7 @@
 <script lang="ts">
   import { ECHELONS } from '../../core/model/echelon';
   import { VERBS, SYNTAX } from '../commands/grammar';
+  import { features } from '../model/features.svelte';
   import { sidcSymbol, type Theme } from '../map/symbols';
   import { ui } from './shell.svelte';
   import { AFFILIATIONS, RINGS } from './words';
@@ -146,7 +147,7 @@
       <p class="note">Verb first, then the unit by designation, quoted title or #id. Press / anywhere to type. Tab completes.</p>
       <table class="cmds">
         <tbody>
-          {#each VERBS as v (v)}<tr><td class="mono verb">/{v}</td><td class="mono">{SYNTAX[v]}</td></tr>{/each}
+          {#each VERBS.filter(v => v !== 'vk' || features.vikunja) as v (v)}<tr><td class="mono verb">/{v}</td><td class="mono">{SYNTAX[v]}</td></tr>{/each}
         </tbody>
       </table>
     {/if}

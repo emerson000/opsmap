@@ -6,6 +6,7 @@
   import { dispatchText } from '../commands/dispatch';
   import { recentIds, touchUnit } from '../commands/recent.svelte';
   import { selection } from '../model/store.svelte';
+  import { features } from '../model/features.svelte';
   import { tokenize } from '../../core/commands/tokenize';
   import { miniSymbol } from './mini';
   import { barRequest, lastResult, assessPrompt, write, ui, env, type Theme } from './shell.svelte';
@@ -27,7 +28,7 @@
 
   const isCommand = $derived(value.trimStart().startsWith('/'));
   const result = $derived(isCommand && value.trim().length > 1 ? parse(value, doc) : null);
-  const sug = $derived(isCommand && focused ? suggest(value, cursor, doc, { recent: recentIds(doc) }) : { items: [] as Suggestion[], ghost: '' });
+  const sug = $derived(isCommand && focused ? suggest(value, cursor, doc, { recent: recentIds(doc), vikunja: features.vikunja !== null }) : { items: [] as Suggestion[], ghost: '' });
   const items = $derived(sug.items);
   const showPop = $derived(open && focused && items.length > 0);
 

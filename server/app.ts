@@ -14,8 +14,16 @@ import { schedulerTick } from './scheduler';
 import { mcpRequest } from './mcp';
 import { Bucket } from './limit';
 import type { MapEvent } from './maps';
+import { VkTokens } from './vikunja/tokens';
+import { SecretBox } from './secrets';
+import { VikunjaSync, isLoopback } from './vikunja/sync';
+import { VK_REQUESTS } from '../src/core/commands/apply';
 export function createApp(config:Config) {
   const store=new Store(join(config.dataDir,'opsmap.db')),maps=new Maps(store,config.tz),hub=maps.default,auth=new Auth(store,config),app=new Hono();
+  // Vikunja sync when configured. Webhooks need a public (non-loopback) origin Vikunja can post to; else it polls.
+  // Each user's token is sealed with the server's secret key; a map syncs with its binder's token.
+  const vkTokens=config.vikunja?new VkTokens(store,SecretBox.fromFile(config.secretKeyFile??join(config.dataDir,'secrets','master.key')),config.vikunja.url):undefined;
+  const vikunja=config.vikunja&&vkTokens?new VikunjaSync(maps,userId=>vkTokens.api(userId),config.vikunja.url,isLoopback(config.publicUrl)?undefined:config.publicUrl):undefined;
   app.use('*',async(c,next)=>{c.header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");c.header('X-Content-Type-Options','nosniff');c.header('Referrer-Policy','same-origin');c.header('X-Frame-Options','DENY');await next();});
   app.onError((err,c)=>{console.error('Request failed',c.req.path,errorCode(err));return c.json({error:'Request failed'},500);});
   app.get('/healthz',c=>c.json({ok:true,maps:maps.hubs.size}));
@@ -60,15 +68,41 @@ export function createApp(config:Config) {
     limit.at=Date.now();if(!limit.bucket.take())return c.json({error:'Rate limit exceeded'},429);
     try {
       const text=await boundedText(c.req.raw,128*1024);
-      return await mcpRequest(new Request(c.req.url,{method:'POST',headers:c.req.raw.headers,body:text}),maps,identity.user,identity);
+      return await mcpRequest(new Request(c.req.url,{method:'POST',headers:c.req.raw.headers,body:text}),maps,identity.user,identity,vikunja);
     }catch{return c.json({error:'Invalid MCP request'},400);}
   });
   app.all('/mcp',c=>c.text('Method not allowed',405));
+  // The signed-in user's Vikunja account: whether a token is set (never the token itself), save, remove.
+  app.get('/api/vikunja/account',c=>{
+    const user=auth.current(c);if(!user)return c.json({error:'Authentication required'},401);
+    if(!vkTokens)return c.json({configured:false});
+    return c.json({configured:true,url:config.vikunja!.url,...vkTokens.account(user.id)});
+  });
+  const accountWrite=async(c:Context,run:(user:User,body:Record<string,unknown>)=>Promise<unknown>)=>{
+    const user=auth.current(c);if(!user)return c.json({error:'Authentication required'},401);
+    if(!vkTokens)return c.json({error:'Vikunja sync is not configured on this server'},404);
+    if(!originAllowed(config,c.req.header('origin'))){warnOrigin(config,c.req.header('origin'),'a Vikunja account change');return c.json({error:'Invalid origin'},403);}
+    try {
+      const text=await boundedText(c.req.raw,8*1024),body=text?JSON.parse(text):{};
+      if(!body||typeof body!=='object'||Array.isArray(body))throw new Error('Invalid request');
+      return c.json({ok:true,configured:true,url:config.vikunja!.url,...(await run(user,body) as object)});
+    }catch(error){return c.json({error:error instanceof Error?error.message:'Invalid request'},400);}
+  };
+  app.put('/api/vikunja/account',c=>accountWrite(c,async(user,body)=>vkTokens!.save(user.id,body.token)));
+  app.delete('/api/vikunja/account',c=>accountWrite(c,async user=>{vkTokens!.remove(user.id);return {connected:false};}));
+  // Vikunja webhooks: server to server, authenticated by the per-map HMAC secret, not by a session.
+  app.post('/api/vikunja/hook/:map',async c=>{
+    if(!vikunja)return c.json({error:'Not found'},404);
+    try {
+      const text=await boundedText(c.req.raw,512*1024);
+      return vikunja.webhook(c.req.param('map'),text,c.req.header('x-vikunja-signature'))?c.json({ok:true}):c.json({error:'Invalid signature'},401);
+    }catch{return c.json({error:'Invalid request'},400);}
+  });
   app.all('/api/*',c=>c.json({error:'Not found'},404));
   // Keep the SPA shell public so the client can render its login screen; APIs and sockets require auth.
   app.use('*',serveStatic({root:config.clientDir}));
   app.get('*',async(c,next)=>{if(!c.req.header('accept')?.includes('text/html'))return c.notFound();if(!existsSync(join(config.clientDir,'index.html')))return c.text('Client has not been built',503);return serveStatic({path:join(config.clientDir,'index.html')})(c,next);});
-  return {app,hub,maps,store,auth};
+  return {app,hub,maps,store,auth,vikunja};
 }
 async function boundedText(request:Request,limit:number):Promise<string> {
   const reader=request.body?.getReader();if(!reader)return '';
@@ -77,7 +111,7 @@ async function boundedText(request:Request,limit:number):Promise<string> {
   return Buffer.concat(chunks).toString('utf8');
 }
 export function startServer(config:Config,options:{schedule?:boolean}={}) {
-  const runtime=createApp(config),{app,maps,store,auth}=runtime;
+  const runtime=createApp(config),{app,maps,store,auth,vikunja}=runtime;
   const server=serve({fetch:app.fetch,port:config.port,hostname:config.host});
   const wss=new WebSocketServer({noServer:true,maxPayload:128*1024});
   const clients=new Map<WebSocket,{user:User;mapId:string;selectedId:string|null;ready:boolean;alive:boolean;cookie:string;frames:Bucket;presence:Bucket}>();
@@ -117,7 +151,7 @@ export function startServer(config:Config,options:{schedule?:boolean}={}) {
             if(!Number.isSafeInteger(msg.since)||msg.since<0||hub.mapId===msg.map&&msg.since>hub.seq)throw new Error('Invalid sequence');
             const previous=client.ready?client.mapId:undefined;
             client.ready=true;client.mapId=hub.mapId;client.selectedId=null;
-            const base={t:'welcome',me:{...user,admin:auth.admin(user)},users:store.users(),seq:hub.seq,map:hub.mapId,maps:maps.list(),...(fallback?{fallback:true}:{})};
+            const base={t:'welcome',me:{...user,admin:auth.admin(user)},users:store.users(),seq:hub.seq,map:hub.mapId,maps:maps.list(),vikunja:config.vikunja?{url:config.vikunja.url}:null,...(fallback?{fallback:true}:{})};
             // Always replace the cache on reconnect, including after a restored or forked database.
             send(ws,{...base,doc:hub.doc});presence(hub.mapId);if(previous&&previous!==hub.mapId)presence(previous);
           }else if(msg.t==='ping')send(ws,{t:'pong'});
@@ -126,6 +160,14 @@ export function startServer(config:Config,options:{schedule?:boolean}={}) {
             if(!client.presence.take())return;
             if(msg.selectedId!==null&&(typeof msg.selectedId!=='string'||msg.selectedId.length>128))throw new Error('Invalid selection');
             client.selectedId=msg.selectedId;presence(client.mapId);
+          }else if(msg.t==='vk') {
+            // /vk bind, sync, status: the server calls Vikunja, then answers this request (ops arrive as usual).
+            if(!opId)throw new Error('Request id required');
+            if(!vikunja)throw new Error('Vikunja sync is not configured on this server');
+            const args=msg.args;if(!args||typeof args!=='object'||!(VK_REQUESTS as readonly string[]).includes(String(args.action)))throw new Error('Invalid /vk request');
+            const mapId=client.mapId;
+            vikunja.request(mapId,{action:args.action,...(typeof args.name==='string'?{name:args.name.slice(0,250)}:{})},user,'web')
+              .then(log=>send(ws,{t:'vk',opId,ok:true,log}),error=>send(ws,{t:'vk',opId,ok:false,error:error instanceof Error?error.message:'Vikunja request failed'}));
           }else if(msg.t==='op'||msg.t==='undo'||msg.t==='redo') {
             if(!opId)throw new Error('Operation id required');
             const hub=maps.get(client.mapId);if(!hub)throw new Error('Map deleted');
@@ -141,9 +183,9 @@ export function startServer(config:Config,options:{schedule?:boolean}={}) {
   const heartbeat=setInterval(()=>{for(const[ws,c]of clients){if(!c.alive||!auth.session(c.cookie)){ws.terminate();continue;}c.alive=false;ws.ping();}},30000);heartbeat.unref();
   const tick=()=>{try{schedulerTick(maps,config.dataDir);}catch(error){console.error('Scheduled maintenance failed',errorCode(error));}};
   let scheduler:ReturnType<typeof setInterval>|undefined;
-  if(options.schedule!==false){tick();scheduler=setInterval(tick,60000);scheduler.unref();}
+  if(options.schedule!==false){tick();scheduler=setInterval(tick,60000);scheduler.unref();vikunja?.start();}
   const close=async()=>{
-    clearInterval(heartbeat);if(scheduler)clearInterval(scheduler);maps.listeners.delete(broadcast);
+    clearInterval(heartbeat);if(scheduler)clearInterval(scheduler);maps.listeners.delete(broadcast);await vikunja?.stop();
     for(const ws of clients.keys())ws.terminate();
     await new Promise<void>(resolve=>wss.close(()=>resolve()));
     await new Promise<void>((resolve,reject)=>server.close(error=>error?reject(error):resolve()));
