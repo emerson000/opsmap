@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Rules for coding agents working in this repository. `README.md` is the user manual; read the section for the area you change.
+Rules for coding agents working in this repository. `README.md` is the overview; the manual is in `docs/` (`user-guide.md`, `mcp.md`, `vikunja.md`, `operations.md`). Read the part for the area you change.
 
 ## Project layout
 
@@ -41,7 +41,7 @@ The command bar and the MCP server must be able to do the same things.
 3. Context that the command bar gets from the browser (the selected unit, which resolves ambiguous names and `sector hq`; the open map) must also be something an MCP caller can supply as an argument (`selected` and `map` on `opsmap_command`).
 4. Anything an MCP tool can do that is not a command (listing maps, querying units, map management) must also be possible in the browser, in the command bar or in the UI. Anything the browser can do outside the command bar (create, rename, duplicate or delete a map) must have an MCP tool with the same permission rules as the HTTP API.
 5. `tests/server/mcp-parity.test.ts` must pass. It sends the same text through the command bar path and through `opsmap_command` and compares the log, the error and the resulting document. When you add a verb, extend that test; do not add the verb to the client-only list to make the test pass unless the browser really must handle it.
-6. Update the MCP part of `README.md` and the `SYNTAX` text when a command changes. `opsmap_help` serves `SYNTAX` to agents.
+6. Update `docs/mcp.md` and the `SYNTAX` text when a command changes. `opsmap_help` serves `SYNTAX` to agents.
 
 ## Parity: the sidebar, menus and the command bar
 
@@ -56,7 +56,7 @@ The sidebar (the inspector: a column on desktop and tablet, the bottom sheet on 
 
 ## UI work
 
-- Phones (below 760 px wide), tablets (760 to 1279 px) and desktop have different layouts. Check all three when you change the UI. `README.md` describes the touch gestures and the phone sheet; do not break them.
+- Phones (below 760 px wide), tablets (760 to 1279 px) and desktop have different layouts. Check all three when you change the UI. `docs/user-guide.md` describes the touch gestures and the phone sheet; do not break them.
 - Keep the existing `data-testid` values or update the e2e tests that use them.
 - Day and Night themes both must work. Use the CSS variables, not fixed colors.
 - For a major UI change, get an independent design review before you merge.
