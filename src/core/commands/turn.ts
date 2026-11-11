@@ -36,8 +36,14 @@ export function advanceDay(original:Doc,now:Date):TurnResult {
   if(crossed.length&&u.affiliation==='hostile'&&!doc.orders.some(o=>o.type==='advance'&&o.from===u.id))doc.orders.push({id:id('o',doc.orders),type:'advance',from:u.id,to:'hq',createdAt:at});
  }
  doc.lastTurn=day;
- const log=`${trails.length} hostiles/suspects advanced${crossings.length?`, ${crossings.length} crossed ${[...new Set(crossings.map(c=>`PL ${c.pl}`))].join(', ')}`:''}`;
- if(trails.length||crossings.length)doc.log.push({id:`log${1+Math.max(0,...doc.log.map(l=>Number(l.id.replace(/^log/,''))||0))}`,at,text:log,cmd:JSON.stringify({verb:'turn',args:{trails,crossings}})});
+ // An axis of advance whose `via` phase line falls due today: the checkpoint is due.
+ const checkpoints=doc.orders.filter(o=>o.type==='axis'&&o.via?.length).flatMap(o=>{
+  const unit=doc.units.find(u=>u.id===o.from),obj=doc.measures.find(m=>m.id===o.to);
+  return (o.via??[]).map(id=>doc.measures.find(m=>m.id===id)).filter(m=>m?.date&&localDay(new Date(m.date),tz)===day)
+   .map(m=>`AXIS ${unit?.designation??o.from}: PL ${m!.name.toUpperCase()} due today (→ OBJ ${obj?.name.toUpperCase()??o.to})`);
+ });
+ const log=`${trails.length} hostiles/suspects advanced${crossings.length?`, ${crossings.length} crossed ${[...new Set(crossings.map(c=>`PL ${c.pl}`))].join(', ')}`:''}${checkpoints.length?`; ${checkpoints.join('; ')}`:''}`;
+ if(trails.length||crossings.length||checkpoints.length)doc.log.push({id:`log${1+Math.max(0,...doc.log.map(l=>Number(l.id.replace(/^log/,''))||0))}`,at,text:log,cmd:JSON.stringify({verb:'turn',args:{trails,crossings}})});
  return {doc,log,advanced:trails.length,crossings,trails};
 }
 export function staleFriendly(u:Unit,now:Date):boolean {return u.affiliation==='friend'&&u.lifecycle==='active'&&now.getTime()-Date.parse(u.updatedAt)>=3*86400000;}

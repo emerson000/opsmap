@@ -3,6 +3,8 @@ import type { Affiliation, Condition, Doc, Lifecycle, Order, Ring, Unit } from '
 import { ringOfRadius } from '../map/interaction';
 import { ECHELONS } from '../../core/model/echelon';
 import { forceRatio } from '../../core/model/forceRatio';
+import { localDay } from '../../core/model/time';
+import { shortDate } from '../map/scene';
 
 export const AFFILIATIONS: { key: Affiliation; label: string; digit: string; meaning: string }[] = [
   { key: 'pending', label: 'Pending', digit: '0', meaning: 'Captured, not looked at' },
@@ -46,13 +48,18 @@ export function unitLabel(u: Unit): string {
 }
 
 /** One line per order, from the point of view of `unitId`. */
-export function orderLine(doc: Doc, o: Order, unitId: string): { text: string; otherId: string | null; ratio?: { text: string; under: boolean } } {
+export function orderLine(doc: Doc, o: Order, unitId: string, now: Date = new Date()): { text: string; otherId: string | null; ratio?: { text: string; under: boolean } } {
   const name = (id: string) => id === 'hq' ? 'HQ' : id.startsWith('hq:') ? `${doc.sectors.find(s => s.id === id.slice(3))?.name.toUpperCase() ?? ''} HQ` : doc.units.find(u => u.id === id)?.designation ?? doc.measures.find(m => m.id === id)?.name ?? id;
   const outgoing = o.from === unitId;
   const otherId = outgoing ? o.to : o.from;
   const verb = o.type === 'attack' ? (o.role === 'main' ? 'Main attack' : 'Supporting attack')
     : o.type === 'advance' ? 'Advancing' : o.type === 'axis' ? 'Axis of advance' : o.type === 'move' ? 'Moving' : o.type === 'support' ? (outgoing ? 'Supporting' : 'Supported by') : `Linkup${o.kind ? ` (${o.kind})` : ''}`;
-  const text = outgoing ? `${verb} → ${name(o.to)}` : `${verb} ← ${name(o.from)}`;
+  // An axis names the phase lines it passes, with their dates; a date already gone is marked.
+  const via = o.type === 'axis' && o.via?.length ? ` via ${o.via.map(id => doc.measures.find(m => m.id === id)).filter(m => m?.date).map(m => {
+    const day = shortDate(new Date(m!.date!), doc.settings.tz), passed = localDay(new Date(m!.date!), doc.settings.tz) < localDay(now, doc.settings.tz);
+    return `PL ${m!.name.toUpperCase()} ${day}${passed ? ' (passed)' : ''}`;
+  }).join(', ')}` : '';
+  const text = outgoing ? `${verb} → ${name(o.to)}${via}` : `${verb} ← ${name(o.from)}`;
   const ratio = o.type === 'attack' ? forceRatio(doc, o.to) ?? undefined : undefined;
   return { text: `${text}${o.planned ? ' · planned' : ''}`, otherId: otherId === 'hq' || otherId.startsWith('hq:') || !doc.units.some(u => u.id === otherId) ? null : otherId, ratio };
 }

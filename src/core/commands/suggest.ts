@@ -98,6 +98,15 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
   hint=`now ${source?.strength===undefined?'not assessed':`${source.strength}% (${source.strength>=85?'green':source.strength>=70?'amber':source.strength>=50?'red':'black'})`}`;
  }
 
+ else if(verb==='axis'&&previous.length>=2){
+  // /axis ‹unit› to [obj] ‹objective› [via [pl] ‹phase line›[, [pl] ‹phase line›…]]
+  const words=previous.map(t=>t.value.toLowerCase());
+  const named=(type:'obj'|'pl',prefix:string)=>doc.measures.filter(m=>m.type===type).map(m=>({insert:/\s/.test(m.name)?JSON.stringify(m.name):m.name,label:`${prefix} ${m.name}`,detail:m.date?.slice(0,10),kind:'keyword' as const}));
+  if(words.includes('via'))candidates=before==='via'||before===','||before==='pl'?named('pl','PL'):[keyword(',')];
+  else if(previous.length===2)candidates=[keyword('to')];
+  else if(before==='to'||before==='obj')candidates=named('obj','OBJ');
+  else candidates=[keyword('via')];
+ }
  else if(verb==='sitrep')candidates=[keyword('copy')];
  else if(verb==='attack'&&previous.length>=3)candidates=['main','support','planned'].map(s=>keyword(s));
  else if(['note','rename','intent'].includes(verb)&&((verb==='intent')||previous.length>=2))candidates=[];

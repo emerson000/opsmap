@@ -62,6 +62,7 @@
           <polygon points={o.head} class="head" class:open={o.kind === 'support' || o.kind === 'assist'} />
         {/if}
       {/if}
+      {#if o.checkpoints}{#each o.checkpoints as c, i (i)}<circle cx={c.x} cy={c.y} r={3.5 * s} class="checkpoint" />{/each}{/if}
       {#if o.obstacle}<path d={o.obstacle} class="obstacle" />{/if}
       {#if o.label}
         <text class="tag" font-size={Math.max(7.5 * s, mt)} transform="translate({o.label.x} {o.label.y}) rotate({o.label.angle})" text-anchor="middle" dy="0.35em">{o.label.text}</text>
@@ -108,6 +109,8 @@
   .planned .head.open { stroke-dasharray: 3 2; }
   .axis { fill: var(--om-axis-fill); stroke: var(--c); stroke-width: 1.6; stroke-linejoin: round; }
   .planned .axis { stroke-dasharray: 8 5; }
+  /* Where an axis crosses a phase line it names with `via`. */
+  .checkpoint { fill: var(--om-halo); stroke: var(--c); stroke-width: 1.6; }
   .order.link .shaft { stroke: var(--om-ink-soft); stroke-dasharray: 2 3; }
   /* Support between friendlies: long dashes, open head, SPT. */
   .order.assist .shaft { stroke-dasharray: 9 4; }

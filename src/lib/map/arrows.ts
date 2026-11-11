@@ -91,6 +91,36 @@ export function axisOutline(c: Curve, o: { halfWidth: number; headLen: number; h
   return `M${ring.map(pt).join(' L')} Z`;
 }
 
+/** Axis of advance through waypoints (the phase lines named with `via`): the same broad hollow arrow, along a
+ *  smooth curve through every point in order. `points` runs from the start to the tip, already clear of symbols. */
+export function axisOutlineThrough(points: Pt[], o: { halfWidth: number; headLen: number; headHalf: number }): string {
+  // Catmull-Rom through the points, sampled densely.
+  const path: Pt[] = [];
+  const at = (i: number) => points[Math.max(0, Math.min(points.length - 1, i))];
+  for (let i = 0; i < points.length - 1; i++) {
+    const p0 = at(i - 1), p1 = at(i), p2 = at(i + 1), p3 = at(i + 2);
+    for (let s = 0; s < 12; s++) {
+      const t = s / 12, t2 = t * t, t3 = t2 * t;
+      path.push({
+        x: 0.5 * (2 * p1.x + (-p0.x + p2.x) * t + (2 * p0.x - 5 * p1.x + 4 * p2.x - p3.x) * t2 + (-p0.x + 3 * p1.x - 3 * p2.x + p3.x) * t3),
+        y: 0.5 * (2 * p1.y + (-p0.y + p2.y) * t + (2 * p0.y - 5 * p1.y + 4 * p2.y - p3.y) * t2 + (-p0.y + 3 * p1.y - 3 * p2.y + p3.y) * t3),
+      });
+    }
+  }
+  const tip = points[points.length - 1];
+  path.push(tip);
+  // The body stops where the head begins: headLen back along the path from the tip.
+  let left = o.headLen, cut = path.length - 1;
+  while (cut > 0 && left > 0) { left -= len(sub(path[cut], path[cut - 1])); cut--; }
+  const body = path.slice(0, Math.max(2, cut + 1));
+  const normalAt = (i: number) => leftNormal(unit(sub(body[Math.min(body.length - 1, i + 1)], body[Math.max(0, i - 1)])));
+  const l: Pt[] = [], r: Pt[] = [];
+  body.forEach((p, i) => { const n = normalAt(i); l.push(add(p, mul(n, o.halfWidth))); r.push(sub(p, mul(n, o.halfWidth))); });
+  const base = body[body.length - 1], n = leftNormal(unit(sub(tip, base)));
+  const ring = [...l, add(base, mul(n, o.headHalf)), tip, sub(base, mul(n, o.headHalf)), ...r.reverse()];
+  return `M${ring.map(pt).join(' L')} Z`;
+}
+
 /** Movement arrow: a thin line with an open V head. */
 export function moveArrow(c: Curve, headLen: number) {
   const h = head(c, headLen, headLen * 0.5);

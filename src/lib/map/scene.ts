@@ -3,7 +3,7 @@ import { DEFAULT_TZ, calendarDay, parts, zonedTime } from '../../core/model/time
 import type { ControlMeasure, Doc, Order, Ring, Unit, View } from '../../core/model/types';
 import { areaShape, polarToXY, radiusForDate, RING_R } from '../../core/model/geometry';
 import { forceRatio } from '../../core/model/forceRatio';
-import { annularSectorPath, arcTextPath, attackArrow, axisOutline, bentCurve, curvePath, labelAt, moveArrow, obstacleMark, type Curve, type Pt } from './arrows';
+import { annularSectorPath, arcTextPath, attackArrow, axisOutline, axisOutlineThrough, bentCurve, curvePath, labelAt, moveArrow, obstacleMark, type Curve, type Pt } from './arrows';
 import { BEYOND_R, CHEVRON_R, HQ_CLEAR, MAP_EDGE_R, RIM_LABEL_R, SCALE, SECTOR_HQ_R, UNIT_CLEAR } from './constants';
 import { ringOfRadius } from './interaction';
 import { hashSeed, mulberry32, smoothPath } from './terrain';
@@ -28,6 +28,7 @@ export interface SceneSector {
 export interface SceneRing { key: Ring; r: number; label: string; date: string; paths: string[]; /** Arc center of each label path, degrees (screen, 270 = up). */ centers: number[] }
 export interface SceneOrder {
   id: string; kind: 'main' | 'support' | 'axis' | 'advance' | 'move' | 'link' | 'assist'; planned: boolean; fromId: string; toId: string;
+  /** Axis of advance: where it crosses each phase line named with `via` (world space). */ checkpoints?: Pt[];
   /** Link orders: linkup-point position and dependency/handoff kind. */
   linkup?: Pt; linkKind?: 'dependency' | 'handoff';
   shaft?: string; head?: string; width?: number; outline?: string;
@@ -66,6 +67,27 @@ export function isArchived(u: Unit, now: Date, lastTurn?: string,tz=DEFAULT_TZ):
   if (u.lifecycle !== 'done') return false;
   if (isThreat(u)) return lastTurn !== undefined && localDay(lastTurn,tz).getTime() > localDay(u.updatedAt,tz).getTime();
   return !sameDay(u.updatedAt, now,tz);
+}
+
+/**
+ * Where an axis of advance meets each phase line it names with `via`, in the given order: the crossing of the
+ * straight route with that phase line's ring when it has one, else a point on the ring part of the way across.
+ */
+export function axisCheckpoints(doc: Doc, ord: Order, a: Pt, b: Pt, now: Date): Pt[] {
+  const lines = (ord.via ?? []).map(id => doc.measures.find(m => m.id === id && m.type === 'pl' && m.date)).filter((m): m is ControlMeasure => Boolean(m));
+  const ta = Math.atan2(a.y, a.x), tb = Math.atan2(b.y, b.x);
+  let delta = tb - ta; if (delta > Math.PI) delta -= 2 * Math.PI; if (delta < -Math.PI) delta += 2 * Math.PI;
+  return lines.map((m, i) => {
+    const r = radiusForDate(m.date, now, doc.settings.tz) * SCALE;
+    // |a + t(b - a)| = r, for t in (0, 1).
+    const dx = b.x - a.x, dy = b.y - a.y, A = dx * dx + dy * dy, B = 2 * (a.x * dx + a.y * dy), C = a.x * a.x + a.y * a.y - r * r, disc = B * B - 4 * A * C;
+    if (A > 0 && disc >= 0) {
+      const roots = [(-B - Math.sqrt(disc)) / (2 * A), (-B + Math.sqrt(disc)) / (2 * A)].filter(t => t > 0.02 && t < 0.98);
+      if (roots.length) { const t = roots[0]; return { x: a.x + dx * t, y: a.y + dy * t }; }
+    }
+    const angle = ta + delta * (i + 1) / (lines.length + 1);
+    return { x: r * Math.cos(angle), y: r * Math.sin(angle) };
+  });
 }
 
 /** Old positions of dated hostiles and suspects that the morning turn moved today. */
@@ -254,7 +276,17 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
       out.label = { ...labelAt(curve, 0.5, 9 * scale), text: 'SPT' };
     } else if (kind === 'advance') Object.assign(out, attackArrow(curve, { width: 3 * scale, headLen: 16 * scale, headHalf: 9 * scale }));
     else if (kind === 'move') Object.assign(out, moveArrow(curve, 10 * scale), { width: 1.5 * scale });
-    else out.outline = axisOutline(curve, { halfWidth: 8 * scale, headLen: 24 * scale, headHalf: 17 * scale });
+    else {
+      const shape = { halfWidth: 8 * scale, headLen: 24 * scale, headHalf: 17 * scale };
+      // A checkpoint under either symbol would hide its mark and fold the route back on itself: skip it.
+      const marks = axisCheckpoints(doc, ord, a, b, o.now).filter(m => Math.hypot(m.x - a.x, m.y - a.y) > a.clear * 1.2 && Math.hypot(m.x - b.x, m.y - b.y) > b.clear * 1.2);
+      if (marks.length) {
+        // Leave each symbol's clear zone, heading for the first and from the last checkpoint.
+        const toward = (p: Pt, q: Pt, d: number): Pt => { const dx = q.x - p.x, dy = q.y - p.y, l = Math.hypot(dx, dy) || 1, k = Math.min(d, l * 0.45) / l; return { x: p.x + dx * k, y: p.y + dy * k }; };
+        out.outline = axisOutlineThrough([toward(a, marks[0], a.clear), ...marks, toward(b, marks[marks.length - 1], b.clear)], shape);
+        out.checkpoints = marks.map(m => ({ x: r2(m.x), y: r2(m.y) }));
+      } else out.outline = axisOutline(curve, shape);
+    }
     if (ord.type === 'attack' && ratioOn.get(ord.to) === ord.id) {
       const ratio = forceRatio(doc, ord.to);
       if (ratio) { out.ratio = ratio; out.ratioAt = labelAt(curve, 0.5, (kind === 'main' ? -12 : -9) * scale); }

@@ -302,7 +302,7 @@
     <section class="block">
       <div class="cap">Orders</div>
       {#each orders as o (o.id)}
-        {@const line = orderLine(doc, o, unit.id)}
+        {@const line = orderLine(doc, o, unit.id, now)}
         <div class="order">
           {#if line.otherId}<button class="link" onclick={() => select(line.otherId!)}>{line.text}</button>{:else}<span>{line.text}</span>{/if}
           {#if line.ratio}<span class="ratio" class:under={line.ratio.under}>{line.ratio.text}</span>{/if}
