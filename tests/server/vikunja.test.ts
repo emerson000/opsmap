@@ -25,7 +25,7 @@ const taskOf = (d: string) => vk.tasksById.get(unit(d).vk!)!;
 
 beforeEach(async () => {
   store = new Store(':memory:');
-  maps = new Maps(store, 'America/New_York');
+  maps = new Maps(store, 'Europe/London');
   hub().import(user.id, seedDoc(new Date()));
   vk = new FakeVikunja();
   // No debounce timers in tests: cycles run when a test asks.

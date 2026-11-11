@@ -7,3 +7,7 @@ dist
 *.db-*
 test-results
 playwright-report
+.data
+secrets
+*.key
+*.sqlite

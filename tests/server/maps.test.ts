@@ -34,7 +34,7 @@ describe('multiple maps',()=>{
   beforeEach(async()=>{
     dir=mkdtempSync(join(tmpdir(),'opsmap-maps-'));
     const clientDir=join(dir,'client');mkdirSync(clientDir);writeFileSync(join(clientDir,'index.html'),'<!doctype html>');
-    settings={port:0,host:'127.0.0.1',publicUrl:'http://localhost',dataDir:dir,clientDir,devUsers:['alice','bob'],adminEmails:['alice@dev.local'],group:'opsmap_users',tz:'America/New_York'};
+    settings={port:0,host:'127.0.0.1',publicUrl:'http://localhost',dataDir:dir,clientDir,devUsers:['alice','bob'],adminEmails:['alice@dev.local'],group:'opsmap_users',tz:'Europe/London'};
     runtime=startServer(settings,{schedule:false});
     if(!runtime.server.listening)await once(runtime.server,'listening');
     url=`http://127.0.0.1:${(runtime.server.address() as {port:number}).port}`;
@@ -107,7 +107,7 @@ describe('multiple maps',()=>{
     const first=runtime.maps.default.since(0)[0];
     c.peer.send({t:'op',opId:first.opId,cmd:first.cmd});expect((await c.peer.next('reject')).error).toMatch(/another map/);
     // Restarting replays every map from its own journal.
-    const reloaded=new Maps(runtime.store,'America/New_York');
+    const reloaded=new Maps(runtime.store,'Europe/London');
     expect(reloaded.get(garden.id)!.doc).toEqual(runtime.maps.get(garden.id)!.doc);expect(reloaded.default.doc).toEqual(runtime.maps.default.doc);
   });
 

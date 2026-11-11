@@ -4,3 +4,11 @@ test-results/
 .DS_Store
 *.log
 .data/
+.env
+.env.*
+*.db
+*.db-*
+*.sqlite
+*.key
+secrets/
+playwright-report/
