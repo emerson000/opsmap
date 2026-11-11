@@ -45,6 +45,8 @@ Touch gestures on the map: drag pans, pinch zooms, double-tap on ground zooms in
 
 Theme follows the system (`prefers-color-scheme`, live) unless this browser picks Day or Night; the choice is stored in `localStorage` under `opsmap.ui.theme`, never in the shared map. `public/theme-init.js` sets the theme before first paint (an external file, so the CSP needs no hash).
 
+Keyboard: the arrow keys or W A S D pan the map (Shift pans farther; WASD follows key position, so it works on any layout), `+` or `=` zooms in and `-` zooms out around the middle of the map, `0` fits it, `/` opens the command bar and Ctrl+Z / Ctrl+Shift+Z undo and redo. Map keys do nothing while you type, in menus, dialogs and lists, or in the side panels, where arrows scroll; Ctrl/⌘ combinations stay the browser's.
+
 Right-click on desktop: on a unit, a menu of its common actions. Attack…, Move…, Due date…, Note… and Block… put the command in the command bar for you to finish; Unblock, Unpin, Halt orders, key terrain, Done (Destroyed for a threat) and Drop (Bypassed) run at once and show a toast with Undo. Right-click also selects the unit. On open ground it opens the capture menu, and on an OBJ, EA or NAI its card. With a unit focused, the keyboard's menu key or Shift+F10 opens its menu; arrow keys move through it and Escape closes it. Touch keeps long-press.
 
 Control measures: `/obj|/ea|/nai move <name> [to <sector>] <hq|near|mid|far>` (the ring words `close`, `deep` and `aoi` also work everywhere) or `move <name> near <unit>`; `/pl date <name> <date>` re-dates a phase line (phase lines sit at their date and are not dragged). Both are ordinary undoable ops.

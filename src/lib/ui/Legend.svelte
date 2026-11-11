@@ -43,6 +43,7 @@
     ['Right-click a symbol', 'Its menu: attack, move, due, note, block, done… (also the menu key or Shift+F10)'],
     ['Right-click ground / area', 'Capture menu / the area’s card'],
     ['/  ·  0  ·  Ctrl+Z', 'Command bar · fit map · undo (Shift: redo)'],
+    ['Arrows or WASD  ·  +  −', 'Pan (Shift: farther) · zoom in, out'],
   ];
   const arrows = [
     { label: 'Main attack (one per sector)', cls: 'main' },

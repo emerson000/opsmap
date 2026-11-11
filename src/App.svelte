@@ -150,6 +150,16 @@
     }
     if (typing) return;
     if(e.key==='0'){e.preventDefault();map?.fitView();return;}
+    // Arrows and WASD (by key position, so any layout) pan the map (Shift: farther); + and - zoom. Not where arrows already mean something: menus,
+    // dialogs, lists and radio groups, or the side panels, which scroll. Ctrl/⌘ combinations stay the browser's.
+    if (!e.ctrlKey && !e.metaKey && !e.altKey && !(e.target as HTMLElement | null)?.closest?.('[contenteditable], [role="menu"], [role="dialog"], [role="listbox"], [role="radiogroup"], [role="tablist"], aside, .sheet')) {
+      const step = e.shiftKey ? 240 : 80;
+      const pan: Record<string, [number, number]> = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step], KeyA: [-step, 0], KeyD: [step, 0], KeyW: [0, -step], KeyS: [0, step] };
+      const move = pan[e.key] ?? (e.code.startsWith('Key') ? pan[e.code] : undefined);
+      if (move) { e.preventDefault(); map?.panBy(...move); return; }
+      if (e.key === '+' || e.key === '=') { e.preventDefault(); map?.zoomBy(1.25, true); return; }
+      if (e.key === '-' || e.key === '_') { e.preventDefault(); map?.zoomBy(1 / 1.25, true); return; }
+    }
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
       e.preventDefault();
       const res = dispatch({ verb: e.shiftKey ? 'redo' : 'undo', args: {} });

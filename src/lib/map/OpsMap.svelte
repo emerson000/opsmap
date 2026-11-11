@@ -126,10 +126,18 @@
     anim = requestAnimationFrame(step);
   }
   /** Zoom buttons: about the center of the free area. */
-  function zoomBy(factor: number) {
+  /** Zoom around the middle of the free area; `animate` eases it (keyboard zoom). */
+  export function zoomBy(factor: number, animate = false) {
     const w = container.clientWidth, h = container.clientHeight;
     userMoved = true;
-    applyView(zoomAround(view2d, { x: insets.left + (w - insets.left - insets.right) / 2, y: insets.top + (h - insets.top - insets.bottom) / 2 }, factor));
+    const target = zoomAround(view2d, { x: insets.left + (w - insets.left - insets.right) / 2, y: insets.top + (h - insets.top - insets.bottom) / 2 }, factor);
+    if (animate) animateTo({ ...target, k: Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, target.k)) }, 160); else applyView(target);
+  }
+  /** Pan by screen pixels: positive `dx` shows more of the map to the right (keyboard arrows). */
+  export function panBy(dx: number, dy: number) {
+    cancelAnimationFrame(anim);
+    userMoved = true;
+    applyView({ x: view2d.x - dx, y: view2d.y - dy, k: view2d.k });
   }
   let flashId = $state<string | null>(null);
   let flashTimer: ReturnType<typeof setTimeout> | undefined;
