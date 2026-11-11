@@ -8,6 +8,7 @@
   import { live, session, isAdmin, initials, color, nameOf, logout, currentMap } from '../sync/sync.svelte';
   import MapSwitcher from './MapSwitcher.svelte';
   import { features } from '../model/features.svelte';
+  import { sound, setSound } from './sound.svelte';
 
   let { doc, now, onimportlocal }: { doc: Doc; now: Date; onimportlocal: () => void } = $props();
 
@@ -94,6 +95,12 @@
       {#if live.localMap}<button class="btn" onclick={onimportlocal} title="Copy the map saved in this browser by opsmap v1 into the shared map" data-testid="import-local">Import my local map</button>{/if}
     {/if}
     <span class="sep" aria-hidden="true"></span>
+    <button class="btn icon" data-testid="sound-toggle" aria-pressed={sound.on} aria-label={sound.on ? 'Sound on' : 'Sound off'} onclick={() => setSound(!sound.on)}
+      title={sound.on ? 'Sound on: a cue for new tracks, new hostiles and hostiles destroyed. Click to mute.' : 'Sound off. Click for cues on new tracks, new hostiles and hostiles destroyed.'}>
+      <svg width="16" height="14" viewBox="0 0 16 14" aria-hidden="true"><path d="M1 5h3l4-3.5v11L4 9H1z" fill="currentColor"/>
+        {#if sound.on}<path d="M10.5 4.5a3.5 3.5 0 0 1 0 5M12.5 2.5a6.5 6.5 0 0 1 0 9" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>
+        {:else}<path d="M10.5 4.5l4 5M14.5 4.5l-4 5" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/>{/if}</svg>
+    </button>
     <button class="btn theme" data-testid="theme-toggle" onclick={() => setThemePref(nextPref(ui.themePref))}
       aria-label="{themeText}. Change to {PREF_LABEL[nextPref(ui.themePref)]}" title="{themeText}. Click for {PREF_LABEL[nextPref(ui.themePref)]}.">
       {ui.themePref === 'system' ? `System (${env.systemDark ? 'night' : 'day'})` : PREF_LABEL[ui.themePref]}
@@ -138,6 +145,11 @@
       {#if features.vikunja}<button class="btn item" data-testid="menu-vikunja" onclick={act(() => { ui.vikunjaOpen = true; })}>Vikunja…</button>{/if}
     </div>
     {@render themeChoice()}
+    <div class="row-label" id="sound-label">Sound</div>
+    <div class="seg" role="radiogroup" aria-labelledby="sound-label" data-testid="sound-choice">
+      <button class="btn" role="radio" aria-checked={sound.on} class:on={sound.on} onclick={() => setSound(true)}>On</button>
+      <button class="btn" role="radio" aria-checked={!sound.on} class:on={!sound.on} onclick={() => setSound(false)}>Off</button>
+    </div>
     <div class="items">
       <button class="btn item" onclick={act(() => run({ verb: 'export', args: {} }))}>Export JSON</button>
       {#if admin}
@@ -160,6 +172,7 @@
   onkeydown={(e) => { if (e.key === 'Escape' && (userOpen || ui.menuOpen)) { closeMenus(); } }} />
 
 <style>
+  .btn.icon { padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; }
   .topbar {
     position: absolute; inset: 0 0 auto 0; height: var(--bar-h); z-index: 20;
     display: flex; align-items: center; gap: var(--s2); padding: 0 var(--s3);

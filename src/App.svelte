@@ -1,6 +1,9 @@
 <script lang="ts">
   import './app.css';
-  import { onMount } from 'svelte';
+  import { onMount, untrack } from 'svelte';
+  import type { Doc } from './lib/model/types';
+  import { cueFor } from './core/model/cues';
+  import { play } from './lib/ui/sound.svelte';
   import type { Ring } from './lib/model/types';
   import { getDoc, selection } from './lib/model/store.svelte';
   import { commandEvents, dispatch, type CommandEvent } from './lib/commands/dispatch';
@@ -25,6 +28,18 @@
   const LOG_W = 264, RAIL_W = 28, BAR_H = 40, CMD_H = 84, PHONE_BAR_H = 44, SHEET_HEAD = 52;
 
   const doc = $derived(getDoc());
+  // Console cues for what changes on the map while it is live: a new track, a new hostile, a hostile destroyed.
+  // Loading, reconnecting and switching maps set a new baseline instead of sounding off.
+  let heard: { map: string; doc: Doc } | null = null;
+  $effect(() => {
+    const d = doc, map = live.mapId, ready = live.status === 'live' && map !== '';
+    untrack(() => {
+      if (!ready || !heard || heard.map !== map) { heard = ready ? { map, doc: d } : null; return; }
+      const cue = cueFor(heard.doc, d);
+      heard = { map, doc: d };
+      if (cue) play(cue);
+    });
+  });
   // System (prefers-color-scheme, live) unless this browser chose Day or Night. Not in the shared doc.
   const theme = $derived(resolveTheme(ui.themePref, env.systemDark));
   const phone = $derived(env.tier === 'phone');

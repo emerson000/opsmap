@@ -31,6 +31,10 @@ The Docker image runs as the unprivileged `node` user.
 
 Restore from a completed `/data/backups/opsmap-YYYY-MM-DD.db` file, which the app creates with `VACUUM INTO` and atomically renames. Stop the container, replace `/data/opsmap.db` with that backup, and remove the stopped database's `opsmap.db-wal` and `opsmap.db-shm` files before starting it. A generic copy of the live database without its matching WAL is not a restore source.
 
+## Sound
+
+Three quiet console cues, synthesized in the browser (no audio files): two rising tones for a new track (from anyone: you, another user, an agent or Vikunja), five quick beeps for a new hostile or suspect track (or one identified as hostile), and two falling tones when a hostile is destroyed. Nothing else makes a sound. Loading, reconnecting and switching maps are silent, and there is at most one cue every 1.2 seconds, so a burst of changes gives one. The speaker button in the top bar (phone: menu → Sound) mutes them; the choice is kept per browser in `localStorage` under `opsmap.ui.sound`. Browsers play sound only after a first click or key press.
+
 ## Phones, tablets and touch
 
 Below 760 px wide (or a touch screen under 500 px tall) the app switches to the phone layout: a compact top bar (DTG, live dot, online chips, menu), the map full screen, the command bar docked at the bottom above the on-screen keyboard, and one bottom sheet for the inspector, situation summary and order log (peek, half, full). From 760 to 1279 px the side columns stay and the less-used top-bar items move into the menu. The page never scrolls or zooms: the map owns its gestures (`touch-action: none`), everything else is `touch-action: pan-x pan-y`, the viewport sets `maximum-scale=1, user-scalable=no`, and iOS `gesture*` events are refused. A landscape phone gets the sheet as a right-hand column.
