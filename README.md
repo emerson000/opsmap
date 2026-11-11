@@ -61,7 +61,7 @@ Axis of advance: `/axis <friendly> to OBJ "<objective>" [via PL <name>[, PL <nam
 
 Clearing orders: `/halt <unit>` cancels all of a unit's own orders, and `/halt <unit> advance|move|attack|axis|link` only that kind (`/stop` and `/cancel` also work); each order in the inspector has a ✕ that does the same for that one order. Undo restores them.
 
-Task forces: a unit becomes a task force (TF bracket) when another unit is attached to it, `/attach <unit> to <tf>`. Only the task force itself may hold orders that cross a sector boundary, e.g. `/attack <tf> <hostile in another sector>`; its attached units may not.
+Task forces: a unit becomes a task force (TF bracket) when another unit is attached to it, `/attach <unit> to <tf>`. It becomes a regular unit again when its last attached unit leaves (`/detach <unit>`, or attached to another task force); any order it held across a sector boundary is then cancelled, and the log names it (`PACKING DETACHED — TF MOVE DISSOLVED; ATTACK ON …`). Undo restores both. Only the task force itself may hold orders that cross a sector boundary, e.g. `/attack <tf> <hostile in another sector>`; its attached units may not.
 
 Supporting attacks (`/attack <unit> <hostile> support`, or a second attack dragged onto a hostile that already has a main effort) draw as a thinner arrow with an open head and SPT. Staff and Detail always show them; Commander shows them when their attacker, their target or the main attacker on that target is selected.
 

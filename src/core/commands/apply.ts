@@ -77,6 +77,14 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
       doc.orders=doc.orders.filter(o=>!cancelled.some(c=>c.id===o.id));
       return cancelled.map(order=>`; ${order.type.toUpperCase()} ON ${doc.units.find(x=>x.id===order.to)?.designation??doc.measures.find(m=>m.id===order.to)?.name??(order.to.startsWith('hq:')?`${doc.sectors.find(x=>x.id===order.to.slice(3))?.name.toUpperCase()??''} HQ`:'HQ')} CANCELLED (BOUNDARY)`).join('');
     };
+    /** A task force left with no attached unit is a regular unit again; orders it held across a sector
+     *  boundary are no longer allowed, so they are cancelled. Returns the log suffix. */
+    const dissolve=(parentId:string|undefined):string=>{
+      const p=parentId===undefined?undefined:doc.units.find(x=>x.id===parentId);
+      if(!p||!p.taskForce||doc.units.some(c=>c.parentId===p.id))return '';
+      delete p.taskForce;changed(p);
+      return ` — TF ${p.designation} DISSOLVED${cancelBoundary([p])}`;
+    };
     /** Place a unit by hand: free spot near the requested position, pinned against auto-advance. */
     const relocate=(u:Unit,sectorId:string,pos:{r:number;theta:number})=>{u.sectorId=sectorId;u.pos=resolvePlacement(doc,sectorId,pos,u.id);if(u.dueAt)u.posOverride=true;changed(u);};
     const areaOf=(u:Unit)=>doc.measures.find(m=>m.members?.includes(u.id));
@@ -181,9 +189,9 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
         u.pos=resolvePlacement(doc,u.sectorId,u.pos,u.id);changed(u);log=`${u.designation} REOPENED`;break;
       }
       case 'vk': return vikunja(doc,cmd,now);
-      case 'reinforce':case 'reduce': {const u=unit();u.reinforced=cmd.verb==='reinforce'?'+':'-';if(a.with){const child=item(doc.units,a.with,'unit');attach(doc,child,u);changed(child);}if(a.note!==undefined)u.note=text(a.note,'scope note');changed(u);log=`${u.designation} ${cmd.verb==='reinforce'?'REINFORCED (+)':'REDUCED (-)'}`;break;}
-      case 'attach': {const u=unit(),parent=item(doc.units,a.parent,'parent');attach(doc,u,parent);changed(u);changed(parent);log=`${u.designation} ATTACHED TO TF ${parent.designation}`;break;}
-      case 'detach': {const u=unit();delete u.parentId;changed(u);log=`${u.designation} DETACHED`;break;}
+      case 'reinforce':case 'reduce': {const u=unit();u.reinforced=cmd.verb==='reinforce'?'+':'-';let left='';if(a.with){const child=item(doc.units,a.with,'unit'),was=child.parentId;attach(doc,child,u);changed(child);if(was!==u.id)left=dissolve(was);}if(a.note!==undefined)u.note=text(a.note,'scope note');changed(u);log=`${u.designation} ${cmd.verb==='reinforce'?'REINFORCED (+)':'REDUCED (-)'}${left}`;break;}
+      case 'attach': {const u=unit(),parent=item(doc.units,a.parent,'parent'),was=u.parentId;attach(doc,u,parent);changed(u);changed(parent);log=`${u.designation} ATTACHED TO TF ${parent.designation}${was!==parent.id?dissolve(was):''}`;break;}
+      case 'detach': {const u=unit(),was=u.parentId;requireThat(was,`${u.designation} is not attached`);delete u.parentId;changed(u);log=`${u.designation} DETACHED${dissolve(was)}`;break;}
       case 'link': {
         const u=unit(),other=item(doc.units,a.target,'unit');
         requireThat(u.id!==other.id,'Link requires two different units');
