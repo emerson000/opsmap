@@ -14,7 +14,7 @@
     entry?: VerbSlot;
     /** The short command, when there is no entry (or to override it). */
     code?: string;
-    /** The full command the field runs with its current value; shown while hovered or focused, and with /CMD. */
+    /** The full command the field runs with its current value: in the echo bar while hovered or focused, and under the field with /CMD. */
     cmd?: string | null;
     children: Snippet;
   } = $props();
@@ -26,19 +26,16 @@
     const [first, ...rest] = m[1].split(' ');
     return { first, rest: rest.length ? ` ${rest.join(' ')}` : '', note: m[2] ?? '' };
   });
-  let active = $state(false);
 </script>
 
-<!-- svelte-ignore a11y_no_static_element_interactions -->
-<div class="field-row" class:wide data-control={entry?.control} use:echoes={cmd}
-  onpointerenter={() => (active = true)} onpointerleave={() => (active = false)}
-  onfocusin={() => (active = true)} onfocusout={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) active = false; }}>
+<!-- Hover and focus show the command in the echo bar only: a line added under the field would push the fields below it down. -->
+<div class="field-row" class:wide data-control={entry?.control} use:echoes={cmd}>
   <div class="lab">
     <span class="name"><span class="lead">{#if tag}<span class="tag">{tag}</span>{/if}{parts.first}</span>{parts.rest}{#if parts.note}<span class="note">{parts.note}</span>{/if}</span>
     {#if short}<code class="code">{short}</code>{/if}
   </div>
   <div class="ctl">{@render children()}</div>
-  {#if cmd && (active || ui.cmdOn)}<div class="filled"><span aria-hidden="true">›</span> {cmd}</div>{/if}
+  {#if cmd && ui.cmdOn}<div class="filled"><span aria-hidden="true">›</span> {cmd}</div>{/if}
 </div>
 
 <style>

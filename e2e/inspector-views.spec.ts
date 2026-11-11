@@ -118,6 +118,31 @@ test('unit view: Drop… asks Drop or Bypassed, Reopen brings it back; sections 
   await page.context().close();
 });
 
+// Hovering a field shows its command in the echo line only; the fields below it keep their place, so the next one is easy to hit.
+test('hovering a sidebar field does not move the fields below it', async ({ browser, baseURL }) => {
+  const page = await userPage(browser, 'alice', baseURL!, true);
+  await openMap(page);
+  const inspector = page.getByTestId('inspector');
+  await command(page, '/find RECORDS');
+  await expect(inspector).toHaveAttribute('data-kind', 'unit');
+  const rows = inspector.locator('.field-row[data-control]');
+  const count = await rows.count();
+  expect(count).toBeGreaterThan(3);
+  let hovered = 0;
+  for (let i = 0; i < count - 1 && hovered < 6; i++) {
+    const row = rows.nth(i), next = rows.nth(i + 1);
+    if (!(await row.isVisible()) || !(await next.isVisible())) continue;
+    const before = (await next.boundingBox())!.y;
+    await row.hover({ position: { x: 4, y: 4 } });
+    await expect(page.getByTestId('echo-line')).not.toContainText('Hover a control');
+    expect((await next.boundingBox())!.y).toBe(before);
+    hovered++;
+  }
+  expect(hovered).toBeGreaterThan(2);
+  expect(errors(page)).toEqual([]);
+  await page.context().close();
+});
+
 // Parity rule 4: every button in a sidebar view shows its command, in its tooltip or accessible description, in its
 // label, or in the field row it sits in. Section headers only fold the view, so they are left out.
 test('every button in each sidebar view shows its command', async ({ browser, baseURL }) => {
