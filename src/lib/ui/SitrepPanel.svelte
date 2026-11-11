@@ -31,7 +31,12 @@
     <button class="btn" onclick={copy}>Copy</button>
     <button class="btn" onclick={() => (ui.sitrepOpen = false)} aria-label="Close SITREP">Close</button>
   </header>
-  <pre>{text}</pre>
+  <!-- One line per row: headings bold, detail lines indented with wrapped text kept under them. Copy gives the plain text. -->
+  <div class="report" data-testid="sitrep-text">
+    {#each text.split('\n') as line, i (i)}
+      <div class="line" class:head={/^(SITREP |\d\. )/.test(line)} class:detail={line.startsWith('   ')}>{line.trim()}</div>
+    {/each}
+  </div>
   <form onsubmit={save}>
     <label for="intent" class="cap">Intent</label>
     <div class="row">
@@ -45,8 +50,12 @@
   .sitrep { width: min(640px, 100%); max-height: 100%; display: flex; flex-direction: column; background: var(--panel); border: 2px solid var(--rule-strong); box-shadow: var(--shadow); }
   header { display: flex; align-items: center; gap: var(--s1); padding: var(--s2) var(--s3); border-bottom: 1px solid var(--rule); background: var(--panel-2); }
   header .cap { flex: 1; color: var(--ink); }
-  pre { margin: 0; padding: var(--s3); font: 12px/1.6 var(--font-mono); white-space: pre-wrap; max-height: 46vh; overflow: auto; overscroll-behavior: contain; touch-action: pan-y; }
-  :global([data-tier='phone']) .sitrep pre { flex: 1 1 auto; min-height: 0; max-height: none; font-size: 13px; }
+  .report { margin: 0; padding: var(--s3); font: 12px/1.6 var(--font-mono); max-height: 46vh; overflow: auto; overscroll-behavior: contain; touch-action: pan-y; }
+  .line { white-space: pre-wrap; overflow-wrap: anywhere; }
+  .line.head { font-weight: 700; margin-top: 6px; }
+  .line.head:first-child { margin-top: 0; }
+  .line.detail { padding-left: 3ch; }
+  :global([data-tier='phone']) .sitrep .report { flex: 1 1 auto; min-height: 0; max-height: none; font-size: 13px; }
   :global([data-tier='phone']) .sitrep .btn { height: 44px; padding: 0 var(--s3); }
   :global([data-tier='phone']) .row .field { height: 44px; }
   form { padding: var(--s2) var(--s3) var(--s3); border-top: 1px dashed var(--rule); }

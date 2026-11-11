@@ -38,5 +38,5 @@ it('SITREP records actual recent captures and completions, and names overdue thr
  const now=new Date(2026,10,9,12);
  const result=apply(doc,{verb:'done',args:{unit:'irsrsp'}},now);expect('doc'in result).toBe(true);if(!('doc'in result))return;
  const text=sitrepText(result.doc,now);
- expect(text).toContain('IRSRSP COMPLETE');expect(text).toContain('1 overdue: ESCALATION (PEN)');expect(text).not.toContain('1 hostiles');
+ expect(text).toContain('completed IRSRSP');expect(text).toContain('Overdue, inside HQ (1): ESCALATION.');expect(text).not.toContain('1 hostiles');
 });

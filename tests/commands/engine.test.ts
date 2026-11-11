@@ -71,7 +71,7 @@ describe('dates and daily turn',()=>{
 });
 describe('suggestions and reports',()=>{
  it('offers verbs, units with sectors, echelon ranges, date tokens, and syntax hints',()=>{expect(suggest('/att',4,state.doc!).items.some(s=>s.insert==='attack')).toBe(true);expect(suggest('/attack IRS',11,state.doc!).items.some(s=>s.unitId==='irs')).toBe(true);expect(suggest('/size TOOLS ',12,state.doc!).items.find(s=>s.insert==='plt')?.detail).toContain('3–8');expect(suggest('/due IRS ',9,state.doc!).items.some(s=>s.kind==='date')).toBe(true);expect(suggest('/attack ',8,state.doc!).ghost).toContain('unit');});
- it('formats a five-line doctrinal SITREP and current intent',()=>{const doc=execute('/intent "Finish taxes"');const report=sitrepText(doc,now);for(const text of ['SITREP','1. ENEMY:','2. FRIENDLY:','3. TERRAIN:','4. CHANGES LAST 24H:','5. CDR\'S INTENT TODAY: Finish taxes'])expect(report).toContain(text);});
+ it('formats a five-line doctrinal SITREP and current intent',()=>{const doc=execute('/intent "Finish taxes"');const report=sitrepText(doc,now);for(const text of ['SITREP','\n1. ENEMY\n','\n2. FRIENDLY\n','\n3. TERRAIN\n','\n4. CHANGES ','\n5. COMMANDER\'S INTENT TODAY\n   Finish taxes'])expect(report).toContain(text);});
 });
 describe('transaction invariants and command aliases',()=>{
  it.each([

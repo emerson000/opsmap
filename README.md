@@ -31,6 +31,10 @@ The Docker image runs as the unprivileged `node` user.
 
 Restore from a completed `/data/backups/opsmap-YYYY-MM-DD.db` file, which the app creates with `VACUUM INTO` and atomically renames. Stop the container, replace `/data/opsmap.db` with that backup, and remove the stopped database's `opsmap.db-wal` and `opsmap.db-shm` files before starting it. A generic copy of the live database without its matching WAL is not a restore source.
 
+## SITREP
+
+`/sitrep` (or the SITREP button) gives a five-paragraph report: 1 ENEMY (hostiles and suspects inside PL WEEK, overdue ones inside HQ), 2 FRIENDLY (main efforts, blocked units, friendlies with no contact for 3+ days), 3 TERRAIN (key terrain and any threat within one ring), 4 CHANGES since the 0400 turn or the last 24 hours, 5 COMMANDER'S INTENT. Changes are a summary of what holds now, not a replay of the log: new units still open (by identity), units closed (completed, destroyed, withdrawn), orders given that still stand, control measures added or removed, phase lines crossed in the morning turn, and a count of other units updated. Something opened and dropped again, or drawn and removed again, leaves no trace. `/sitrep copy` copies the plain text.
+
 ## Sound
 
 Three quiet console cues, synthesized in the browser (no audio files): two rising tones for a new track (from anyone: you, another user, an agent or Vikunja), five quick beeps for a new hostile or suspect track (or one identified as hostile), and two falling tones when a hostile is destroyed. Nothing else makes a sound. Loading, reconnecting and switching maps are silent, and there is at most one cue every 1.2 seconds, so a burst of changes gives one. The speaker button in the top bar (phone: menu → Sound) mutes them; the choice is kept per browser in `localStorage` under `opsmap.ui.sound`. Browsers play sound only after a first click or key press.
