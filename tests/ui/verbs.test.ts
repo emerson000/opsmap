@@ -54,6 +54,8 @@ function samples(doc: Doc): Record<string, Command[]> {
     'reduce': [c('reduce', { unit: 'records' }), c('reduce', { unit: 'records', note: 'Only 2025' })],
     'attach': [c('attach', { unit: 'records', parent: 'move' })],
     'detach': [c('detach', { unit: 'packing' })],
+    'collapse': [c('collapse', { unit: 'move' }), c('collapse', { all: true })],
+    'expand': [c('expand', { unit: 'move' }), c('expand', { all: true })],
     'due': [c('due', { unit: 'records', dueAt: due(doc, '2026-12-01') }), c('due', { unit: 'records', dueAt: due(doc, '011230JDEC26') }), c('due', { unit: 'records', dueAt: null })],
     'note': [c('note', { unit: 'records', note: 'Line one\nline "two"' }), c('note', { unit: 'records', note: '' })],
     'rate': [c('rate', { unit: 'records', rating: 'B2' })],
@@ -92,6 +94,7 @@ function fixture(tz?: string): Doc {
 function docFor(base: Doc, cmd: Command): Doc {
   const doc = structuredClone(base);
   if (cmd.args.action === 'leave') doc.measures.find(m => m.id === cmd.args.measure)!.members = ['records'];
+  if (cmd.verb === 'expand') doc.units.find(u => u.id === 'move')!.collapsed = true;
   return doc;
 }
 

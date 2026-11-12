@@ -122,6 +122,8 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
   if(previous.length===1){
    if(verb==='unblock')candidates=units(doc.units.filter(u=>u.lifecycle==='blocked'));
    if(verb==='unpin')candidates=units(doc.units.filter(u=>u.posOverride));
+   // Task forces only: expanded ones to collapse, collapsed ones to expand, then every task force at once.
+   if(verb==='collapse'||verb==='expand'){const fold=verb==='collapse';candidates=[...units(doc.units.filter(u=>u.taskForce&&Boolean(u.collapsed)!==fold&&doc.units.some(c=>c.parentId===u.id))),{...keyword('all'),label:`all · every ${fold?'expanded':'collapsed'} task force`}];}
    if(verb==='reopen')candidates=units(doc.units.filter(u=>u.lifecycle==='done'||u.lifecycle==='dropped'));
    // The attacker slot: own units first (friend, then assumed), unresolved only.
    if(verb==='attack'||verb==='moving'){const rank=(a:string)=>a==='friend'?0:a==='assumed'?1:2;candidates=units(doc.units.filter(unresolved),u=>rank(u.affiliation),true);}
@@ -138,6 +140,7 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
   if(verb==='moving'&&previous.length===2)candidates=[keyword('to')];
   if(verb==='moving'&&before==='to')candidates.push(keyword('nearest hostile'));
   if(verb==='attach'&&previous.length===2)candidates=[keyword('to')];
+  if((verb==='collapse'||verb==='expand')&&previous.length>=2)candidates=[];
   if(verb==='reinforce'&&previous.length===2)candidates=[keyword('with'),...candidates.filter(c=>c.insert.toLowerCase()!==previous[1].value.toLowerCase())];
   if(verb==='advancing'&&previous.length===2)candidates=[keyword('on')];
   if((verb==='advancing'&&before==='on')||(verb==='moving'&&before==='to'))candidates.unshift(keyword('sector hq'),...doc.sectors.map(s=>({insert:`${/\s/.test(s.name)?JSON.stringify(s.name):s.name} hq`,label:`${s.name} HQ`,kind:'keyword' as const})));

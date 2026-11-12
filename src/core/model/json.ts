@@ -44,7 +44,7 @@ export function importJson(text:string):Doc {
     optional(u,'echelon',v=>ECHELONS.some(e=>e.key===v));
     optional(u,'strength',v=>finite(v)&&v>=0&&v<=100);
     optional(u,'reinforced',v=>oneOf(v,['+','-','±']));
-    for(const key of ['taskForce','posOverride','keyTerrain']) optional(u,key,v=>typeof v==='boolean');
+    for(const key of ['taskForce','collapsed','posOverride','keyTerrain']) optional(u,key,v=>typeof v==='boolean');
     optional(u,'cp',v=>oneOf(v,['main','tac','alt','rear']));
     for(const key of ['note','rating','createdBy','updatedBy']) optional(u,key,string);
     optional(u,'dueAt',date);

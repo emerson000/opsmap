@@ -10,6 +10,7 @@
   import { parseDate } from '../../../core/commands/tokenize';
   import { suggest } from '../../../core/commands/suggest';
   import { unresolved } from '../../../core/commands/resolve';
+  import { attachedUnder, collapsedOver } from '../../../core/commands/apply';
   import { recentIds } from '../../commands/recent.svelte';
   import { miniSymbol } from '../mini';
   import { annotate, initials, color, nameOf } from '../../sync/sync.svelte';
@@ -91,6 +92,11 @@
   const orders = $derived(doc.orders.filter(o => o.from === unit.id || o.to === unit.id));
   const parent = $derived(unit.parentId ? doc.units.find(u => u.id === unit.parentId) : undefined);
   const members = $derived(doc.units.filter(u => u.parentId === unit.id));
+  /** The collapsed task force whose stack stands for this unit on the map. */
+  const holder = $derived(collapsedOver(doc, unit));
+  const hiddenCount = $derived(attachedUnder(doc, unit).filter(unresolved).length);
+  /** A support order can become an attachment, unless the supported unit is already attached under the supporter. */
+  const canAttachInstead = (from: string, to: string) => { const f = doc.units.find(u => u.id === from); return Boolean(f && unresolved(f) && !attachedUnder(doc, f).some(u => u.id === to)); };
   const areas = $derived(doc.measures.filter(m => m.type !== 'pl'));
   const area = $derived(areas.find(m => m.members?.includes(unit.id)));
   /** Join the chosen area (the unit moves inside it), or leave the current one. */
@@ -159,7 +165,7 @@
     identity: `${AFFILIATIONS.find(a => a.key === unit.affiliation)?.label ?? ''} · ${unit.fn} · ${unit.echelon ?? '—'}${unit.cp ? ` · ${unit.cp.toUpperCase()} CP` : ''}`,
     place: `${sectorName(unit.sectorId)} · ${ringWord}${unit.dueAt ? ` · ${dayMonth(unit.dueAt)}` : ''}${area ? ` · ${area.type.toUpperCase()} ${area.name}` : ''}`,
     condition: `${CONDITIONS.find(c => c.key === unit.condition)?.label ?? ''}${unit.strength !== undefined ? ` · ${unit.strength}%` : ''}${unit.rating ? ` · ${unit.rating}` : ''}`,
-    taskorg: parent ? `in TF ${parent.designation}` : members.length ? `TF of ${members.length}` : 'not attached',
+    taskorg: `${parent ? `in TF ${parent.designation}` : members.length ? `TF of ${members.length}` : 'not attached'}${unit.collapsed && members.length ? ' · collapsed' : holder ? ' · hidden' : ''}`,
   });
 </script>
 
@@ -387,6 +393,13 @@
         onchoose={(o) => { attachText = ''; run('attach', { parent: idOf(o) }); }} />
     {/if}
   </Field>
+  {#if holder}
+    {@const t = textOf({ verb: 'expand', args: { unit: holder.id } }, doc)}
+    <Field label="On the map" code="/expand" cmd={t}>
+      <span class="pair" data-testid="unit-hidden">Hidden in collapsed task force {holder.designation}
+        <button class="btn" data-testid="holder-expand" title="Show it again: expand task force {holder.designation} ({t})" use:echoes={t} onclick={() => runCommand({ verb: 'expand', args: { unit: holder.id } })}>Expand {holder.designation}</button></span>
+    </Field>
+  {/if}
   {#if members.length}
     <Field label="TF members" entry={slot('detach')} cmd={null}>
       <ul class="members" data-testid="tf-members">
@@ -396,6 +409,16 @@
             <button class="x" aria-label="Detach: {m.designation}" title="Detach {m.designation} ({t})" use:echoes={t} onclick={() => runCommand({ verb: 'detach', args: { unit: m.id } })}>✕</button></li>
         {/each}
       </ul>
+    </Field>
+    <Field label="On the map" entry={slot(unit.collapsed ? 'expand' : 'collapse')} cmd={line(unit.collapsed ? 'expand' : 'collapse')}>
+      <div class="seg" role="radiogroup" aria-label="Draw task force {unit.designation}">
+        {#each [{ verb: 'expand', label: 'Expanded', hint: 'every attached unit on the map' }, { verb: 'collapse', label: 'Collapsed', hint: 'one stacked symbol with a count' }] as c (c.verb)}
+          {@const on = (c.verb === 'collapse') === Boolean(unit.collapsed)}
+          {@const t = line(c.verb)}
+          <button class="btn" role="radio" class:on aria-checked={on} data-testid="tf-{c.verb}" title="{c.label}: {c.hint} ({t})" use:echoes={t} onclick={() => { if (!on) run(c.verb); }}>{c.label}</button>
+        {/each}
+      </div>
+      <span class="note" data-testid="tf-fold-note">{unit.collapsed ? `${hiddenCount} attached ${hiddenCount === 1 ? 'unit' : 'units'} hidden. Click +${hiddenCount} on the map to show them.` : 'Collapsed draws the task force as one symbol with a count.'}</span>
     </Field>
   {/if}
 </Section>
@@ -407,6 +430,12 @@
     <div class="order">
       {#if ol.other}<button class="link" title={findOf(ol.other, doc)} onclick={() => open(ol.other, onfocus)}>{ol.text}</button>{:else}<span>{ol.text}</span>{/if}
       {#if ol.ratio}<span class="ratio" class:under={ol.ratio.under}>{ol.ratio.text}</span>{/if}
+      {#if o.type === 'support' && canAttachInstead(o.from, o.to)}
+        {@const at = textOf({ verb: 'attach', args: { unit: o.from, parent: o.to } }, doc)}
+        {@const names = [doc.units.find(u => u.id === o.from)?.designation, doc.units.find(u => u.id === o.to)?.designation]}
+        <button class="btn attach-instead" data-testid="support-attach" title="Attach instead: {names[0]} joins TF {names[1]} and the support ends ({at})" use:echoes={at}
+          onclick={() => runCommand({ verb: 'attach', args: { unit: o.from, parent: o.to } })}>Attach instead</button>
+      {/if}
       <button class="x" aria-label="Cancel order: {ol.text}" title="Cancel this order{halt ? ` (${halt})` : ' (/halt)'}" data-testid="cancel-order" use:echoes={halt}
         onclick={() => runCommand({ verb: 'halt', args: { unit: o.from, order: o.id } })}>✕</button>
     </div>
@@ -501,6 +530,10 @@
   .confirm { margin-top: var(--s1); padding: var(--s2); border: 1px solid var(--hostile); background: var(--hostile-bg); font-size: 12px; display: flex; flex-wrap: wrap; gap: var(--s1); align-items: center; }
   .order { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); padding: 3px 0; border-bottom: 1px dotted var(--rule); }
   .ratio { font: 700 12px/1 var(--font-mono); }
+  .attach-instead { flex: none; padding: 0 6px; margin-right: var(--s2); }
+  .seg { display: flex; width: 100%; }
+  .seg .btn { flex: 1; justify-content: center; }
+  .seg .btn + .btn { margin-left: -1px; }
   .ratio.under { color: var(--hostile); }
   .x { margin-left: auto; flex: none; width: 24px; height: 24px; display: grid; place-items: center; padding: 0; border: 1px solid var(--rule); background: none; color: var(--ink-3); font: 12px/1 var(--font-mono); }
   .x:hover { color: var(--hostile); border-color: var(--hostile); }

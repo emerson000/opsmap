@@ -1,5 +1,5 @@
 import { test, expect, type Page, type BrowserContext } from '@playwright/test';
-import { resetShared, signIn, watchErrors, errors as allErrors } from './helpers';
+import { command, resetShared, signIn, watchErrors, errors as allErrors } from './helpers';
 
 // WebKit warns about the viewport key interactive-widget (Chrome's keyboard mode); Safari ignores it.
 const errors = (page: Page) => allErrors(page).filter(e => !/interactive-widget/.test(e));
@@ -580,4 +580,16 @@ test('phone phase line and sector views: re-date with the ring note, set a width
   await inspector.getByTestId('sector-width-set').click();
   await expect(page.getByTestId('command-preview')).toContainText('SECTOR WIDTH');
   await sameAsBar(page, '/sector width Work 100');
+});
+
+test('tapping a collapsed task force\'s count expands it without opening the sheet', async ({ page }) => {
+  await command(page, '/collapse MOVE');
+  const badge = page.locator('g.unit[data-unit-id="move"] [data-testid="tf-stack"]');
+  await expect(badge).toHaveAttribute('data-count', '2');
+  await expect(page.locator('g.unit[data-unit-id="packing"]')).toHaveCount(0);
+  const size = await page.getByTestId('sheet').getAttribute('data-size');
+  await badge.tap();
+  await expect(page.locator('g.unit[data-unit-id="packing"]')).toHaveCount(1);
+  await expect(badge).toHaveCount(0);
+  await expect(page.getByTestId('sheet')).toHaveAttribute('data-size', size ?? '');
 });

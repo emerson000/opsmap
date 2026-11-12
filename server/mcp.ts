@@ -6,7 +6,7 @@ import { aliases, helpText, parse, SYNTAX, VERBS } from '../src/core/commands/gr
 import { sitrepText } from '../src/core/commands/sitrep';
 import { resolveUnit } from '../src/core/commands/resolve';
 import { ringForRadius } from '../src/core/model/geometry';
-import type { Unit } from '../src/core/model/types';
+import type { Doc, Unit } from '../src/core/model/types';
 import type { Maps } from './maps';
 import type { User } from './db';
 import type { VikunjaSync } from './vikunja/sync';
@@ -28,7 +28,7 @@ export const CLIENT_ONLY:Readonly<Record<string,string>>={
   undo:'Undoes this token’s own last change; each token has its own undo history.',
   redo:'Redoes this token’s last undo.',
 };
-const row=(u:Unit)=>({designation:u.designation,title:u.title,affiliation:u.affiliation,fn:u.fn,echelon:u.echelon,lifecycle:u.lifecycle,ring:ringForRadius(u.pos.r),due:u.dueAt,strength:u.strength,sector:u.sectorId});
+const row=(u:Unit,doc?:Doc)=>({designation:u.designation,title:u.title,affiliation:u.affiliation,fn:u.fn,echelon:u.echelon,lifecycle:u.lifecycle,ring:ringForRadius(u.pos.r),due:u.dueAt,strength:u.strength,sector:u.sectorId,...(u.parentId?{tf:doc?.units.find(x=>x.id===u.parentId)?.designation??u.parentId}:{}),...(u.taskForce?{taskForce:true}:{}),...(u.collapsed?{collapsed:true}:{})});
 export async function mcpRequest(request:Request,maps:Maps,user:User,agent?:{id:string;name:string},vikunja?:VikunjaSync,admin=false):Promise<Response> {
   const server=new McpServer({name:'opsmap',version:'2.1.0'},{instructions:'There can be several shared maps; opsmap_maps lists them. Every tool takes an optional map (id or name) and uses the default (first) map without one. opsmap_command takes the same text as the command bar; pass selected (a unit) where the bar would have one selected. Use unit designations in commands. Prefer /new pending when identity is uncertain. opsmap_map_create, opsmap_map_rename, opsmap_map_delete (administrator) and opsmap_import (administrator) manage maps as the map switcher does. opsmap_tokens and opsmap_token_revoke list and revoke bearer tokens; create tokens in the browser (Access tokens in the user menu). All writes affect the shared maps and are attributed to your token user.'});
   const result=(value:unknown)=>({content:[{type:'text' as const,text:JSON.stringify(value)}]});
@@ -53,7 +53,7 @@ export async function mcpRequest(request:Request,maps:Maps,user:User,agent?:{id:
           const doc=hub.doc,des=(id:string)=>doc.units.find(u=>u.id===id)?.designation??id;
           if(args.measure!==undefined){const m=doc.measures.find(x=>x.id===args.measure)!;return result({ok:true,log,measure:{type:m.type,name:m.name,sector:m.sectorId,ring:m.pos?ringForRadius(m.pos.r):undefined,size:m.size,members:m.members?.map(des),date:m.date}});}
           if(args.sectorId!==undefined){const s=doc.sectors.find(x=>x.id===args.sectorId)!;return result({ok:true,log,sector:{name:s.name,width:s.widthDeg,units:doc.units.filter(u=>u.sectorId===s.id).map(u=>u.designation)}});}
-          return result({ok:true,log,unit:row(doc.units.find(u=>u.id===args.unit)!)});
+          return result({ok:true,log,unit:row(doc.units.find(u=>u.id===args.unit)!,doc)});
         }
         case 'sitrep':return result({ok:true,log,text:sitrepText(hub.doc,now)});
         case 'export':return result({ok:true,log,doc:hub.doc});
@@ -70,7 +70,7 @@ export async function mcpRequest(request:Request,maps:Maps,user:User,agent?:{id:
       return result({ok:true,log:op.log,preview:parsed.preview});
     }catch(error){return failure(error);}
   });
-  server.registerTool('opsmap_query',{description:'Query units with optional filters.',inputSchema:{map,sector:z.string().optional(),affiliation:z.string().optional(),lifecycle:z.string().optional(),ring:z.string().optional(),text:z.string().optional()}},async q=>{let hub;try{hub=maps.resolve(q.map);}catch(error){return failure(error);}return result(hub.doc.units.filter(u=>(!q.sector||u.sectorId===q.sector||hub.doc.sectors.find(s=>s.id===u.sectorId)?.name.toLowerCase()===q.sector.toLowerCase())&&(!q.affiliation||u.affiliation===q.affiliation)&&(!q.lifecycle||u.lifecycle===q.lifecycle)&&(!q.ring||ringForRadius(u.pos.r)===q.ring)&&(!q.text||`${u.designation} ${u.title} ${u.note??''}`.toLowerCase().includes(q.text.toLowerCase()))).map(row));});
+  server.registerTool('opsmap_query',{description:'Query units with optional filters.',inputSchema:{map,sector:z.string().optional(),affiliation:z.string().optional(),lifecycle:z.string().optional(),ring:z.string().optional(),text:z.string().optional()}},async q=>{let hub;try{hub=maps.resolve(q.map);}catch(error){return failure(error);}return result(hub.doc.units.filter(u=>(!q.sector||u.sectorId===q.sector||hub.doc.sectors.find(s=>s.id===u.sectorId)?.name.toLowerCase()===q.sector.toLowerCase())&&(!q.affiliation||u.affiliation===q.affiliation)&&(!q.lifecycle||u.lifecycle===q.lifecycle)&&(!q.ring||ringForRadius(u.pos.r)===q.ring)&&(!q.text||`${u.designation} ${u.title} ${u.note??''}`.toLowerCase().includes(q.text.toLowerCase()))).map(u=>row(u,hub.doc)));});
   server.registerTool('opsmap_sitrep',{description:'Current situation report.',inputSchema:{map}},async q=>{try{return result(sitrepText(maps.resolve(q.map).doc,new Date()));}catch(error){return failure(error);}});
   server.registerTool('opsmap_help',{description:'Strict command grammar: every verb, or one verb (aliases and a leading / are accepted).',inputSchema:{verb:z.string().optional()}},async({verb})=>{
     if(!verb)return result(SYNTAX);

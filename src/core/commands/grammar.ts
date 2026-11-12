@@ -90,6 +90,7 @@ export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult 
    case 'drop':subject();a.bypassed=eat('bypassed');break;
    case 'reinforce':subject();if(eat('with')||(peek()&&!peek().quoted)){const t=take('unit');a.with=resolveUnit(t.value,doc,t.start,selected?.sectorId).id;}break;
    case 'reduce':subject();if(peek())a.note=quoted('scope cut');break;
+   case 'collapse':case 'expand':if(is('all')){take('all');a.all=true;}else subject();break;
    case 'attach':subject();expect('to');{const t=take('task force');a.parent=resolveUnit(t.value,doc,t.start,selected?.sectorId).id;}break;
    case 'link':subject();{const t=take('unit');a.target=resolveUnit(t.value,doc,t.start,selected?.sectorId).id;}if(eat('as'))a.kind=take('dependency or handoff').value.toLowerCase();break;
    case 'due':subject();a.dueAt=eat('none')?null:date();break;

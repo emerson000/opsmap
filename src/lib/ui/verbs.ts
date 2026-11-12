@@ -38,6 +38,13 @@ const threat = (u?: Unit) => u?.affiliation === 'hostile' || u?.affiliation === 
 const friendly = (u?: Unit) => u?.affiliation === 'friend' || u?.affiliation === 'assumed';
 const resolved = (u?: Unit) => u?.lifecycle === 'done' || u?.lifecycle === 'dropped';
 const open = (o: Obj): true | string => resolved(o.unit) ? `${o.unit!.designation} is ${o.unit!.lifecycle}: reopen it first` : true;
+/** `/collapse` (fold) or `/expand`: a task force in the other state, or on the map view any such task force. */
+function foldable(o: Obj, doc: Doc, fold: boolean): true | string {
+  const tf = (u: Unit) => Boolean(u.taskForce) && doc.units.some(c => c.parentId === u.id);
+  if (o.kind === 'map') return doc.units.some(u => tf(u) && Boolean(u.collapsed) !== fold) ? true : `No ${fold ? 'expanded' : 'collapsed'} task force`;
+  if (!o.unit || !tf(o.unit)) return 'Not a task force';
+  return Boolean(o.unit.collapsed) !== fold ? true : `Already ${fold ? 'collapsed' : 'expanded'}`;
+}
 const AREAS = ['obj', 'ea', 'nai'] as const;
 const AREA_WORD: Record<string, string> = { obj: 'objective', ea: 'engagement area', nai: 'named area of interest' };
 
@@ -72,6 +79,8 @@ export const VERB_SLOTS: readonly VerbSlot[] = [
   { verb: 'reduce', kinds: ['unit'], slots: ['‹unit›', '["‹scope cut›"]'], control: 'reduce-note', label: '(−)' },
   { verb: 'attach', kinds: ['unit'], slots: ['‹unit›', 'to ‹task force›'], control: 'unit-attach', label: 'Attach…', menu: 'form' },
   { verb: 'detach', kinds: ['unit'], slots: ['‹unit›'], control: 'unit-detach', label: 'Detach', menu: 'run', enabled: o => o.unit?.parentId ? true : 'Not attached' },
+  { verb: 'collapse', kinds: ['unit', 'map'], slots: ['‹task force› | all'], control: 'tf-collapse', label: 'Collapse task force', menu: 'run', enabled: (o, doc) => foldable(o, doc, true) },
+  { verb: 'expand', kinds: ['unit', 'map'], slots: ['‹task force› | all'], control: 'tf-expand', label: 'Expand task force', menu: 'run', enabled: (o, doc) => foldable(o, doc, false) },
   { verb: 'due', kinds: ['unit'], slots: ['‹unit›', '‹date|none›'], control: 'unit-due', label: 'Due…', menu: 'form' },
   { verb: 'note', kinds: ['unit'], slots: ['‹unit›', '"‹text›"'], control: 'unit-note', label: 'Note…', menu: 'form' },
   { verb: 'rate', kinds: ['unit'], slots: ['‹unit›', '‹A–F›‹1–6›'], control: 'unit-rating', label: 'Rating' },
@@ -117,7 +126,7 @@ export const VERB_SLOTS: readonly VerbSlot[] = [
  */
 export const UNIT_MENU: readonly { key: string; verb: string; form?: string }[] = [
   { key: 'reopen', verb: 'reopen' }, { key: 'attack', verb: 'attack' }, { key: 'move', verb: 'move' }, { key: 'due', verb: 'due' }, { key: 'note', verb: 'note' },
-  { key: 'unblock', verb: 'unblock' }, { key: 'block', verb: 'block' }, { key: 'unpin', verb: 'unpin' }, { key: 'halt', verb: 'halt' }, { key: 'key', verb: 'key' },
+  { key: 'collapse', verb: 'collapse' }, { key: 'expand', verb: 'expand' }, { key: 'unblock', verb: 'unblock' }, { key: 'block', verb: 'block' }, { key: 'unpin', verb: 'unpin' }, { key: 'halt', verb: 'halt' }, { key: 'key', verb: 'key' },
   { key: 'done', verb: 'done' }, { key: 'drop', verb: 'drop' }, { key: 'inspect', verb: 'find' },
 ];
 /** The table entry behind a unit menu item. */
@@ -216,6 +225,7 @@ export function format(cmd: Command, doc: Doc): string {
     case 'reinforce': add(unit(a.unit), a.with !== undefined && `with ${unit(a.with)}`); break;
     case 'reduce': add(unit(a.unit), typeof a.note === 'string' && quoted(a.note)); break;
     case 'attach': add(unit(a.unit), 'to', unit(a.parent)); break;
+    case 'collapse': case 'expand': add(a.all === true ? 'all' : unit(a.unit)); break;
     case 'link': add(unit(a.unit), unit(a.target), typeof a.kind === 'string' && `as ${a.kind}`); break;
     case 'due': add(unit(a.unit), a.dueAt === null ? 'none' : date(a.dueAt)); break;
     case 'note': add(unit(a.unit), text(a.note)); break;

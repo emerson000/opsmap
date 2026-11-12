@@ -5,6 +5,8 @@
   import type { Doc, Unit } from '../../../core/model/types';
   import { AO_SIZES, aoScale, aoSizeName, ringForRadius, type AoSize } from '../../../core/model/geometry';
   import { isArchived } from '../../map/scene';
+  import { attachedUnder } from '../../../core/commands/apply';
+  import { unresolved } from '../../../core/commands/resolve';
   import { miniSymbol } from '../mini';
   import { env, runCommand, ui, type CreateRequest, type Theme } from '../shell.svelte';
   import { ringOf } from '../words';
@@ -30,6 +32,9 @@
     return { s, units: here.length, threats: here.filter(threat).length };
   }));
   const measures = $derived([...doc.measures].sort((a, b) => Number(a.type === 'pl') - Number(b.type === 'pl') || a.name.localeCompare(b.name)));
+  /** Task forces with an attached unit, and how many open units each one holds. */
+  const tfs = $derived(live.filter(u => u.taskForce && doc.units.some(c => c.parentId === u.id)).map(u => ({ u, n: attachedUnder(doc, u).filter(unresolved).length })));
+  const foldAll = (verb: 'collapse' | 'expand') => ({ verb, args: { all: true } });
   const home = $derived(doc.sectors.find(s => s.name.toLowerCase() === 'household') ?? doc.sectors[0]);
   /** The create buttons: + Unit… is the one filled. Each opens the form under them; pressed again, it closes. */
   const CREATE: { kind: CreateRequest['kind']; label: string; hint: string }[] = [
@@ -97,6 +102,18 @@
     </button>
   {:else}<p class="muted">No OBJ, EA, NAI or phase line yet: + Area… or + Phase line… adds one.</p>{/each}
 </section>
+{#if tfs.length}
+  <section class="block" data-testid="situation-tfs">
+    <div class="cap sub-cap"><span>Task forces <b>{tfs.length}</b></span><code class="code">/collapse all</code></div>
+    {#each tfs as t (t.u.id)}{@render row(t.u, `${t.u.collapsed ? 'Collapsed' : 'Expanded'} · ${t.n}`)}{/each}
+    <div class="pair">
+      {#each [{ verb: 'collapse', label: 'Collapse all', any: tfs.some(t => !t.u.collapsed) }, { verb: 'expand', label: 'Expand all', any: tfs.some(t => t.u.collapsed) }] as c (c.verb)}
+        {@const t = textOf(foldAll(c.verb as 'collapse' | 'expand'), doc)}
+        <button class="btn" data-testid="tf-{c.verb}" disabled={!c.any} title="{c.label} task forces ({t})" use:echoes={t} onclick={() => runCommand(foldAll(c.verb as 'collapse' | 'expand'))}>{c.label}</button>
+      {/each}
+    </div>
+  </section>
+{/if}
 <section class="block ao" data-testid="ao-size">
   <div class="cap sub-cap" id="ao-label">AO size <code class="code">/ao size</code></div>
   <div class="seg" role="radiogroup" aria-labelledby="ao-label">
@@ -130,6 +147,7 @@
   .ao .seg .btn { flex: 1; justify-content: center; }
   .ao .seg .btn + .btn { margin-left: -1px; }
   .muted { color: var(--ink-3); margin: 2px 0; font-size: 12px; }
+  .pair { display: flex; flex-wrap: wrap; gap: var(--s1); margin-top: var(--s1); }
   .hint { color: var(--ink-3); font-size: 12px; margin: var(--s2) 0; }
   :global([data-tier='phone']) .urow { min-height: 44px; }
   .urow { display: grid; grid-template-columns: 40px 72px 1fr; align-items: center; gap: var(--s1); width: 100%; padding: 2px var(--s1); background: none; border: 0; border-bottom: 1px dotted var(--rule); text-align: left; }

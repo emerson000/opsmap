@@ -18,6 +18,8 @@ export interface SceneOptions { view: View; now: Date; selectedId?: string | nul
 export interface SceneUnit {
   id: string; unit: Unit; x: number; y: number; ring: Ring; symbolView: View;
   pulse: boolean; penetration: boolean; penetrationPath?: string; contact: boolean; pinned: boolean; selected: boolean;
+  /** A collapsed task force: how many live units attached under it are hidden (drawn as a stack with a count). */
+  stack?: number;
 }
 export interface SceneSector {
   id: string; name: string; index: number; startDeg: number; widthDeg: number; centerDeg: number;
@@ -127,9 +129,22 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
   // "PL QUARTER 07FEB" is the longest stock label: 16 monospace characters plus margins.
   const plLen = o.plFont ? 17 * 0.7 * o.plFont + 16 : 170;
   const unitClear = UNIT_CLEAR * scale;
-  const live = doc.units.filter(u => !isArchived(u, o.now, doc.lastTurn,doc.settings.tz));
-  const liveIds = new Set(live.map(u => u.id));
+  const all = doc.units.filter(u => !isArchived(u, o.now, doc.lastTurn,doc.settings.tz));
   const byId = new Map(doc.units.map(u => [u.id, u]));
+  // Collapsed task forces: each unit attached under one (at any depth) is drawn as the outermost collapsed TF above it.
+  const holder = new Map<string, string>();
+  for (const u of all) {
+    let at = u.parentId ? byId.get(u.parentId) : undefined, found: Unit | undefined;
+    const seen = new Set<string>();
+    while (at && !seen.has(at.id)) { seen.add(at.id); if (at.collapsed && at.taskForce) found = at; at = at.parentId ? byId.get(at.parentId) : undefined; }
+    if (found && !isArchived(found, o.now, doc.lastTurn, doc.settings.tz)) holder.set(u.id, found.id);
+  }
+  const stackOf = new Map<string, number>();
+  for (const id of holder.values()) stackOf.set(id, (stackOf.get(id) ?? 0) + 1);
+  const live = all.filter(u => !holder.has(u.id));
+  const liveIds = new Set(live.map(u => u.id));
+  /** The id an order or line is drawn from: the unit, or the collapsed task force that holds it. */
+  const shownId = (id: string) => holder.get(id) ?? id;
   const staffPlus = o.view !== 'commander';
 
   // Sectors
@@ -169,12 +184,14 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
   });
 
   // Units
-  const attacked = new Set(doc.orders.filter(ord => ord.type === 'attack' && liveIds.has(ord.from) && byId.get(ord.from)!.lifecycle !== 'done').map(ord => ord.to));
+  // A hidden attacker still engages its target, and puts the stack that holds it in contact.
+  const allIds = new Set(all.map(u => u.id));
+  const attacked = new Set(doc.orders.filter(ord => ord.type === 'attack' && allIds.has(ord.from) && byId.get(ord.from)!.lifecycle !== 'done').map(ord => ord.to));
   const contactIds = new Set<string>();
   for (const ord of doc.orders) {
     if (ord.type !== 'attack') continue;
     const a = byId.get(ord.from), t = byId.get(ord.to);
-    if (a && t && liveIds.has(a.id) && liveIds.has(t.id) && a.pos.r < RING_R.mid[0] && t.pos.r < RING_R.mid[0]) contactIds.add(a.id);
+    if (a && t && allIds.has(a.id) && liveIds.has(t.id) && a.pos.r < RING_R.mid[0] && t.pos.r < RING_R.mid[0]) contactIds.add(shownId(a.id));
   }
   const todayStart = zonedTime(localDay(o.now,doc.settings.tz),doc.settings.tz).getTime();
   const units: SceneUnit[] = [];
@@ -196,8 +213,10 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
       penetration: overdue && ring === 'hq',
       contact: contactIds.has(u.id),
       pinned: Boolean(u.posOverride),
-      selected: o.selectedId === u.id,
+      // A hidden unit open in the sidebar marks the stack that holds it.
+      selected: o.selectedId === u.id || (o.selectedId != null && holder.get(o.selectedId) === u.id),
     };
+    if (stackOf.has(u.id)) scenePos.stack = stackOf.get(u.id);
     if (scenePos.penetration) {
       const tip = world(Math.max(u.pos.r + unitClear / SCALE * 0.9, 0.35), u.pos.theta);
       const a = world(RING_R.near[0] + 0.12, u.pos.theta - 5), b = world(RING_R.near[0] + 0.12, u.pos.theta + 5);
@@ -206,6 +225,8 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
     units.push(scenePos);
     anchors.set(u.id, { x: p.x, y: p.y, clear: unitClear });
   }
+
+  for (const [id, tf] of holder) { const a = anchors.get(tf); if (a) anchors.set(id, a); }
 
   // Control measures
   const measures: SceneMeasure[] = doc.measures.filter(m => m.type !== 'pl').map(m => {
@@ -250,7 +271,17 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
     commandLines.push({ id: `cmd-${u.id}`, fromId: u.id, toId: parent.id, side,
       d: `M${r2(a.x + ux * a.clear)} ${r2(a.y + uy * a.clear)} L${r2(b.x - ux * b.clear)} ${r2(b.y - uy * b.clear)}` });
   }
-  const shown = doc.orders.filter(visibleOrder);
+  // Orders inside one collapsed task force are not drawn; orders that several hidden units give the same target draw once.
+  // The task force's own order wins over the same order from a unit hidden in it.
+  const key = (ord: Order) => `${ord.type}|${shownId(ord.from)}|${shownId(ord.to)}`;
+  const hiddenEnd = (ord: Order) => holder.has(ord.from) || holder.has(ord.to);
+  const visible = doc.orders.filter(visibleOrder);
+  const drawn = new Set(visible.filter(ord => !hiddenEnd(ord)).map(key));
+  const shown = visible.filter(ord => {
+    if (!hiddenEnd(ord)) return true;
+    if (shownId(ord.from) === shownId(ord.to) || drawn.has(key(ord))) return false;
+    drawn.add(key(ord)); return true;
+  });
   const ratioOn = new Map<string, string>();   // target id → order id that carries the force ratio
   if (staffPlus) {
     const byTarget = new Map<string, Order[]>();
@@ -306,7 +337,7 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
   const ghosts: SceneGhost[] = [];
   for (const t of trails) {
     const u = byId.get(t.unitId), now = anchors.get(t.unitId);
-    if (!u || !now || ringOfRadius(t.from.r) === 'beyond' && ringOfRadius(u.pos.r) === 'beyond') continue;
+    if (!u || !now || holder.has(u.id) || ringOfRadius(t.from.r) === 'beyond' && ringOfRadius(u.pos.r) === 'beyond') continue;
     const from = world(Math.min(t.from.r, BEYOND_R), t.from.theta);
     ghosts.push({ unitId: u.id, unit: u, x: r2(from.x), y: r2(from.y), trail: `M${r2(from.x)} ${r2(from.y)} L${r2(now.x)} ${r2(now.y)}` });
   }

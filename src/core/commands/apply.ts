@@ -27,12 +27,30 @@ function item<T extends {id:string}>(values:T[],value:unknown,label:string):T {c
 function finite(value:unknown,label:string):number {requireThat(typeof value==='number'&&Number.isFinite(value),`Invalid ${label}`);return value;}
 function date(value:unknown):string {const result=text(value,'date');requireThat(Number.isFinite(Date.parse(result)),'Invalid date');return result;}
 function checkPerson(u:Unit,identity:Affiliation,confirm:unknown):void {requireThat(u.kind!=='person'||identity!=='hostile'||confirm===true,'Mark a person hostile? The problem is usually the situation, not the person. Add confirm to proceed.');}
-function attach(doc:Doc,child:Unit,parent:Unit):void {
+/** Attach `child` to `parent`, which becomes a task force. Attached replaces support: a support order from the child
+ *  to its new task force is removed. Returns the log suffix for that, and for joining a collapsed task force. */
+function attach(doc:Doc,child:Unit,parent:Unit):string {
   requireThat(child.id!==parent.id,'A unit cannot attach to itself');
   let ancestor:Unit|undefined=parent;
   const visited=new Set<string>();
   while(ancestor){requireThat(ancestor.id!==child.id&&!visited.has(ancestor.id),'Attachment would create a cycle');visited.add(ancestor.id);ancestor=doc.units.find(u=>u.id===ancestor?.parentId);}
-  child.parentId=parent.id;parent.taskForce=true;
+  const moved=child.parentId!==parent.id;child.parentId=parent.id;parent.taskForce=true;
+  const support=doc.orders.some(o=>o.type==='support'&&o.from===child.id&&o.to===parent.id);
+  if(support)doc.orders=doc.orders.filter(o=>!(o.type==='support'&&o.from===child.id&&o.to===parent.id));
+  const hidden=moved?collapsedOver(doc,child):undefined;
+  return `${support?' — SUPPORT ENDED':''}${hidden?` — HIDDEN IN COLLAPSED TF ${hidden.designation}`:''}`;
+}
+/** The outermost collapsed task force above a unit (the symbol that stands for it on the map), if any. */
+export function collapsedOver(doc:Doc,u:Unit):Unit|undefined {
+  let found:Unit|undefined,at=u.parentId?doc.units.find(x=>x.id===u.parentId):undefined;const seen=new Set<string>();
+  while(at&&!seen.has(at.id)){seen.add(at.id);if(at.collapsed)found=at;at=at.parentId?doc.units.find(x=>x.id===at!.parentId):undefined;}
+  return found;
+}
+/** Every unit attached under a task force, at any depth. */
+export function attachedUnder(doc:Doc,tf:Unit):Unit[] {
+  const out=new Set<string>([tf.id]);
+  for(let grew=true;grew;){grew=false;for(const u of doc.units)if(u.parentId&&out.has(u.parentId)&&!out.has(u.id)){out.add(u.id);grew=true;}}
+  out.delete(tf.id);return doc.units.filter(u=>out.has(u.id));
 }
 function adjustSectors(doc:Doc,old:Doc):void {
   let start=old.sectors[0]?.startDeg??270;
@@ -83,7 +101,7 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
     const dissolve=(parentId:string|undefined):string=>{
       const p=parentId===undefined?undefined:doc.units.find(x=>x.id===parentId);
       if(!p||!p.taskForce||doc.units.some(c=>c.parentId===p.id))return '';
-      delete p.taskForce;changed(p);
+      delete p.taskForce;delete p.collapsed;changed(p);
       return ` — TF ${p.designation} DISSOLVED${cancelBoundary([p])}`;
     };
     /** Place a unit by hand: free spot near the requested position, pinned against auto-advance. */
@@ -190,8 +208,23 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
         u.pos=resolvePlacement(doc,u.sectorId,u.pos,u.id);changed(u);log=`${u.designation} REOPENED`;break;
       }
       case 'vk': return vikunja(doc,cmd,now);
-      case 'reinforce':case 'reduce': {const u=unit();u.reinforced=cmd.verb==='reinforce'?'+':'-';let left='';if(a.with){const child=item(doc.units,a.with,'unit'),was=child.parentId;attach(doc,child,u);changed(child);if(was!==u.id)left=dissolve(was);}if(a.note!==undefined)u.note=text(a.note,'scope note');changed(u);log=`${u.designation} ${cmd.verb==='reinforce'?'REINFORCED (+)':'REDUCED (-)'}${left}`;break;}
-      case 'attach': {const u=unit(),parent=item(doc.units,a.parent,'parent'),was=u.parentId;attach(doc,u,parent);changed(u);changed(parent);log=`${u.designation} ATTACHED TO TF ${parent.designation}${was!==parent.id?dissolve(was):''}`;break;}
+      case 'reinforce':case 'reduce': {const u=unit();u.reinforced=cmd.verb==='reinforce'?'+':'-';let left='';if(a.with){const child=item(doc.units,a.with,'unit'),was=child.parentId;left=attach(doc,child,u);changed(child);if(was!==u.id)left+=dissolve(was);}if(a.note!==undefined)u.note=text(a.note,'scope note');changed(u);log=`${u.designation} ${cmd.verb==='reinforce'?'REINFORCED (+)':'REDUCED (-)'}${left}`;break;}
+      case 'attach': {const u=unit(),parent=item(doc.units,a.parent,'parent'),was=u.parentId;const ended=attach(doc,u,parent);changed(u);changed(parent);log=`${u.designation} ATTACHED TO TF ${parent.designation}${ended}${was!==parent.id?dissolve(was):''}`;break;}
+      case 'collapse':case 'expand': {
+        // Display state stored in the map: a collapsed task force stands for every unit attached under it.
+        const fold=cmd.verb==='collapse',open=(x:Unit)=>attachedUnder(doc,x).filter(unresolved).length;
+        if(a.all===true){
+          const tfs=doc.units.filter(x=>x.taskForce&&Boolean(x.collapsed)!==fold&&doc.units.some(c=>c.parentId===x.id));
+          requireThat(tfs.length,fold?'No expanded task force to collapse':'No collapsed task force to expand');
+          for(const x of tfs){if(fold)x.collapsed=true;else delete x.collapsed;changed(x);}
+          log=`${tfs.length===1?'TF':'TFS'} ${tfs.map(x=>x.designation).join(', ')} ${fold?'COLLAPSED':'EXPANDED'}`;break;
+        }
+        const u=unit();
+        requireThat(u.taskForce&&doc.units.some(c=>c.parentId===u.id),`${u.designation} is not a task force: attach a unit to it first`);
+        requireThat(Boolean(u.collapsed)!==fold,`TF ${u.designation} is already ${fold?'collapsed':'expanded'}`);
+        if(fold)u.collapsed=true;else delete u.collapsed;changed(u);
+        const n=open(u);log=`TF ${u.designation} ${fold?'COLLAPSED':'EXPANDED'} — ${n} ${n===1?'UNIT':'UNITS'}`;break;
+      }
       case 'detach': {const u=unit(),was=u.parentId;requireThat(was,`${u.designation} is not attached`);delete u.parentId;changed(u);log=`${u.designation} DETACHED${dissolve(was)}`;break;}
       case 'link': {
         const u=unit(),other=item(doc.units,a.target,'unit');

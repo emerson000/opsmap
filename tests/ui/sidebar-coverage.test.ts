@@ -18,7 +18,7 @@ const ACTS_ON: Record<string, ObjKind[]> = {
   new: ['map', 'sector'], id: ['unit'], size: ['unit'], fn: ['unit'], rename: ['unit'], move: ['unit', 'sector'],
   attack: ['unit', 'area'], moving: ['unit', 'area', 'pl', 'sector'], axis: ['unit', 'area', 'pl'], advancing: ['unit', 'sector'],
   bda: ['unit'], block: ['unit'], unblock: ['unit'], unpin: ['unit'], reopen: ['unit'], done: ['unit'], drop: ['unit'],
-  reinforce: ['unit'], reduce: ['unit'], attach: ['unit'], detach: ['unit'], link: ['unit'], due: ['unit'], note: ['unit'],
+  reinforce: ['unit'], reduce: ['unit'], attach: ['unit'], detach: ['unit'], collapse: ['unit', 'map'], expand: ['unit', 'map'], link: ['unit'], due: ['unit'], note: ['unit'],
   rate: ['unit'], key: ['unit'], cp: ['unit'], halt: ['unit', 'area', 'pl', 'sector'], support: ['unit'], sidc: ['unit'],
   find: ['unit', 'area', 'pl', 'sector'], intent: ['map'], sitrep: ['map'],
   'sector add': ['map'], 'sector rename': ['sector'], 'sector remove': ['sector'], 'sector width': ['sector'], 'sector size': ['map'],

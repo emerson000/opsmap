@@ -365,7 +365,8 @@
     if (measureCard) measureCard = null;
     if (unitMenu) unitMenu = null;
     // The chevron's own click opens its sector; capturing the pointer here would send that click to the map.
-    if (target.closest?.('[data-beyond]')) return;
+    // So does a collapsed task force's count badge (it expands the stack).
+    if (target.closest?.('[data-beyond], [data-stack]')) return;
     pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
     cancelAnimationFrame(anim);
     if (pointers.size === 2) { capture(e); startPinch(); return; }
@@ -529,6 +530,14 @@
   function onDblClick(e: MouseEvent) {
     // Touch double-tap is handled from pointer events (zoom); the dblclick that some browsers add is ignored.
     if (picking || (lastPointerType !== 'mouse' && lastPointerType !== 'pen')) return;
+    // The press captured the pointer, so the event targets the map: find the unit under it. A double-click on a
+    // task force toggles its stack (not right after its badge expanded it); on any other unit it does nothing.
+    const unitId = unitUnder(e);
+    if (unitId) {
+      const u = doc.units.find(x => x.id === unitId);
+      if (u && isTf(u) && performance.now() - foldedAt > 600) fold(u.id, u.collapsed ? 'expand' : 'collapse');
+      return;
+    }
     const measureId = (e.target as Element).closest('[data-measure-id]')?.getAttribute('data-measure-id');
     if (measureId) { selectObject({ kind: 'measure', id: measureId }); if (!isPl(measureId)) openMeasure(measureId); return; }
     if ((e.target as Element).closest('[data-interactive], [data-sector-id]')) return;
@@ -587,6 +596,14 @@
     try { const res = dispatch(cmd); if (res.ok) onnotice?.(res.log); else toast(res.error); }
     catch (e) { toast(`Could not ${verb}: ${e instanceof Error ? e.message : String(e)}`); }
   };
+  const isTf = (u: Unit) => Boolean(u.taskForce) && doc.units.some(c => c.parentId === u.id);
+  /** Collapse or expand a task force on the map (the badge, a double-click), with the log line as a notice. */
+  let foldedAt = -Infinity;
+  function fold(id: string, verb: 'collapse' | 'expand') {
+    foldedAt = performance.now();
+    try { const res = dispatch({ verb, args: { unit: id } }); if (res.ok) onnotice?.(res.log); else toast(res.error); }
+    catch (e) { toast(`Could not ${verb}: ${e instanceof Error ? e.message : String(e)}`); }
+  }
   /** Open the unit's view and move focus into the sidebar. */
   const inspect = (id: string) => () => {
     select({ kind: 'unit', id });
@@ -622,6 +639,8 @@
     add('unpin', 'Unpin', act('unpin'));
     if (doc.orders.some(o => o.from === u.id)) add('halt', 'Halt orders', act('halt'));
     add('key', u.keyTerrain ? 'Clear key terrain' : 'Mark key terrain', act('key'));
+    add('collapse', 'Collapse task force', act('collapse'));
+    add('expand', 'Expand task force', act('expand'));
     if (items[first]) items[first].sep = true;
     add('done', threat ? 'Destroyed' : 'Done', act('done'), { sep: true });
     add('drop', threat ? 'Bypassed' : 'Drop', act('drop', threat ? { bypassed: true } : {}), { warn: true, code: threat ? '/drop … bypassed' : '/drop' });
@@ -756,7 +775,7 @@
             onpointerleave={() => { if (selection.hoveredId === su.id) selection.hoveredId = null; }}>
             <g out:leave={{ id: su.id, x: su.x, y: su.y }}>
               {#if su.pulse}<circle r={21 * s} class="pulse" />{/if}
-              {#if su.selected}<circle r={23 * s} class="sel-ring" />{:else if selection.hoveredId === su.id}<circle r={22 * s} class="hover-ring" />{/if}
+              {#if su.selected}<circle r={(su.stack ? 27 : 23) * s} class="sel-ring" />{:else if selection.hoveredId === su.id}<circle r={22 * s} class="hover-ring" />{/if}
               {#each remote.filter(r => r.unitId === su.id) as r, i (r.userId)}
                 <g class="remote-sel" data-testid="remote-selection" data-user-id={r.userId} style="--who:{r.color}">
                   <circle r={(26 + i * 4) * s} />
@@ -767,6 +786,12 @@
               {#if link?.targetId === su.id}<circle r={23 * s} class="target-ring" />{/if}
               {#if pk}<circle r={24 * s} class="target-ring pick-ring" class:cursor={picking?.cursor?.kind === 'unit' && picking.cursor.id === su.id} />{/if}
               <rect x={-20*s} y={-24*s} width={40*s} height={48*s} fill="transparent" />
+              {#if su.stack}
+                <!-- Collapsed task force: two copies offset behind the symbol read as a stack of units. -->
+                {#each [2, 1] as k (k)}
+                  <image pointer-events="none" class="stack-frame" href={sym.href} x={-sym.center.x * s + 4 * k * s} y={-sym.center.y * s - 4 * k * s} width={sym.width * s} height={sym.height * s} />
+                {/each}
+              {/if}
               <!-- Placed by the frame center, so an HQ's frame sits on its spot and its staff hangs below. -->
               <image pointer-events="none" href={sym.href} x={-sym.center.x * s} y={-sym.center.y * s} width={sym.width * s} height={sym.height * s} />
               {#if su.unit.lifecycle === 'done' && su.unit.affiliation === 'friend'}
@@ -775,6 +800,21 @@
               {#if su.unit.keyTerrain}
                 {@const kt = keyTerrainSymbol(11, theme)}
                 <image href={kt.href} x={-22 * s - kt.anchor.x * s} y={-17 * s - kt.anchor.y * s} width={kt.width * s} height={kt.height * s} class="kt"><title>Key terrain</title></image>
+              {/if}
+              {#if su.stack}
+                {@const n = su.stack}
+                {@const w = (n > 9 ? 22 : 17) * s}
+                {@const t = tryFormat({ verb: 'expand', args: { unit: su.id } }, doc) ?? '/expand'}
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <g class="stack-badge" class:touch data-stack data-interactive data-testid="tf-stack" data-count={n} role="button" tabindex="-1"
+                  aria-label="Expand task force {su.unit.designation}: {n} attached {n === 1 ? 'unit' : 'units'} hidden" transform="translate({30 * s} {-26 * s})"
+                  onclick={(e) => { e.stopPropagation(); fold(su.id, 'expand'); }} ondblclick={(e) => e.stopPropagation()}>
+                  <!-- At least 24 px to click; on touch smaller than the usual 44 px so it does not cover the symbol. -->
+                  <circle r={touch ? 16 / view2d.k : Math.max(12 / view2d.k, 9 * s)} class="stack-hit" />
+                  <rect x={-w / 2} y={-7.5 * s} width={w} height={15 * s} rx={7.5 * s} class="stack-pill" />
+                  <text y={3.8 * s} font-size={10.5 * s} class="stack-count">+{n}</text>
+                  <title>{n} attached {n === 1 ? 'unit' : 'units'} hidden. Click to show them ({t})</title>
+                </g>
               {/if}
               {#if su.pinned}
                 <path d={PIN} transform="translate({-17 * s} {-12 * s}) scale({s})" class="pin"><title>Placed by hand: skipped by auto-advance</title></path>
@@ -1053,6 +1093,12 @@
   .flash { fill: none; stroke: var(--om-select); stroke-width: 3; transform-box: fill-box; transform-origin: center; animation: flash 0.6s ease-out 3; }
   .pulse { fill: var(--om-hostile); opacity: 0; transform-box: fill-box; transform-origin: center; animation: pulse 2.4s ease-out infinite; pointer-events: none; }
   .pin { fill: none; stroke: var(--om-ink); stroke-width: 1.4; }
+  .stack-frame { opacity: 0.6; }
+  .stack-badge { cursor: pointer; }
+  .stack-hit { fill: transparent; }
+  .stack-pill { fill: var(--om-ink); stroke: var(--om-halo); stroke-width: 1.2; }
+  .stack-badge:hover .stack-pill { stroke: var(--om-select); stroke-width: 2.4; }
+  .stack-count { fill: var(--om-halo); font-family: var(--om-font); font-weight: 700; text-anchor: middle; pointer-events: none; }
   .kt { pointer-events: none; }
   .pen { fill: var(--om-hostile); fill-opacity: 0.16; stroke: var(--om-hostile); stroke-width: 1.6; stroke-linejoin: miter; pointer-events: none; }
   .trail { fill: none; stroke: var(--om-hostile); stroke-width: 1.2; stroke-dasharray: 1.5 3.5; stroke-linecap: round; opacity: 0.55; }

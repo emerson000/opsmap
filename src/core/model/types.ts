@@ -20,6 +20,8 @@ export interface Unit {
   strength?: number;
   reinforced?: '+'|'-'|'±';
   taskForce?: boolean;
+  /** A task force drawn as one stacked symbol: every unit attached under it is hidden on the map (`/collapse`). */
+  collapsed?: boolean;
   parentId?: string;
   sectorId: string;
   pos: { r: number; theta: number };

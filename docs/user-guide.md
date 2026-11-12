@@ -118,6 +118,16 @@ A unit becomes a task force (TF bracket) when another unit is attached to it, `/
 
 ![Task force MOVE with the bracket over its echelon, and PACKING and MOVERS attached to it by dashed command lines](images/task-force.png)
 
+A task force with many attached units can take up a lot of the map. `/collapse <tf>` draws it as one stacked symbol with a count badge (+2) and hides every unit attached under it; `/expand <tf>` shows them again, and `/collapse all` or `/expand all` does every task force at once. The state is stored in the map, so everyone sees the same picture. A hidden unit keeps its orders: they are drawn from the stack, once per target, and orders between units inside the task force are not drawn. A unit attached to a collapsed task force is hidden too, and the log says so. Ways to collapse or expand:
+
+- Desktop: double-click the task force's symbol. Click the count badge to expand.
+- Phone and tablet: tap the count badge to expand. Double-tap still opens the unit's full view.
+- The task force's view, Task organization → On the map: Expanded or Collapsed. A hidden unit's view names its task force under On the map, with a button to expand it.
+- The right-click menu: Collapse task force or Expand task force.
+- The Situation view (nothing selected) lists the task forces, with Collapse all and Expand all.
+
+A collapsed task force stops being collapsed when it dissolves.
+
 ### Supporting attacks
 
 Supporting attacks (`/attack <unit> <hostile> support`, or a second attack dragged onto a hostile that already has a main effort) draw as a thinner arrow with an open head and SPT. Staff and Detail always show them; Commander shows them when their attacker, their target or the main attacker on that target is selected.
@@ -132,7 +142,7 @@ Command bar suggestions list units in this order: each command's own grouping fi
 
 ### Support between friendlies
 
-`/support <unit> <engaged unit>` (alias `/spt`) has one friendly back another, in any sector, without a task force. It draws a dashed arrow with an open head and SPT from the supporter to the supported unit (Staff and Detail, or in Commander when either is selected), adds the supporter's weight to the force ratio of the attacks the supported unit makes, and is cleared with `/halt <unit> support` or the inspector's ✕. It is not an attack: the supporter takes no order against the hostile.
+`/support <unit> <engaged unit>` (alias `/spt`) has one friendly back another, in any sector, without a task force. It draws a dashed arrow with an open head and SPT from the supporter to the supported unit (Staff and Detail, or in Commander when either is selected), adds the supporter's weight to the force ratio of the attacks the supported unit makes, and is cleared with `/halt <unit> support` or the inspector's ✕. It is not an attack: the supporter takes no order against the hostile. To make a supporter part of the supported unit's task force, attach it (`/attach <supporter> to <supported>`, or Attach instead on the support order in either unit's view): attaching ends its support to that unit, and the log adds `— SUPPORT ENDED`.
 
 ### Sector HQs as targets
 

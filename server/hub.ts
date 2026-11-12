@@ -10,7 +10,7 @@ export interface Op {seq:number;opId:string;userId:string;source:'web'|'mcp'|'sy
 interface Row {map_id:string;seq:number;op_id:string;user_id:string;source:Op['source'];at:string;cmd:string;log:string;inverse:string;undone_by:number|null;reverts:number|null;principal:string|null;via:string|null;}
 const toOp=(r:Row):Op=>({seq:r.seq,opId:r.op_id,userId:r.user_id,source:r.source,at:r.at,cmd:JSON.parse(r.cmd),log:r.log,...(r.via?{via:r.via}:{})});
 /** Verbs a user (browser or MCP) may submit as an op; the rest are answered by the browser shell or the MCP server. */
-export const MUTATION_VERBS:ReadonlySet<string>=new Set(['new','id','size','fn','rename','move','attack','moving','axis','advancing','bda','block','unblock','unpin','reopen','done','drop','reinforce','reduce','attach','detach','link','due','note','rate','key','cp','halt','support','sector','pl','obj','ea','nai','intent','sidc','vk']);
+export const MUTATION_VERBS:ReadonlySet<string>=new Set(['new','id','size','fn','rename','move','attack','moving','axis','advancing','bda','block','unblock','unpin','reopen','done','drop','reinforce','reduce','attach','detach','collapse','expand','link','due','note','rate','key','cp','halt','support','sector','pl','obj','ea','nai','intent','sidc','vk']);
 function overlaps(a:InversePatch,b:InversePatch):boolean {
   return (['units','orders','measures','sectors'] as const).some(k=>a[k].some(x=>b[k].some(y=>x.id===y.id)))||Object.keys(a.top).some(k=>Object.hasOwn(b.top,k));
 }
