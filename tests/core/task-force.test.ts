@@ -56,4 +56,14 @@ describe('task forces', () => {
   it('a unit that is not attached cannot be detached', () => {
     expect(parse('/detach TOOLS', seedDoc(now), { now })).toMatchObject({ ok: false, error: 'TOOLS is not attached' });
   });
+  it('/reinforce takes the reinforcing unit with or without `with`, including hostiles named T1 and T2', () => {
+    let doc = run(seedDoc(now), '/new hostile "Alpha" as T1');
+    doc = run(doc, '/new hostile "Bravo" as T2');
+    const bare = parse('/reinforce T1 T2', doc, { now }), full = parse('/reinforce T1 with T2', doc, { now });
+    expect(bare.ok && full.ok && bare.cmd.args).toEqual(full.ok && full.cmd.args);
+    const r = exec(doc, '/reinforce T1 T2');
+    expect(r.log).toBe('T1 REINFORCED (+)');
+    expect(unit(r.doc, 'T2').parentId).toBe(unit(r.doc, 'T1').id);
+    expect(parse('/reinforce T1 "T2"', doc, { now })).toMatchObject({ ok: false });
+  });
 });

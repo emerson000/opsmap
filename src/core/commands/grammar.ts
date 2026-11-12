@@ -88,7 +88,7 @@ export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult 
     else subject();break;
    }
    case 'drop':subject();a.bypassed=eat('bypassed');break;
-   case 'reinforce':subject();if(eat('with')){const t=take('unit');a.with=resolveUnit(t.value,doc,t.start,selected?.sectorId).id;}break;
+   case 'reinforce':subject();if(eat('with')||(peek()&&!peek().quoted)){const t=take('unit');a.with=resolveUnit(t.value,doc,t.start,selected?.sectorId).id;}break;
    case 'reduce':subject();if(peek())a.note=quoted('scope cut');break;
    case 'attach':subject();expect('to');{const t=take('task force');a.parent=resolveUnit(t.value,doc,t.start,selected?.sectorId).id;}break;
    case 'link':subject();{const t=take('unit');a.target=resolveUnit(t.value,doc,t.start,selected?.sectorId).id;}if(eat('as'))a.kind=take('dependency or handoff').value.toLowerCase();break;

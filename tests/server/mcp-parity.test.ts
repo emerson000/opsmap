@@ -99,7 +99,7 @@ describe('opsmap_command matches the command bar',()=>{
     ['/attack RSP SINK main'],['/moving RSP to nearest hostile'],['/obj add "GOAL" in Household near'],['/pl add "LAUNCH" 2026-12-24'],['/axis RSP to OBJ GOAL via PL LAUNCH'],['/obj rename GOAL "FINAL GOAL"'],['/pl rename LAUNCH "LIFTOFF"'],['/pl rename LIFTOFF "LIFTOFF"'],['/ea rename GOAL "X"'],
     ['/advancing SINK on sector hq'],['/advancing SINK on Household hq'],['/moving RSP to sector hq'],
     ['/block TAX by "Waiting"'],['/unblock TAX'],['/due TAX 2026-11-20'],['/move TAX near'],['/unpin TAX'],['/note TAX "Call the office"'],['/rate TAX B2'],['/key TAX'],['/cp RSP main'],
-    ['/support TAX RSP'],['/halt TAX support'],['/reinforce RSP with TAX'],['/reduce RSP "Less scope"'],['/detach TAX'],['/attach TAX to RSP'],['/link TAX RSP as handoff'],
+    ['/support TAX RSP'],['/halt TAX support'],['/reinforce RSP with TAX'],['/reinforce RSP TAX'],['/reduce RSP "Less scope"'],['/detach TAX'],['/attach TAX to RSP'],['/link TAX RSP as handoff'],
     ['/sector add Learning'],['/ea add "BATCH" in Work mid'],['/ea join BATCH GSINK'],['/nai add "WATCH" in Work far'],['/intent "Finish the taxes"'],['/sidc TAX 13031000141211000000'],
     ['/drop GSINK bypassed'],['/reopen GSINK'],['/done SINK'],['/note MISSING "x"'],['/attack TAX GSINK'],
     ['/find RSP'],['/find OBJ "FINAL GOAL"'],['/find pl liftoff'],['/find sector Work'],['/find obj NOWHERE'],['/sitrep'],['/sitrep copy'],['/export'],['/help'],['/help mv'],['/help nonsense'],['/map'],['/map field'],['/map nowhere'],

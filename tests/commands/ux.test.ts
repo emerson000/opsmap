@@ -40,3 +40,9 @@ it('SITREP records actual recent captures and completions, and names overdue thr
  const text=sitrepText(result.doc,now);
  expect(text).toContain('completed IRSRSP');expect(text).toContain('Overdue, inside HQ (1): ESCALATION.');expect(text).not.toContain('1 hostiles');
 });
+it('/reinforce offers with after the reinforced unit, then units',()=>{
+ const after=s('/reinforce TOOLS ').items;
+ expect(after[0].insert).toBe('with');
+ expect(after.some(i=>i.insert==='TOOLS')).toBe(false);
+ expect(s('/reinforce TOOLS with ').items[0].kind).not.toBe('keyword');
+});

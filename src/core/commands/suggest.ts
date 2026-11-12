@@ -138,6 +138,7 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
   if(verb==='moving'&&previous.length===2)candidates=[keyword('to')];
   if(verb==='moving'&&before==='to')candidates.push(keyword('nearest hostile'));
   if(verb==='attach'&&previous.length===2)candidates=[keyword('to')];
+  if(verb==='reinforce'&&previous.length===2)candidates=[keyword('with'),...candidates.filter(c=>c.insert.toLowerCase()!==previous[1].value.toLowerCase())];
   if(verb==='advancing'&&previous.length===2)candidates=[keyword('on')];
   if((verb==='advancing'&&before==='on')||(verb==='moving'&&before==='to'))candidates.unshift(keyword('sector hq'),...doc.sectors.map(s=>({insert:`${/\s/.test(s.name)?JSON.stringify(s.name):s.name} hq`,label:`${s.name} HQ`,kind:'keyword' as const})));
  }
