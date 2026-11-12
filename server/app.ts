@@ -72,6 +72,22 @@ export function createApp(config:Config) {
     }catch{return c.json({error:'Invalid MCP request'},400);}
   });
   app.all('/mcp',c=>c.text('Method not allowed',405));
+  // Bearer tokens for MCP and the API, managed by the signed-in user (dev users as well as OIDC users). Each user
+  // lists, creates and revokes their own; an administrator also lists and revokes everyone's, to cut off a leaked one.
+  // The secret is shown once, in the create response.
+  const tokenList=(user:User)=>(auth.admin(user)?store.tokens():store.tokens(user.id)).map(t=>({...t,mine:t.userId===user.id}));
+  app.get('/api/tokens',c=>{const user=auth.current(c);return user?c.json({tokens:tokenList(user),admin:auth.admin(user)}):c.json({error:'Authentication required'},401);});
+  const tokenWrite=async(c:Context,run:(user:User,body:Record<string,unknown>)=>object)=>{
+    const user=auth.current(c);if(!user)return c.json({error:'Authentication required'},401);
+    if(!originAllowed(config,c.req.header('origin'))){warnOrigin(config,c.req.header('origin'),'a token change');return c.json({error:'Invalid origin'},403);}
+    try {
+      const text=await boundedText(c.req.raw,4*1024),body=text?JSON.parse(text):{};
+      if(!body||typeof body!=='object'||Array.isArray(body))throw new Error('Invalid request');
+      return c.json({ok:true,...run(user,body),tokens:tokenList(user)});
+    }catch(error){return c.json({error:error instanceof Error?error.message:'Invalid request'},400);}
+  };
+  app.post('/api/tokens',c=>tokenWrite(c,(user,body)=>{const {token,info}=store.issueToken(user.id,body.name);return {token,created:{...info,mine:true}};}));
+  app.delete('/api/tokens/:id',c=>tokenWrite(c,user=>({revoked:store.revokeToken(c.req.param('id'),auth.admin(user)?undefined:user.id)})));
   // The signed-in user's Vikunja account: whether a token is set (never the token itself), save, remove.
   app.get('/api/vikunja/account',c=>{
     const user=auth.current(c);if(!user)return c.json({error:'Authentication required'},401);

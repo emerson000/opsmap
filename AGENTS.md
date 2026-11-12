@@ -70,4 +70,4 @@ The sidebar (the inspector: a column on desktop and tablet, the bottom sheet on 
 
 ## Local MCP
 
-Create a token for local testing with `DATA_DIR=.data npx tsx server/cli.ts token create --name <agent> --user alice@dev.local`. The MCP endpoint is `POST /mcp` with the token as a bearer token. Do not commit tokens or the `.data` directory.
+Create a token for local testing in the browser (sign in as alice, then **Access tokens…** in the user menu) or with `DATA_DIR=.data npx tsx server/cli.ts token create --name <agent> --user alice@dev.local`. `docs/mcp.md` shows how to connect Claude Code and Codex. The MCP endpoint is `POST /mcp` with the token as a bearer token. Do not commit tokens or the `.data` directory.

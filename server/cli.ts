@@ -9,7 +9,6 @@ try {
     console.log(store.createToken(name,user));
   }else if(args[1]==='list')console.log(JSON.stringify(store.db.prepare('SELECT name,user_id,created_at,last_used,revoked_at FROM tokens ORDER BY name').all(),null,2));
   else if(args[1]==='revoke'&&args[2]) {
-    const result=store.db.prepare('UPDATE tokens SET revoked_at=? WHERE name=? AND revoked_at IS NULL').run(new Date().toISOString(),args[2]);
-    if(!result.changes)throw new Error('Active token not found');
+    store.revokeToken(args[2]);
   }else throw new Error('Unknown token command');
 }catch(error){console.error(error instanceof Error?error.message:'Token command failed');process.exitCode=1;}finally{store.close();}

@@ -25,6 +25,8 @@ export const ui = $state({
   legendOpen: false,
   /** The Vikunja account panel (connect an API token). */
   vikunjaOpen: false,
+  /** The access tokens panel (MCP and API bearer tokens). */
+  tokensOpen: false,
   legendTab: 'symbols' as 'symbols' | 'commands' | 'gestures' | 'keys',
   /** System unless this browser chose Day or Night. */
   themePref: parsePref(read(THEME_KEY)) as ThemePref,

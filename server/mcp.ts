@@ -30,7 +30,7 @@ export const CLIENT_ONLY:Readonly<Record<string,string>>={
 };
 const row=(u:Unit)=>({designation:u.designation,title:u.title,affiliation:u.affiliation,fn:u.fn,echelon:u.echelon,lifecycle:u.lifecycle,ring:ringForRadius(u.pos.r),due:u.dueAt,strength:u.strength,sector:u.sectorId});
 export async function mcpRequest(request:Request,maps:Maps,user:User,agent?:{id:string;name:string},vikunja?:VikunjaSync,admin=false):Promise<Response> {
-  const server=new McpServer({name:'opsmap',version:'2.1.0'},{instructions:'There can be several shared maps; opsmap_maps lists them. Every tool takes an optional map (id or name) and uses the default (first) map without one. opsmap_command takes the same text as the command bar; pass selected (a unit) where the bar would have one selected. Use unit designations in commands. Prefer /new pending when identity is uncertain. opsmap_map_create, opsmap_map_rename, opsmap_map_delete (administrator) and opsmap_import (administrator) manage maps as the map switcher does. All writes affect the shared maps and are attributed to your token user.'});
+  const server=new McpServer({name:'opsmap',version:'2.1.0'},{instructions:'There can be several shared maps; opsmap_maps lists them. Every tool takes an optional map (id or name) and uses the default (first) map without one. opsmap_command takes the same text as the command bar; pass selected (a unit) where the bar would have one selected. Use unit designations in commands. Prefer /new pending when identity is uncertain. opsmap_map_create, opsmap_map_rename, opsmap_map_delete (administrator) and opsmap_import (administrator) manage maps as the map switcher does. opsmap_tokens and opsmap_token_revoke list and revoke bearer tokens; create tokens in the browser (Access tokens in the user menu). All writes affect the shared maps and are attributed to your token user.'});
   const result=(value:unknown)=>({content:[{type:'text' as const,text:JSON.stringify(value)}]});
   const map=z.string().max(128).optional().describe('Map id or name; the default map when omitted');
   const failure=(error:unknown)=>result({ok:false,error:error instanceof Error?error.message:'Command failed',at:0});
@@ -100,6 +100,13 @@ export async function mcpRequest(request:Request,maps:Maps,user:User,agent?:{id:
   server.registerTool('opsmap_import',{description:'Administrator only: replace a map with an exported document, for everyone (the bar’s /import). Undo reverses it.',inputSchema:{map,doc:document.describe('An exported map document')}},async q=>{
     if(!admin)return refuse('Only the administrator can import a map');
     try{const op=maps.resolve(q.map).import(user.id,q.doc,new Date(),'mcp',agent);return result({ok:true,log:op.log});}catch(error){return failure(error);}
+  });
+  // Tokens: list and revoke with the HTTP API's rules (your own; an administrator's covers everyone's). Creating a
+  // token is left to the browser and the server CLI, so a leaked token cannot mint replacements that outlive it.
+  const store=maps.store,tokenRows=()=>store.tokens(admin?undefined:user.id).map(t=>({id:t.id,name:t.name,user:t.userEmail,createdAt:t.createdAt,lastUsed:t.lastUsed,mine:t.userId===user.id,current:t.id===agent?.id}));
+  server.registerTool('opsmap_tokens',{description:'List active bearer tokens: your own, or everyone\u2019s for an administrator. Never the secrets.',inputSchema:{}},async()=>result(tokenRows()));
+  server.registerTool('opsmap_token_revoke',{description:'Revoke an active bearer token by id or name: your own, or anyone\u2019s for an administrator. Revoking the token you call with ends your access.',inputSchema:{token:z.string().min(1).max(128).describe('Token id or name')}},async q=>{
+    try{const t=store.revokeToken(q.token,admin?undefined:user.id);return result({ok:true,revoked:{id:t.id,name:t.name,user:t.userEmail}});}catch(error){return failure(error);}
   });
   const transport=new WebStandardStreamableHTTPServerTransport({sessionIdGenerator:undefined,enableJsonResponse:true});
   await server.connect(transport);

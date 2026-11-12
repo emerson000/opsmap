@@ -113,6 +113,7 @@
           <div class="menu" role="menu">
             <div class="who">{session.me.name}<span>{session.me.email}{admin ? ' · admin' : ''}</span></div>
             {#if features.vikunja}<button class="btn" role="menuitem" data-testid="menu-vikunja" onclick={() => { userOpen = false; ui.vikunjaOpen = true; }}>Vikunja…</button>{/if}
+            <button class="btn" role="menuitem" data-testid="menu-tokens" title="Create and revoke tokens for MCP agents and the API" onclick={() => { userOpen = false; ui.tokensOpen = true; }}>Access tokens…</button>
             <button class="btn" role="menuitem" onclick={logout}>Log out</button>
           </div>
         {/if}
@@ -143,6 +144,7 @@
       <button class="btn item" onclick={act(() => { ui.legendOpen = true; ui.legendTab = 'symbols'; })}>Legend</button>
       <button class="btn item" onclick={act(() => { ui.legendOpen = true; ui.legendTab = 'gestures'; })}>Gestures and help</button>
       {#if features.vikunja}<button class="btn item" data-testid="menu-vikunja" onclick={act(() => { ui.vikunjaOpen = true; })}>Vikunja…</button>{/if}
+      {#if session.me}<button class="btn item" data-testid="menu-tokens" onclick={act(() => { ui.tokensOpen = true; })}>Access tokens…</button>{/if}
     </div>
     {@render themeChoice()}
     <div class="row-label" id="sound-label">Sound</div>

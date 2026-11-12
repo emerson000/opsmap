@@ -118,6 +118,24 @@ test('the menu holds views, SITREP, legend, theme, export and logout', async ({ 
   await expect(page.getByTestId('gestures')).toContainText('Long-press a symbol, drag');
 });
 
+test('the menu opens access tokens, which fit the phone and create a token', async ({ page }, info) => {
+  await page.getByTestId('app-menu-button').click();
+  await page.getByTestId('app-menu').getByTestId('menu-tokens').click();
+  const panel = page.getByTestId('access-tokens');
+  await expect(panel).toBeVisible();
+  await panel.getByTestId('tk-name').fill(`phone ${info.project.name}`);
+  await panel.getByTestId('tk-create').click();
+  await expect(panel.getByTestId('tk-secret')).toHaveValue(/^[A-Za-z0-9_-]{43}$/);
+  const box = (await panel.boundingBox())!, width = page.viewportSize()!.width;
+  expect(box.x).toBeGreaterThanOrEqual(0);expect(box.x + box.width).toBeLessThanOrEqual(width);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+  const revoke = panel.locator(`[data-testid="tk-row"][data-name="phone ${info.project.name}"]`).getByTestId('tk-revoke');
+  await revoke.click(); await revoke.click();
+  await expect(panel.getByTestId('tk-created')).toHaveCount(0);
+  await panel.getByRole('button', { name: 'Close access tokens' }).click();
+  await expect(panel).toHaveCount(0);
+});
+
 test('the menu lists maps, creates one and switches back', async ({ page }, info) => {
   const name = `Phone ${info.project.name}`;
   await page.getByTestId('app-menu-button').click();

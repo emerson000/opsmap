@@ -16,6 +16,7 @@
   import SitrepPanel from './lib/ui/SitrepPanel.svelte';
   import Legend from './lib/ui/Legend.svelte';
   import VikunjaAccount from './lib/ui/VikunjaAccount.svelte';
+  import AccessTokens from './lib/ui/AccessTokens.svelte';
   import Toasts from './lib/ui/Toasts.svelte';
   import Login from './lib/ui/Login.svelte';
   import Sheet from './lib/ui/Sheet.svelte';
@@ -288,6 +289,9 @@
   {/if}
   {#if ui.vikunjaOpen}
     <div class="sitrep-layer vk-layer"><VikunjaAccount /></div>
+  {/if}
+  {#if ui.tokensOpen}
+    <div class="sitrep-layer vk-layer"><AccessTokens /></div>
   {/if}
   {#if ui.legendOpen}
     <div class="legend-layer"><Legend {theme} /></div>

@@ -6,6 +6,8 @@ import { randomBytes, createHash } from 'node:crypto';
 export interface User { id:string; email:string; name:string; initials:string; color:string; emailVerified?:boolean; }
 /** One shared map. Every map has its own op journal, snapshots, undo history and daily turn. */
 export interface MapInfo { id:string; name:string; createdAt:string; createdBy:string|null; position:number; }
+/** An active bearer token as listed to its owner or an administrator: never the secret. */
+export interface TokenInfo { id:string; name:string; userId:string; userName:string|null; userEmail:string|null; createdAt:string; lastUsed:string|null; }
 export const DEFAULT_MAP='main';
 export const hashToken=(token:string)=>createHash('sha256').update(token).digest('hex');
 export class Store {
@@ -68,9 +70,28 @@ export class Store {
   createToken(name:string,email:string):string {
     const user=this.db.prepare('SELECT id FROM users WHERE lower(email)=lower(?)').get(email) as {id:string}|undefined;
     if(!user)throw new Error('User must sign in before a token can be created');
-    const token=randomBytes(32).toString('base64url');
-    this.db.prepare('INSERT INTO tokens(id,name,user_id,hash,created_at) VALUES(?,?,?,?,?)').run(randomBytes(16).toString('hex'),name,user.id,hashToken(token),new Date().toISOString());
-    return token;
+    return this.issueToken(user.id,name).token;
+  }
+  /** A new bearer token for MCP and the API, owned by userId. The secret is returned once; only its hash is kept. */
+  issueToken(userId:string,name:unknown):{token:string;info:TokenInfo} {
+    const clean=typeof name==='string'?name.trim().replace(/\s+/g,' '):'';
+    if(!clean)throw new Error('Token name required');
+    if(clean.length>60)throw new Error('Token name is too long (60 characters at most)');
+    if(this.db.prepare('SELECT 1 FROM tokens WHERE lower(name)=lower(?) AND revoked_at IS NULL').get(clean))throw new Error(`A token named ${clean} is already in use`);
+    const token=randomBytes(32).toString('base64url'),id=randomBytes(16).toString('hex');
+    this.db.prepare('INSERT INTO tokens(id,name,user_id,hash,created_at) VALUES(?,?,?,?,?)').run(id,clean,userId,hashToken(token),new Date().toISOString());
+    return {token,info:this.tokens().find(t=>t.id===id)!};
+  }
+  /** Active tokens, newest first; only userId's when given. Never the secrets. */
+  tokens(userId?:string):TokenInfo[] {
+    return this.db.prepare(`SELECT t.id,t.name,t.user_id AS userId,u.name AS userName,u.email AS userEmail,t.created_at AS createdAt,t.last_used AS lastUsed FROM tokens t LEFT JOIN users u ON u.id=t.user_id WHERE t.revoked_at IS NULL${userId?' AND t.user_id=?':''} ORDER BY t.created_at DESC,t.id`).all(...(userId?[userId]:[])) as unknown as TokenInfo[];
+  }
+  /** Revokes an active token by id or name (ignoring case); the token stops working at once. */
+  revokeToken(ref:string,userId?:string):TokenInfo {
+    const found=this.tokens(userId).find(t=>t.id===ref)??this.tokens(userId).find(t=>t.name.toLowerCase()===ref.trim().toLowerCase());
+    if(!found)throw new Error('Active token not found');
+    this.db.prepare('UPDATE tokens SET revoked_at=? WHERE id=? AND revoked_at IS NULL').run(new Date().toISOString(),found.id);
+    return found;
   }
   tokenIdentity(token:string):{user:User;id:string;name:string}|undefined {
     const row=this.db.prepare('SELECT id,user_id,name,last_used FROM tokens WHERE hash=? AND revoked_at IS NULL').get(hashToken(token)) as {id:string;user_id:string;name:string;last_used:string|null}|undefined;
