@@ -59,8 +59,8 @@
   const orderFrom = $derived(ordering ? orderingUnits(orderVerb, doc, recentIds(doc), targetText) : []);
   function orderOnto() {
     ordering = !ordering;
-    // Phone at peek: open the sheet so the list has room.
-    if (ordering && env.tier === 'phone' && !env.landscape && ui.sheet === 'peek') ui.sheet = 'half';
+    // Phone: open the sheet to full so the list has room (its picker scrolls it into view).
+    if (ordering && env.tier === 'phone' && !env.landscape) ui.sheet = 'full';
   }
   function orderFor(unit: string) { ordering = false; ui.compose = { unit, verb: orderVerb, target: m.id }; }
 
@@ -95,9 +95,14 @@
   const toggle = (list: string[], id: string) => (list.includes(id) ? list.filter(x => x !== id) : [...list, id]);
   function addUnits() {
     joining = true;
-    // Open Members and scroll to it (also when it is already the anchor).
+    // Phone: open the sheet to full first, so Members and its list have room. The filter is not focused there:
+    // the keyboard would cover the list of units to tick.
+    const phone = env.tier === 'phone' && !env.landscape;
+    if (phone) ui.sheet = 'full';
+    // Open Members and scroll to it (also when it is already the anchor), once the sheet has grown.
     selection.section = null;
     queueMicrotask(() => { selection.section = 'members'; });
+    if (phone) setTimeout(() => { selection.section = null; queueMicrotask(() => { selection.section = 'members'; }); }, 240);
   }
   function join() { if (joinCmd && runCommand(joinCmd).ok) { joinPick = []; joining = false; } }
   let filterEl: HTMLInputElement | undefined = $state();

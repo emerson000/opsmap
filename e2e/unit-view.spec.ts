@@ -77,7 +77,7 @@ test('long-press shows a control’s command without running it; single-letter k
   const box = (await done.boundingBox())!;
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.down();
-  await expect(inspector.getByTestId('cmd-bubble')).toHaveText('/done RECORDS');
+  await expect(page.getByTestId('cmd-bubble')).toHaveText('/done RECORDS');
   await page.mouse.up();
   await expect(done).toBeVisible();
   await expect(inspector.getByTestId('unit-reopen')).toHaveCount(0);

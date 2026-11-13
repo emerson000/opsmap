@@ -130,7 +130,7 @@
   .cur { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
   .caret { font-size: 10px; color: var(--ink-3); }
   .panel {
-    position: absolute; left: 0; top: calc(100% + 6px); z-index: 40; width: 280px; padding: var(--s2);
+    position: absolute; left: 0; top: calc(100% + 6px); z-index: 1; width: 280px; padding: var(--s2);
     background: var(--panel); border: 1px solid var(--rule-strong); box-shadow: var(--shadow);
     display: flex; flex-direction: column; gap: var(--s2);
   }

@@ -491,6 +491,7 @@
   .sym { flex: none; padding: 2px; border: 1px solid transparent; background: none; line-height: 0; }
   .sym:hover { border-color: var(--rule); background: var(--accent-bg); }
   .sym img { max-width: 96px; height: auto; }
+  :global([data-tier='phone']) .sym { min-width: 44px; min-height: 44px; display: grid; place-items: center; }
   .who { flex: 1; min-width: 0; }
   .desig { font: 700 18px/1.1 var(--font-mono); letter-spacing: 0.04em; }
   .ttl { font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

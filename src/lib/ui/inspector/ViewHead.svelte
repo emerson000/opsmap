@@ -41,6 +41,7 @@
   .glyph.area { border-style: dashed; border-radius: 16px; }
   .glyph.pl { border-width: 0 0 2px; border-color: var(--pl); color: var(--pl); }
   button.glyph:hover { background: var(--accent-bg); }
+  :global([data-tier='phone']) .glyph { height: 44px; }
   .who { flex: 1; min-width: 0; }
   .name { font: 700 18px/1.1 var(--font-mono); letter-spacing: 0.04em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sub { color: var(--ink-2); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

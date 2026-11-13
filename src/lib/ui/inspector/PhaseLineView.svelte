@@ -73,7 +73,7 @@
   const axisFrom = $derived(axing ? orderingUnits('axis', doc, recentIds(doc)) : []);
   function axisVia() {
     axing = !axing;
-    if (axing && env.tier === 'phone' && !env.landscape && ui.sheet === 'peek') ui.sheet = 'half';
+    if (axing && env.tier === 'phone' && !env.landscape) ui.sheet = 'full';
   }
   function axisFor(unit: string) { axing = false; ui.compose = { unit, verb: 'axis', via: [m.id] }; }
   const impact = $derived.by(() => {

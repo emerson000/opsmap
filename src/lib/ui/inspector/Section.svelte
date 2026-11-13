@@ -13,6 +13,7 @@
   import { tick, type Snippet } from 'svelte';
   import { selection } from '../../model/store.svelte';
   import { allSections } from '../shell.svelte';
+  import { reveal } from './reveal';
 
   let { kind, key, title, count, summary, open: initial = true, force = false, testid, children }: {
     /** The view kind (unit, area, pl, sector, map): open state is kept per kind. */
@@ -49,7 +50,7 @@
   $effect(() => {
     if (selection.section !== key) return;
     isOpen = true;
-    void tick().then(() => el?.scrollIntoView({ block: 'start' }));
+    void tick().then(() => { if (el?.closest('.scroll')) reveal(el, 'start', 0); else el?.scrollIntoView({ block: 'start' }); });
   });
 </script>
 

@@ -35,7 +35,7 @@
     onbeyond?: (sectorId: string) => void;
     /** Capture menu: open the sidebar's create form for an area or a phase line, with the press point's sector and ring. */
     oncreate?: (kind: 'area' | 'pl', ctx: { sectorId: string; ring: Ring }) => void;
-    /** Errors from drag commands. Without it the map shows its own toast. */
+    /** Errors from drag commands. The app shows them as toasts. */
     onerror?: (message: string) => void;
     /** Confirmation of a drag-made order (e.g. "PACKING ATTACKS LEAK"), offered with undo by the shell. */
     onnotice?: (message: string) => void;
@@ -198,14 +198,8 @@
   });
 
   // ---------- commands ----------
-  let toasts = $state<{ id: number; text: string }[]>([]);
-  let toastSeq = 0;
-  function toast(text: string) {
-    if (onerror) { onerror(text); return; }
-    const id = ++toastSeq;
-    toasts = [...toasts, { id, text }];
-    setTimeout(() => (toasts = toasts.filter(t => t.id !== id)), 4000);
-  }
+  /** Errors go to the app shell's toasts (one toast system, clear of the top bar). */
+  function toast(text: string) { onerror?.(text); }
   function run(cmd: Command): boolean {
     try {
       const res = dispatch(cmd);
@@ -287,9 +281,11 @@
   let measureCard = $state<{ id: string; x: number; y: number } | null>(null);
   /** The card's height, so it stays above whatever covers the bottom of the map (command bar, sheet). */
   let cardH = $state(0), mapH = $state(0), menuH = $state(0);
-  function menuTop(m: { y: number; py: number }): number {
-    const limit = mapH - (insets?.bottom ?? 0) - 8;
-    return m.y + menuH <= limit ? m.y : Math.max(8, m.py - 16 - menuH);
+  /** Menus stay between the top bar and whatever covers the bottom right now (the phone sheet); a taller one scrolls. */
+  const popBottom = $derived(mapH - ((focusInsets ?? insets)?.bottom ?? 0) - 8);
+  const popMax = $derived(Math.max(120, popBottom - insets.top - 4));
+  function menuTop(m: { y: number; py: number }, h: number, gap = 16): number {
+    return m.y + h <= popBottom ? m.y : Math.max(insets.top + 4, m.py - gap - h);
   }
   /** The card stays between the top bar and whatever covers the bottom right now (the phone sheet); it scrolls when taller. */
   const cardBottom = $derived(mapH - ((focusInsets ?? insets)?.bottom ?? 0) - 8);
@@ -879,7 +875,7 @@
   </svg>
 
   <!-- Touch: Fit sits bottom right, above the sheet, in thumb reach. -->
-  <div class="map-controls" class:touch aria-label="Map zoom" style={touch ? `right:${insets.right+8}px;bottom:${insets.bottom+8}px` : `left:${insets.left+8}px;top:${insets.top+8}px`}>
+  <div class="map-controls" class:touch aria-label="Map zoom" style={touch ? `right:${insets.right+8}px;bottom:${(focusInsets ?? insets).bottom+8}px` : `left:${insets.left+8}px;top:${insets.top+8}px`}>
     {#if !touch}
       <button class="btn" aria-label="Zoom in" onclick={()=>zoomBy(1.25)}>+</button>
       <button class="btn" aria-label="Zoom out" onclick={()=>zoomBy(1/1.25)}>−</button>
@@ -928,7 +924,7 @@
     {@const um = unitMenu}
     <div class="capture-menu desk-menu" role="menu" tabindex="-1" aria-label="{u.designation} actions" data-testid="unit-menu" data-unit={u.id}
       bind:this={unitMenuEl} bind:offsetHeight={unitMenuH} onkeydown={unitMenuKey} oncontextmenu={(e) => e.preventDefault()}
-      style="left:{um.x}px; top:{um.y + unitMenuH <= mapH - (insets?.bottom ?? 0) - 8 ? um.y : Math.max(8, um.py - unitMenuH - 2)}px">
+      style="left:{um.x}px; top:{menuTop(um, unitMenuH, 2)}px; max-height:{popMax}px">
       <div class="cm-title"><b>{u.designation}</b> {u.title}</div>
       {#each unitMenuItems(u) as item (item.key)}
         {#if item.sep}<div class="cm-sep" role="separator"></div>{/if}
@@ -942,7 +938,7 @@
     {@const sec = captureSector}
     <!-- Below the finger, or above it when the command bar or sheet would cover it; never under the finger, which lifts onto it. -->
     <div class="capture-menu" class:desk-menu={!touch} role="menu" aria-label="Capture here" data-testid="capture-menu" bind:offsetHeight={menuH}
-      style="left:{m.x}px; top:{menuTop(m)}px">
+      style="left:{m.x}px; top:{menuTop(m, menuH)}px; max-height:{popMax}px">
       <div class="cm-title">New here · {sec?.name ?? m.ctx.sectorId} · {RING_NAME[m.ctx.ring]}</div>
       <button class="btn" role="menuitem" onclick={() => chooseCapture()}>New unit</button>
       <button class="btn" role="menuitem" onclick={() => chooseCapture('hostile')}>New problem (hostile)</button>
@@ -963,11 +959,6 @@
     </div>
   {/if}
 
-  {#if toasts.length}
-    <div class="toasts" role="status" aria-live="polite">
-      {#each toasts as t (t.id)}<div class="toast">{t.text}</div>{/each}
-    </div>
-  {/if}
 </div>
 
 <style>
@@ -1043,7 +1034,7 @@
   .map-controls {position:absolute;height:24px;display:flex;gap:4px;}
   .map-controls.touch {height:44px;}
   .map-controls.touch .btn {height:44px;min-width:44px;justify-content:center;font-size:14px;}
-  .capture-menu { position:absolute; z-index:4; width:220px; display:flex; flex-direction:column; gap:4px; padding:8px; background:var(--om-panel); color:var(--om-ink); border:2px solid var(--om-ink); box-shadow:0 4px 16px rgba(0,0,0,0.25); }
+  .capture-menu { position:absolute; z-index:var(--z-map-pop); overflow-y:auto; overscroll-behavior:contain; width:220px; display:flex; flex-direction:column; gap:4px; padding:8px; background:var(--om-panel); color:var(--om-ink); border:2px solid var(--om-ink); box-shadow:0 4px 16px rgba(0,0,0,0.25); }
   .capture-menu .btn { height:44px; justify-content:center; }
   /* Desktop menus (right-click): compact rows, left-aligned, keyboard focus visible. */
   .desk-menu { gap:0; padding:4px; width:248px; }
@@ -1121,13 +1112,11 @@
     .flash { animation: none; }
   }
   .hover-label {
-    position: absolute; transform: translate(24px, -100%); pointer-events: none; z-index: 2;
+    position: absolute; transform: translate(24px, -100%); pointer-events: none; z-index: var(--z-map-label);
     background: var(--om-panel); color: var(--om-ink); border: 1px solid var(--om-ink-soft);
     padding: 4px 8px; font: 12px/1.35 var(--om-font); white-space: nowrap; box-shadow: 0 1px 0 rgba(0, 0, 0, 0.12);
   }
   .hover-label.west { transform:translate(calc(-100% - 24px),-100%); }
   .hl-title b { letter-spacing: 0.04em; }
   .hl-meta { opacity: 0.85; font-size: 12px; }
-  .toasts { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); display: flex; flex-direction: column; gap: 4px; z-index: 3; }
-  .toast { background: var(--om-panel); color: var(--om-ink); border-left: 3px solid var(--om-hostile); padding: 6px 12px; font: 12px/1.4 var(--om-font); box-shadow: 0 2px 8px rgba(0, 0, 0, 0.18); }
 </style>

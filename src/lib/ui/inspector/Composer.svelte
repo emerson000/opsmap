@@ -6,11 +6,12 @@
   import type { Doc, Unit } from '../../../core/model/types';
   import { parse } from '../../commands/grammar';
   import { recentIds } from '../../commands/recent.svelte';
-  import { prefill, runText, ui, type Compose, type PickSlot } from '../shell.svelte';
+  import { env, prefill, runText, ui, type Compose, type PickSlot } from '../shell.svelte';
   import { enabledFor, slotFor } from '../verbs';
   import { dayMonth } from '../words';
   import { ORDER_VERBS, SLOT_HINT, draftSlots, draftText, isOrderVerb, optionFor, targetOptions, type Draft, type Option, type OrderVerb, type SlotKey } from '../compose';
   import Picker from './Picker.svelte';
+  import { reveal, settle } from './reveal';
 
   let { doc, unit, init }: { doc: Doc; unit: Unit; init: Compose } = $props();
 
@@ -93,11 +94,16 @@
     via = next;
     void tick().then(() => el?.querySelectorAll<HTMLElement>('[data-testid="composer-via"] li')[j]?.focus());
   }
+  /** After a target is chosen: the next slot to fill (a verb's options, else Run), clear of the pinned foot. */
+  function next() {
+    void tick().then(() => settle(() => reveal(el?.querySelector('[data-next]') ?? el?.querySelector('[data-testid="composer-run"]'))));
+  }
+  const phone = env.tier === 'phone';
   onMount(() => {
-    // After the Orders section has opened and the target list has rendered: the composer's top at the top of the sidebar.
-    // (Scroll the sidebar itself: scrollIntoView would also scroll the fixed app shell.)
-    requestAnimationFrame(() => { const box = el?.closest<HTMLElement>('.scroll'); if (el && box) box.scrollTop += el.getBoundingClientRect().top - box.getBoundingClientRect().top - 8; });
-    if (!chosen) targetInput?.focus({ preventScroll: true });
+    // After the Orders section has opened and the sheet has grown: the composer's top at the top of the sidebar.
+    settle(() => reveal(el, 'start'));
+    // A phone does not focus the target: the keyboard and the list would cover the options and Run. A tap opens them.
+    if (!chosen && !phone) targetInput?.focus({ preventScroll: true });
   });
 </script>
 
@@ -124,14 +130,14 @@
     <div class="ctl">
       <Picker items={options} bind:value={query} chosen={chosen?.key ?? null} bind:input={targetInput} label="Target" placeholder="hq, a unit…"
         testid="composer-target" mapTestid="composer-pick-map" pickLabel="Pick target" {pickSlots}
-        onchoose={(o) => { chosen = o; query = o.label; }} oninput={() => (chosen = null)}
+        onchoose={(o) => { chosen = o; query = o.label; if (phone) { targetInput?.blur(); next(); } }} oninput={() => (chosen = null)}
         onfocus={() => (focusSlot = 'target')} />
     </div>
   </div>
 
   {#if verb === 'attack'}
     {@const roles = ['', 'main', 'support'] as const}
-    <div class="row">
+    <div class="row" data-next>
       <span class="lab" class:act={activeSlot === 'role'}>Role</span>
       <div class="seg" role="radiogroup" aria-label="Attack role" data-testid="composer-role">
         {#each roles as r, i (r)}
@@ -142,12 +148,12 @@
         {/each}
       </div>
     </div>
-    <div class="row">
+    <div class="row" data-testid="composer-flags">
       <span class="lab" class:act={activeSlot === 'planned'}>Flags</span>
       <label class="check"><input type="checkbox" bind:checked={planned} data-testid="composer-planned" onfocus={() => (focusSlot = 'planned')} onblur={() => (focusSlot = null)} /> Planned (dashed)</label>
     </div>
   {:else if verb === 'axis'}
-    <div class="row">
+    <div class="row" data-next>
       <span class="lab" class:act={activeSlot === 'via'}>Via</span>
       <div class="ctl">
         {#if via.length}
@@ -177,7 +183,7 @@
     </div>
   {:else if verb === 'link'}
     {@const kinds = ['', 'dependency', 'handoff'] as const}
-    <div class="row">
+    <div class="row" data-next>
       <span class="lab" class:act={activeSlot === 'kind'}>As</span>
       <div class="seg" role="radiogroup" aria-label="Link kind" data-testid="composer-kind">
         {#each kinds as k, i (k)}
@@ -189,13 +195,13 @@
     </div>
   {/if}
 
-  <div class="foot">
+  <div class="foot" data-pinned>
     <div class="preview" data-testid="composer-preview" aria-live="polite">
       <code class="slots">{#each slots as s, i (i)}{i ? ' ' : ''}<span class="slot" class:verb={s.key === 'verb'} class:empty={!s.filled} class:active={s.key === activeSlot}>{s.text}</span>{/each}</code>
-      {#if runError}<div class="effect err">✕ {runError}</div>
-      {:else if result?.ok}<div class="effect ok">✓ {result.preview}</div>
-      {:else if result}<div class="effect err">✕ {result.error}</div>
-      {:else}<div class="effect hint">{SLOT_HINT[verb]}</div>{/if}
+      {#if runError}<div class="effect err" title={runError}>✕ {runError}</div>
+      {:else if result?.ok}<div class="effect ok" title={result.preview}>✓ {result.preview}</div>
+      {:else if result}<div class="effect err" title={result.error}>✕ {result.error}</div>
+      {:else}<div class="effect hint" title={SLOT_HINT[verb]}>{SLOT_HINT[verb]}</div>{/if}
     </div>
     <div class="actions">
       <button type="button" class="btn primary" data-testid="composer-run" title="Run it (Enter)" onclick={runIt}>Run <span class="k" aria-hidden="true">⏎</span></button>
@@ -250,9 +256,19 @@
   /* Phone: 44 px targets, and the preview with Run / To bar / Cancel stays pinned at the bottom of the sheet. */
   :global([data-tier='phone']) .composer .btn { min-height: 44px; }
   :global([data-tier='phone']) .composer .x { width: 44px; height: 44px; }
-  :global([data-tier='phone']) .row { grid-template-columns: 1fr; gap: 2px; }
-  /* The sidebar body has 12 px of padding at the bottom: the foot pins to its very edge. */
-  :global([data-tier='phone']) .foot { position: sticky; bottom: calc(-1 * var(--s3)); z-index: 1; box-shadow: 0 -4px 10px rgba(0, 0, 0, 0.12); }
-  :global([data-tier='phone']) .slots { display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  /* The sheet's tab names the unit and the foot has Cancel: no caption row, so Run and the options fit a short phone. */
+  :global([data-tier='phone']) .ch { display: none; }
+  /* Labels beside their controls, on the line of the first 44 px control (an open list flows below it). */
+  :global([data-tier='phone']) .row { grid-template-columns: 52px minmax(0, 1fr); }
+  :global([data-tier='phone']) .lab { padding-top: 0; line-height: 44px; }
+  /* The sidebar body has 12 px of padding at the bottom: the foot pins to its very edge. About 90 px: one line of
+     command, one line of effect (the whole text in its tooltip), and the buttons. */
+  :global([data-tier='phone']) .foot { position: sticky; bottom: calc(-1 * var(--s3)); z-index: 1; padding: var(--s1) var(--s2); box-shadow: 0 -4px 10px rgba(0, 0, 0, 0.12); }
+  :global([data-tier='phone']) .slots, :global([data-tier='phone']) .effect { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  :global([data-tier='phone']) .effect { margin-top: 0; }
+  :global([data-tier='phone']) .effect.err { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; }
+  :global([data-tier='phone']) .actions { margin-top: var(--s1); }
+  /* An open target list flows in the composer: the foot steps back into the flow so it never covers the list. */
+  :global([data-tier='phone']) .composer:has(:global([role='listbox'])) .foot { position: static; box-shadow: none; }
   :global([data-tier='phone']) .check { min-height: 44px; font-size: 16px; }
 </style>

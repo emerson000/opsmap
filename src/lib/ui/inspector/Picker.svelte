@@ -1,13 +1,16 @@
 <script lang="ts">
   // A combobox picker: type to filter, arrows and Enter to choose, and "⌖ Map" to pick the object on the map
   // instead (map pick mode, shell startPick). The list floats under the input, over the controls that follow.
-  import { onDestroy } from 'svelte';
-  import { pick, startPick, cancelPick, type PickSlot } from '../shell.svelte';
+  // In the portrait phone sheet the list flows instead (it pushes the controls down), the sheet opens to full, and the
+  // input scrolls to the top so the list has the room under it.
+  import { onDestroy, tick, untrack } from 'svelte';
+  import { env, pick, startPick, cancelPick, ui, type PickSlot } from '../shell.svelte';
+  import { reveal, settle } from './reveal';
   import type { Sel } from '../../model/store.svelte';
   import { optionForSel, type Option } from '../compose';
   import { echoes } from './echo';
 
-  let { items, value = $bindable(''), chosen = null, onchoose, oninput, onfocus, label, placeholder = '', testid, mapTestid, pickLabel = 'Pick target', pickSlots, command = null, input = $bindable() }: {
+  let { items, value = $bindable(''), chosen = null, onchoose, oninput, onfocus, label, placeholder = '', testid, mapTestid, pickLabel = 'Pick target', pickSlots, command = null, input = $bindable(), listOpen = false }: {
     items: Option[];
     /** The text in the input. */
     value?: string;
@@ -29,10 +32,25 @@
     /** The command this picker builds, with its open slot (`/move X near ‹unit›`): the echo line and the long-press bubble show it. */
     command?: string | null;
     input?: HTMLInputElement;
+    /** Show the list from the start, without focusing the input (a list that is the whole step, as in + Order onto…). */
+    listOpen?: boolean;
   } = $props();
 
   const uid = `pk${Math.random().toString(36).slice(2, 8)}`;
-  let open = $state(false);
+  let open = $state(untrack(() => listOpen));
+  let root: HTMLDivElement | undefined = $state();
+  /** In the portrait phone sheet (not the landscape column or a desktop sidebar). */
+  const inSheet = () => env.tier === 'phone' && !env.landscape && !!root?.closest('[data-testid="sheet"]');
+  // The list opened in the sheet: full height, and the input at the top of the sheet with the list below it.
+  $effect(() => {
+    if (!open || !root) return;
+    const el = root;
+    untrack(() => {
+      if (!inSheet()) return;
+      if (ui.sheet !== 'full') ui.sheet = 'full';
+      void tick().then(() => settle(() => reveal(el, 'start')));
+    });
+  });
   let active = $state(-1);
   const chosenLabel = $derived(items.find(o => o.key === chosen)?.label);
   const shown = $derived.by(() => {
@@ -74,20 +92,21 @@
       label: pickLabel,
       accept: (sel: Sel) => { const o = optionForSel(sel, items); return o !== undefined && !o.why; },
       slots: pickSlots?.(),
-      onpick: (sel: Sel) => { mapPicking = false; const o = optionForSel(sel, items); if (o) choose(o); input?.focus(); },
-      onlist: () => { mapPicking = false; open = true; input?.focus(); },
+      // A phone does not focus the input after a pick: the keyboard would cover what comes next.
+      onpick: (sel: Sel) => { mapPicking = false; const o = optionForSel(sel, items); if (o) choose(o); if (!inSheet()) input?.focus(); },
+      onlist: () => { mapPicking = false; open = true; if (!inSheet()) input?.focus(); },
       oncancel: () => { mapPicking = false; },
     });
   }
 </script>
 
-<div class="picker" use:echoes={command}>
+<div class="picker" use:echoes={command} bind:this={root}>
   <div class="line">
     <input bind:this={input} class="field" type="text" role="combobox" spellcheck="false" autocomplete="off" {placeholder}
       aria-label={label} aria-expanded={open} aria-controls="{uid}-list" aria-autocomplete="list"
       aria-activedescendant={open && active >= 0 ? `${uid}-${active}` : undefined} data-testid={testid}
       bind:value oninput={() => { open = true; oninput?.(value); }}
-      onfocus={() => { open = true; onfocus?.(); }} onblur={() => (open = false)} onkeydown={keys} />
+      onfocus={() => { open = true; onfocus?.(); }} onblur={() => { if (!listOpen) open = false; }} onkeydown={keys} />
     {#if onMap}
       <button class="btn map" type="button" class:on={picking} aria-pressed={picking} data-testid={mapTestid}
         title="Pick it on the map (Tab cycles, Enter picks, Esc cancels)" onclick={mapPick}><span aria-hidden="true">⌖</span> Map</button>
@@ -114,7 +133,7 @@
   .line { display: flex; }
   .line .field { flex: 1; min-width: 0; font-family: var(--font-mono); }
   .map { flex: none; margin-left: -1px; padding: 0 6px; letter-spacing: 0.06em; }
-  .list { position: absolute; left: 0; right: 0; top: 100%; z-index: 5; box-shadow: var(--shadow); margin: 2px 0 0; padding: 0; list-style: none; max-height: 196px; overflow-y: auto; border: 1px solid var(--rule); background: var(--panel); overscroll-behavior: contain; }
+  .list { position: absolute; left: 0; right: 0; top: 100%; z-index: 2; box-shadow: var(--shadow); margin: 2px 0 0; padding: 0; list-style: none; max-height: 196px; overflow-y: auto; border: 1px solid var(--rule); background: var(--panel); overscroll-behavior: contain; }
   .list li { display: flex; align-items: baseline; gap: var(--s2); min-height: 26px; padding: 3px var(--s2); font-size: 12px; cursor: pointer; border-bottom: 1px dotted var(--rule); }
   .list li.active { background: var(--accent-bg); box-shadow: inset 2px 0 0 var(--accent); }
   .list li.chosen .name { text-decoration: underline; }
@@ -126,4 +145,6 @@
   :global([data-tier='phone']) .line .field { height: 44px; font-size: 16px; }
   :global([data-tier='phone']) .map { height: 44px; }
   :global([data-tier='phone']) .list li { min-height: 44px; align-items: center; }
+  /* Portrait phone: the list flows under the input, so it never covers the controls that follow. */
+  :global([data-tier='phone']) .picker .list { position: static; max-height: 224px; box-shadow: none; }
 </style>

@@ -184,7 +184,8 @@ test('one tap opens and closes the sheet, from its tab or its grab bar', async (
   await expect(grab).toHaveAttribute('aria-expanded', 'true');
   await grab.click();
   await expect(sheet).toHaveAttribute('data-size', 'peek');
-  // Opened at full (a double-tap on a unit), it reopens at full next time.
+  // Opened at full (a double-tap on a unit), it reopens at full next time. (Once the sheet has finished closing: half covers KNEE.)
+  await page.waitForTimeout(300);
   const t = await touchFor(page, browserName);
   const p = await unitAt(page, 'knee');
   await tap(t, p); await page.waitForTimeout(60); await tap(t, p);
@@ -592,4 +593,154 @@ test('tapping a collapsed task force\'s count expands it without opening the she
   await expect(page.locator('g.unit[data-unit-id="packing"]')).toHaveCount(1);
   await expect(badge).toHaveCount(0);
   await expect(page.getByTestId('sheet')).toHaveAttribute('data-size', size ?? '');
+});
+
+/** The element is the topmost one at its own center: nothing covers it (a checkbox counts through its label). */
+const onTop = (l: ReturnType<Page['locator']>) => l.evaluate(el => {
+  const r = el.getBoundingClientRect(), hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+  return !!hit && (hit === el || el.contains(hit) || !!hit.closest('label')?.contains(el));
+});
+
+test('the attack composer on a phone: Run, Role and Planned are on top before and after a target is picked', async ({ page, browserName }) => {
+  const t = await touchFor(page, browserName);
+  const sheet = page.getByTestId('sheet');
+  await tap(t, await unitAt(page, 'records'));
+  await page.getByTestId('unit-order').click();
+  await expect(sheet).toHaveAttribute('data-size', 'full');
+  const composer = page.getByTestId('composer'), target = composer.getByTestId('composer-target');
+  await expect(composer.locator('[data-verb="attack"]')).toHaveAttribute('aria-checked', 'true');
+  // No autofocus on a phone: the keyboard and the target list would cover the options and Run.
+  await expect(target).not.toBeFocused();
+  await expect(composer.getByRole('listbox')).toHaveCount(0);
+  await page.waitForTimeout(300);
+  const controls = [composer.getByTestId('composer-run'), ...await composer.getByTestId('composer-role').getByRole('radio').all(), composer.getByTestId('composer-planned'), target];
+  for (const c of controls) expect(await onTop(c), await c.evaluate(e => e.textContent || e.outerHTML.slice(0, 60))).toBe(true);
+  // A tap opens the list in the flow: it pushes Role down instead of covering it.
+  await target.click();
+  const list = composer.getByRole('listbox');
+  await expect(list).toBeVisible();
+  const lb = (await list.boundingBox())!, rb = (await composer.getByTestId('composer-role').boundingBox())!;
+  expect(rb.y).toBeGreaterThanOrEqual(lb.y + lb.height);
+  await list.getByRole('option', { name: /LEAK/ }).click();
+  await expect(target).toHaveValue('LEAK');
+  await expect(list).toHaveCount(0);
+  await page.waitForTimeout(400);
+  for (const c of controls) expect(await onTop(c), await c.evaluate(e => e.textContent || e.outerHTML.slice(0, 60))).toBe(true);
+  await composer.getByTestId('composer-role').getByRole('radio', { name: 'Main' }).click();
+  await expect(composer.getByTestId('composer-preview')).toContainText('/attack RECORDS LEAK main');
+});
+
+test('with the keyboard up, a focused field in the sheet stays in view and uncovered', async ({ page, browserName }) => {
+  const t = await touchFor(page, browserName);
+  const vp = page.viewportSize()!;
+  await tap(t, await unitAt(page, 'records'));
+  await page.getByTestId('unit-order').click();
+  const composer = page.getByTestId('composer'), target = composer.getByTestId('composer-target');
+  await target.click();
+  await expect(target).toBeFocused();
+  // The keyboard: the page gets 300 px shorter (Android resizes the layout viewport).
+  await page.setViewportSize({ width: vp.width, height: vp.height - 300 });
+  try {
+    await page.waitForTimeout(500);
+    // The sheet takes the room: the command bar steps aside, the field and the first suggestions show.
+    await expect(page.getByTestId('command-input')).toBeHidden();
+    await expect(target).toBeInViewport({ ratio: 1 });
+    expect(await onTop(target)).toBe(true);
+    const first = composer.getByRole('listbox').getByRole('option').first();
+    await expect(first).toBeInViewport({ ratio: 1 });
+    expect(await onTop(first)).toBe(true);
+    // Still a portrait phone: the keyboard does not turn the layout into the landscape column.
+    const sheet = (await page.getByTestId('sheet').boundingBox())!;
+    expect(sheet.width).toBeGreaterThan(vp.width - 2);
+  } finally {
+    await target.blur();
+    await page.setViewportSize(vp);
+  }
+  await expect(page.getByTestId('command-input')).toBeVisible();
+});
+
+test('a swipe up on the peek card opens the sheet; nothing scrolls under the close button', async ({ page, browserName }) => {
+  const t = await touchFor(page, browserName);
+  const sheet = page.getByTestId('sheet');
+  await tap(t, await unitAt(page, 'records'));
+  await expect(sheet).toHaveAttribute('data-size', 'peek');
+  const close = page.locator('.peek-close');
+  /** Text or a control in the card that shows under the ✕. */
+  const overlap = () => close.evaluate(x => {
+    const a = x.getBoundingClientRect(), box = x.closest('.inspector')!.querySelector('.scroll')!.getBoundingClientRect();
+    return [...x.closest('.inspector')!.querySelectorAll('.scroll *')].filter(el => {
+      if (el.children.length && !el.matches('button, img, input')) return false;
+      const b = el.getBoundingClientRect();
+      if (!b.width || !b.height || b.bottom <= box.top || b.top >= box.bottom) return false;
+      return b.left < a.right && a.left < b.right && b.top < a.bottom && a.top < b.bottom;
+    }).map(el => el.textContent?.trim() || el.tagName);
+  });
+  expect(await overlap()).toEqual([]);
+  // On the card's status line, between the header and the action row (once the sheet has risen to peek).
+  await page.waitForTimeout(300);
+  const status = (await page.getByTestId('inspector').locator('.scroll').boundingBox())!;
+  const from = { x: status.x + status.width / 2, y: status.y + 56 };
+  if (browserName === 'chromium') {
+    await t.down([from]);
+    for (let i = 1; i <= 5; i++) await t.move([{ x: from.x, y: from.y - i * 15 }]);
+    await t.up();
+  } else {
+    // WebKit: touch PointerEvents on the element under the finger.
+    await page.evaluate(({ x, y }) => {
+      const el = document.elementFromPoint(x, y)!;
+      const fire = (type: string, cy: number) => el.dispatchEvent(new PointerEvent(type, { pointerId: 7, pointerType: 'touch', isPrimary: true, clientX: x, clientY: cy, button: 0, buttons: type === 'pointerup' ? 0 : 1, bubbles: true, cancelable: true }));
+      fire('pointerdown', y);
+      for (let i = 1; i <= 5; i++) fire('pointermove', y - i * 15);
+      fire('pointerup', y - 75);
+    }, from);
+  }
+  await expect(sheet).toHaveAttribute('data-size', 'half');
+  await expect(close).toHaveCount(0);
+  // At peek the card's body never scrolls.
+  await page.getByTestId('sheet-grab').click();
+  await expect(sheet).toHaveAttribute('data-size', 'peek');
+  const scroll = page.locator('[data-testid="sheet"] .scroll');
+  await scroll.evaluate(el => { el.scrollTop = 0; });
+  expect(await scroll.evaluate(el => getComputedStyle(el).overflowY)).toBe('hidden');
+  expect(await overlap()).toEqual([]);
+});
+
+test('the capture menu opens above the open sheet, clear of the top bar', async ({ page, browserName }) => {
+  const t = await touchFor(page, browserName);
+  const sheet = page.getByTestId('sheet');
+  await page.getByTestId('sheet-grab').click();
+  await expect(sheet).toHaveAttribute('data-size', 'half');
+  await page.waitForTimeout(300);
+  const sb = (await sheet.boundingBox())!, top = (await page.locator('.topbar').boundingBox())!;
+  // The half sheet covers the rings: a plain drag pans them up into the strip of map above it.
+  const x0 = sb.width / 2;
+  await t.down([{ x: x0, y: sb.y - 20 }]);
+  for (let i = 1; i <= 8; i++) await t.move([{ x: x0, y: sb.y - 20 - i * 30 }]);
+  await t.up();
+  await page.waitForTimeout(300);
+  // Open ground just above the sheet: a menu below the finger would land on the sheet.
+  const ground = await page.evaluate(({ from, to }) => {
+    // From the middle outward: ground off the map's rings belongs to no sector and offers no capture.
+    const xs = Array.from({ length: Math.floor(innerWidth / 24) }, (_, i) => innerWidth / 2 + (i % 2 ? 1 : -1) * Math.ceil(i / 2) * 12).filter(x => x > 30 && x < innerWidth - 30);
+    for (let y = from; y > to; y -= 6) for (const x of xs) {
+      const e = document.elementFromPoint(x, y);
+      const busy = '[data-unit-id],[data-measure-id],[data-sector-id],[data-interactive],[role="button"],.map-controls';
+      const clear = [[-14, 0], [14, 0], [0, -14], [0, 14]].every(([dx, dy]) => { const n = document.elementFromPoint(x + dx, y + dy); return n?.closest('svg.map-svg') && !n.closest(busy); });
+      // Inside a sector's wedge (open ground on the map, not the terrain past its edge).
+      if (e?.matches('path.wedge') && clear) return { x, y };
+    }
+    return null;
+  }, { from: Math.round(sb.y - 24), to: Math.round(top.y + top.height + 60) });
+  expect(ground).not.toBeNull();
+  await longPress(page, t, ground!);
+  await t.up();
+  const menu = page.getByTestId('capture-menu');
+  await expect(menu).toBeVisible();
+  await expect(sheet).toHaveAttribute('data-size', 'half');
+  const mb = (await menu.boundingBox())!;
+  expect(mb.y + mb.height).toBeLessThanOrEqual(sb.y + 1);
+  expect(mb.y).toBeGreaterThanOrEqual(top.y + top.height);
+  for (const item of await menu.getByRole('menuitem').all()) expect(await onTop(item), await item.innerText()).toBe(true);
+  await menu.getByRole('menuitem', { name: 'Cancel' }).click();
+  await expect(menu).toHaveCount(0);
 });

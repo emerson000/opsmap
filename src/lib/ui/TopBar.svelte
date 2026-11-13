@@ -176,11 +176,13 @@
 <style>
   .btn.icon { padding: 0 8px; display: inline-flex; align-items: center; justify-content: center; }
   .topbar {
-    position: absolute; inset: 0 0 auto 0; height: var(--bar-h); z-index: 20;
+    position: absolute; inset: 0 0 auto 0; height: var(--bar-h); z-index: var(--z-topbar);
     display: flex; align-items: center; gap: var(--s2); padding: 0 var(--s3);
     background: var(--panel); border-bottom: 2px solid var(--rule-strong);
     touch-action: pan-x pan-y; /* a pinch on the bar must not zoom the page */
   }
+  /* A menu open in the bar (user, map switcher) rises with the bar over the panels and map popovers. */
+  .topbar:has([aria-expanded='true']) { z-index: var(--z-popover); }
   .brand { display: flex; align-items: center; gap: var(--s2); margin-right: var(--s2); }
   .mark { width: 18px; height: 12px; border: 2px solid var(--ink); position: relative; flex: none; }
   .mark::after { content: ''; position: absolute; left: 2px; right: 2px; top: 50%; border-top: 2px solid var(--ink); }
@@ -205,7 +207,7 @@
   .chip.me { min-width: 24px; height: 18px; }
   /* Under 1400 px the name goes to the tooltip and the menu; the chip identifies the user. */
   @media (max-width: 1399px) { .uname { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; } }
-  .menu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 200px; padding: var(--s2); background: var(--panel); border: 1px solid var(--rule-strong); display: flex; flex-direction: column; gap: var(--s2); z-index: 40; }
+  .menu { position: absolute; right: 0; top: calc(100% + 6px); min-width: 200px; padding: var(--s2); background: var(--panel); border: 1px solid var(--rule-strong); display: flex; flex-direction: column; gap: var(--s2); z-index: 1; }
   .who { font-weight: 600; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .who span { font: 12px/1.2 var(--font-mono); color: var(--ink-3); font-weight: 400; overflow-wrap: anywhere; }
   .sep { width: 1px; height: 18px; background: var(--rule); margin: 0 var(--s1); }
@@ -229,7 +231,7 @@
   @media (max-width: 399px) { .phone .name, .phone .menu-text { display: none; } }
 
   .app-menu {
-    position: absolute; z-index: 40; display: flex; flex-direction: column; gap: var(--s2);
+    position: absolute; z-index: var(--z-popover); display: flex; flex-direction: column; gap: var(--s2);
     padding: var(--s3); background: var(--panel); border: 2px solid var(--rule-strong); box-shadow: var(--shadow);
     overflow-y: auto; overscroll-behavior: contain; touch-action: pan-y;
   }

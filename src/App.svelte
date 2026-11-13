@@ -27,7 +27,7 @@
   import { copyText, download, pickFile, stamp } from './lib/ui/files';
   import { quoteName } from './lib/ui/words';
 
-  const LOG_W = 264, RAIL_W = 28, BAR_H = 40, CMD_H = 84, PHONE_BAR_H = 44, SHEET_HEAD = 52;
+  const LOG_W = 264, RAIL_W = 28, BAR_H = 40, CMD_H = 84, PHONE_BAR_H = 40, SHEET_HEAD = 52;
 
   const doc = $derived(getDoc());
   // Console cues for what changes on the map while it is live: a new track, a new hostile, a hostile destroyed.
@@ -65,6 +65,12 @@
   let vvH = $state(typeof window === 'undefined' ? 800 : window.innerHeight);
   let kb = $state(0);
   const topH = $derived(PHONE_BAR_H + safeTop);
+  /** The on-screen keyboard is up: iOS shrinks the visual viewport (kb), Android the layout viewport (vh below its tallest). */
+  const kbUp = $derived(kb > 0 || env.tallH - vh > 120);
+  /** A text field in the sheet has focus (the sheet reports it). */
+  let fieldFocus = $state(false);
+  // Portrait phone, typing in the sheet: the sheet takes the whole height between the top bar and the keyboard.
+  $effect(() => { ui.sheetTyping = phone && !side && fieldFocus && kbUp; });
   const sheetAvail = $derived(Math.max(SHEET_HEAD, vh - topH - dockH - kb - 8));
   const popMax = $derived(Math.max(120, vvH - topH - dockH - 8));
   const insets = $derived(side
@@ -110,6 +116,12 @@
     });
   });
   $effect(() => { void selection.sel; untrack(cancelPick); });
+  // Portrait phone: the focused command bar hides the sheet and its pick banner, and the bar cannot finish a map
+  // pick, so focusing the bar ends the pick (the draft stays in the composer).
+  $effect(() => {
+    if (!ui.barFocused || !phone || side) return;
+    untrack(() => { if (pick.current) { cancelPick(); toast('Map pick cancelled', 'info'); } });
+  });
 
   /** F6 (Shift+F6 back): map → sidebar → command bar. */
   function cycleRegion(back: boolean) {
@@ -239,7 +251,7 @@
 {#if session.phase !== 'ready'}
 <Login />
 {:else}
-<div class="app {env.tier}" class:kb={kb > 0} style="--left-w:{leftW}px; --right-w:{INSPECTOR_W}px; --cmd-h:{CMD_H}px; --kb:{kb}px; --dock-h:{dockH + kb}px; --top-h:{topH}px; --pop-max:{popMax}px">
+<div class="app {env.tier}" class:kb={kb > 0} class:typing={ui.sheetTyping} style="--left-w:{leftW}px; --right-w:{INSPECTOR_W}px; --cmd-h:{CMD_H}px; --kb:{kb}px; --dock-h:{dockH + kb}px; --top-h:{topH}px; --pop-max:{popMax}px">
   <div class="probe" aria-hidden="true" bind:clientHeight={safeTop}></div>
   <div class="map-layer">
     <OpsMap bind:this={map} {theme} {insets} {now} {trails} {remote}
@@ -260,7 +272,7 @@
   <TopBar {doc} {now} onimportlocal={importLocal} />
 
   {#if phone}
-    <Sheet {doc} {now} {theme} avail={sheetAvail} onfocus={focus} bind:shown={sheetH} {side} {sideW} />
+    <Sheet {doc} {now} {theme} avail={sheetAvail} onfocus={focus} bind:shown={sheetH} bind:fieldFocus {side} {sideW} />
   {/if}
   {#if pick.current && phone && side}
     <div class="pick-layer"><PickBanner {doc} /></div>
@@ -303,34 +315,38 @@
   .app { position: relative; width: 100%; height: 100dvh; overflow: hidden; overflow: clip; }
   .probe { position: absolute; top: 0; left: 0; width: 0; height: env(safe-area-inset-top); visibility: hidden; pointer-events: none; }
   .map-layer { position: absolute; inset: 0; }
-  .left { position: absolute; top: var(--bar-h); bottom: 0; left: 0; width: var(--left-w); z-index: 10; }
-  .right { position: absolute; top: var(--bar-h); bottom: 0; right: 0; width: var(--right-w); z-index: 10; }
+  .left { position: absolute; top: var(--bar-h); bottom: 0; left: 0; width: var(--left-w); z-index: var(--z-sheet); }
+  .right { position: absolute; top: var(--bar-h); bottom: 0; right: 0; width: var(--right-w); z-index: var(--z-sheet); }
   .bottom {
     touch-action: pan-x pan-y;
-    position: absolute; bottom: 12px; left: calc(var(--left-w) + 16px); right: calc(var(--right-w) + 16px); z-index: 15;
+    position: absolute; bottom: 12px; left: calc(var(--left-w) + 16px); right: calc(var(--right-w) + 16px); z-index: var(--z-dock);
     display: flex; justify-content: center; pointer-events: none;
   }
+  /* Typing in the bar: its suggestions open over the panels. */
+  .bottom:focus-within { z-index: var(--z-popover); }
   .orientation { padding:8px;background:var(--panel);border:1px solid var(--rule);font-size:12px;margin-bottom:8px; }
   .orientation div {display:flex;gap:4px;margin-top:8px;}
   .bar-wrap { width: 100%; max-width: 760px; pointer-events: auto; }
-  .toast-layer { position: absolute; top: calc(var(--bar-h) + 8px); left: calc(var(--left-w) + 16px); right: calc(var(--right-w) + 16px); z-index: 30; }
-  .sitrep-layer { position: absolute; top: calc(var(--bar-h) + 16px); left: calc(var(--left-w) + 16px); right: calc(var(--right-w) + 16px); z-index: 25; display: flex; justify-content: center; }
-  .vk-layer { z-index: 27; }
-  .pick-layer { position: absolute; top: calc(var(--bar-h) + 8px); left: calc(var(--left-w) + 16px); right: calc(var(--right-w) + 16px); z-index: 24; display: flex; justify-content: center; pointer-events: none; }
+  .toast-layer { position: absolute; top: calc(var(--bar-h) + 8px); left: calc(var(--left-w) + 16px); right: calc(var(--right-w) + 16px); z-index: var(--z-toast); }
+  .sitrep-layer { position: absolute; top: calc(var(--bar-h) + 16px); left: calc(var(--left-w) + 16px); right: calc(var(--right-w) + 16px); z-index: var(--z-panel); display: flex; justify-content: center; }
+  .vk-layer { z-index: calc(var(--z-panel) + 2); }
+  .pick-layer { position: absolute; top: calc(var(--bar-h) + 8px); left: calc(var(--left-w) + 16px); right: calc(var(--right-w) + 16px); z-index: var(--z-pick); display: flex; justify-content: center; pointer-events: none; }
   .pick-layer > :global(*) { width: min(440px, 100%); pointer-events: auto; }
   /* Out of flow, so the dock height (and the map's insets) stay the same while picking. */
   .bar-wrap { position: relative; }
   .pick-dock { position: absolute; left: 0; right: 0; bottom: calc(100% + 8px); }
   .app.phone .pick-layer { top: calc(var(--top-h) + 8px); left: 8px; right: calc(var(--right-w) + 8px); }
-  .legend-layer { position: absolute; top: calc(var(--bar-h) + 6px); right: 12px; z-index: 26; }
+  .legend-layer { position: absolute; top: calc(var(--bar-h) + 6px); right: 12px; z-index: calc(var(--z-panel) + 1); }
 
   /* Phone: the map fills the screen; the command bar docks at the bottom (above the keyboard),
      the details sheet sits on top of it, and overlays fill the space between bar and dock. */
   .app.phone .bottom {
     left: 0; right: 0; bottom: var(--kb); pointer-events: auto;
     padding: 8px calc(8px + env(safe-area-inset-right)) max(8px, env(safe-area-inset-bottom)) calc(8px + env(safe-area-inset-left));
-    background: var(--panel); border-top: 1px solid var(--rule); z-index: 16;
+    background: var(--panel); border-top: 1px solid var(--rule); z-index: var(--z-dock);
   }
+  /* Typing in the sheet: the bar steps aside, so the sheet reaches down to the keyboard. */
+  .app.phone.typing .bottom { display: none; }
   .app.phone.kb .bottom { padding-bottom: 8px; }
   .app.phone .bar-wrap { max-width: none; }
   .app.phone .toast-layer { top: calc(var(--top-h) + 8px); left: 8px; right: 8px; }

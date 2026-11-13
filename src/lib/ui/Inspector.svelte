@@ -44,7 +44,9 @@
   // Phone at half or full: chips at the top that jump to each section of the open view.
   let bodyEl: HTMLDivElement | undefined = $state();
   let index = $state<{ key: string; title: string; count: string }[]>([]);
-  const showIndex = $derived(env.tier === 'phone' && !peek && kind !== 'map');
+  /** Not while the order composer is open: it needs the height, and it has its own command line. */
+  const composing = $derived(ui.compose !== null && kind === 'unit');
+  const showIndex = $derived(env.tier === 'phone' && !peek && kind !== 'map' && !composing);
   $effect(() => {
     const el = bodyEl;
     if (!el || !showIndex) { index = []; return; }
@@ -87,7 +89,15 @@
 
   // Long-press on a control: its command in a bubble, without running it (on a phone this stands in for the tooltip).
   const LONG_PRESS = 500;
-  let bubble = $state<{ text: string; x: number; y: number } | null>(null);
+  let bubble = $state<{ text: string; x: number; y: number; below: boolean } | null>(null);
+  /** The bubble lives on <body>, above every panel and bar (the sheet's own stacking would cap it). */
+  function portal(node: HTMLElement) { document.body.appendChild(node); return { destroy() { node.remove(); } }; }
+
+  // Phone: the section chips scroll sideways; a chevron at the right edge shows there are more.
+  let chipsEl: HTMLElement | undefined = $state();
+  let chipsMore = $state(false);
+  function chipsCheck() { const el = chipsEl; chipsMore = !!el && el.scrollLeft + el.clientWidth < el.scrollWidth - 4; }
+  $effect(() => { void index; const el = chipsEl; if (!el) return; chipsCheck(); const ro = new ResizeObserver(chipsCheck); ro.observe(el); return () => ro.disconnect(); });
   let press: { timer: ReturnType<typeof setTimeout>; id: number; x: number; y: number } | null = null;
   let swallowClick = false;
   let bubbleTimer: ReturnType<typeof setTimeout> | undefined;
@@ -110,7 +120,10 @@
     press = { id: e.pointerId, x: e.clientX, y: e.clientY, timer: setTimeout(() => {
       press = null;
       swallowClick = true;
-      bubble = { text, x: Math.max(8, Math.min(r.left + r.width / 2, window.innerWidth - 8)), y: r.top };
+      // Above the control, or below it when the top bar would cover the bubble.
+      const barBottom = document.querySelector('.topbar')?.getBoundingClientRect().bottom ?? 0;
+      const below = r.top - 56 < barBottom;
+      bubble = { text, x: Math.max(8, Math.min(r.left + r.width / 2, window.innerWidth - 8)), y: below ? r.bottom : r.top, below };
       try { navigator.vibrate?.(10); } catch { /* not supported */ }
       clearTimeout(bubbleTimer);
       bubbleTimer = setTimeout(() => (bubble = null), 3500);
@@ -134,7 +147,7 @@
   onpointerdown={pressStart} onpointermove={pressMove} onpointerup={() => { endPress(); setTimeout(() => (swallowClick = false), 0); }} onpointercancel={endPress}
   onclickcapture={clickCapture} oncontextmenu={(e) => { if (press || bubble) e.preventDefault(); }}>
   {#if bubble}
-    <div class="bubble" role="status" data-testid="cmd-bubble" style="left:{bubble.x}px; top:{bubble.y}px"><code>{bubble.text}</code></div>
+    <div class="bubble" class:below={bubble.below} role="status" data-testid="cmd-bubble" style="left:{bubble.x}px; top:{bubble.y}px" use:portal><code>{bubble.text}</code></div>
   {/if}
   {#if peek}
     <button class="btn close peek-close" onclick={() => select(null)} aria-label="Close inspector">✕</button>
@@ -157,9 +170,9 @@
   </div>
   {/if}
   {#if index.length}
-    <div class="index-row"><nav class="index" aria-label="Sections" data-testid="section-index">
+    <div class="index-row"><nav class="index" aria-label="Sections" data-testid="section-index" bind:this={chipsEl} onscroll={chipsCheck}>
       {#each index as s (s.key)}<button type="button" class="chip" onclick={() => jump(s.key)}>{s.title}{#if s.count && s.count !== '0'} <b>{s.count}</b>{/if}</button>{/each}
-    </nav></div>
+    </nav>{#if chipsMore}<span class="more" aria-hidden="true" data-testid="section-more">›</span>{/if}</div>
   {/if}
   {#key selKey}
   <div class="body scroll" bind:this={bodyEl}>
@@ -176,8 +189,8 @@
     {/if}
   </div>
   {/key}
-  <!-- Portrait phone: only at full; at peek and half the command bar's own result line is enough. -->
-  {#if !(env.tier === 'phone' && !env.landscape && ui.sheet !== 'full')}<EchoBar />{/if}
+  <!-- Portrait phone: only at full, and not under the composer (it has its own line); at peek and half the command bar's own result line is enough. -->
+  {#if !(env.tier === 'phone' && !env.landscape && (ui.sheet !== 'full' || composing))}<EchoBar />{/if}
 </aside>
 
 <style>
@@ -187,11 +200,12 @@
   /* A long-press shows the command bubble, not the browser's callout or a text selection. */
   .inspector :global(button), .inspector :global([role='radio']) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }
   .bubble {
-    position: fixed; z-index: 40; transform: translate(-50%, calc(-100% - 8px)); max-width: min(320px, calc(100vw - 16px));
+    position: fixed; z-index: var(--z-bubble); transform: translate(-50%, calc(-100% - 8px)); max-width: min(320px, calc(100vw - 16px));
     padding: var(--s1) var(--s2); background: var(--ink); color: var(--panel); box-shadow: var(--shadow); pointer-events: none;
     font: 400 12px/1.4 var(--font-mono); overflow-wrap: anywhere;
   }
   .bubble code { color: inherit; }
+  .bubble.below { transform: translate(-50%, 8px); }
   .strip { flex: none; display: flex; align-items: center; gap: 6px; min-height: 36px; padding: var(--s1) var(--s3); border-bottom: 1px solid var(--rule); }
   .kind { flex: none; padding: 1px 4px; border: 1px solid var(--rule-strong); font: 700 11px/14px var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; color: var(--ink); }
   .crumbs { flex: 1; min-width: 0; display: flex; align-items: center; gap: 3px; white-space: nowrap; font: 600 12px/1.2 var(--font-cond); letter-spacing: 0.02em; text-transform: uppercase; color: var(--ink-2); }
@@ -212,9 +226,15 @@
   .inspector.peek { position: relative; }
   .inspector.peek .body { padding-top: var(--s2); }
   .peek-close { position: absolute; top: var(--s2); right: var(--s3); z-index: 1; background: var(--panel); }
+  /* Peek shows the header, status and actions only: the body does not scroll, so nothing slides under the ✕. */
+  .inspector.peek .body { overflow: hidden; touch-action: none; }
   /* Room for the ✕ beside the header (a view's own header, or the unit's). */
   .inspector.peek :global(.head) { padding-right: 52px; }
-  .index-row { flex: none; border-bottom: 1px solid var(--rule); }
+  .index-row { position: relative; flex: none; border-bottom: 1px solid var(--rule); }
+  .more {
+    position: absolute; top: 0; right: 0; bottom: 0; display: grid; place-items: center; width: 24px; pointer-events: none;
+    background: var(--panel); border-left: 1px solid var(--rule); font: 700 16px/1 var(--font-mono); color: var(--ink-2);
+  }
   /* The row scrolls sideways: a fade at the right edge shows there is more (the end padding clears it at the end). */
   .index {
     display: flex; gap: var(--s1); overflow-x: auto; padding: var(--s1) var(--s5) var(--s1) var(--s3); scrollbar-width: none; touch-action: pan-x;
@@ -226,5 +246,10 @@
     font: 600 12px/1 var(--font-cond); letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-2); white-space: nowrap;
   }
   .chip b { font: 700 12px/1 var(--font-mono); color: var(--ink); letter-spacing: 0; }
+  /* 36 px to the eye, 44 px to the finger: the hit area reaches into the row's padding. */
+  .chip { position: relative; }
+  .chip::after { content: ''; position: absolute; inset: calc(-1 * var(--s1)) 0; }
+  /* Phone: the sector link in the strip is a 44 px target. */
+  :global([data-tier='phone']) .crumb { display: inline-flex; align-items: center; min-height: 44px; }
   :global([data-tier='phone']) .body { overscroll-behavior: contain; touch-action: pan-y; }
 </style>

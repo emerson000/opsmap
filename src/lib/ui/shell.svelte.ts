@@ -37,6 +37,8 @@ export const ui = $state({
   menuOpen: false,
   /** The command input has focus (phone: the sheet hides so suggestions get the room). */
   barFocused: false,
+  /** Portrait phone: a text field in the sheet has focus and the keyboard is up, so the sheet takes the whole height. */
+  sheetTyping: false,
   /** /CMD: every sidebar control shows its filled command. */
   cmdOn: read('opsmap.ui.cmd') === 'on',
   /** The Situation view's create form (a button there, or the capture menu), with the sector and ring to prefill. */
@@ -77,17 +79,25 @@ export function setSingleKeys(on: boolean): void { ui.singleKeys = on; write(KEY
 export type Tier = 'phone' | 'tablet' | 'desktop';
 export const PHONE_QUERY = '(max-width: 759px), (max-height: 500px) and (pointer: coarse)';
 export const DESKTOP_QUERY = '(min-width: 1280px)';
-export const env = $state({ tier: 'desktop' as Tier, systemDark: false, coarse: false, landscape: false });
+/**
+ * `landscape` compares the width with `tallH`, the tallest layout height seen at this width: an Android keyboard
+ * shrinks the layout viewport, and must not turn a portrait phone into a landscape one. A new width (rotation)
+ * starts over. `tallH - innerHeight` is how far a keyboard (or anything else) has shortened the page.
+ */
+export const env = $state({ tier: 'desktop' as Tier, systemDark: false, coarse: false, landscape: false, tallH: 0 });
 if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
-  const phone = matchMedia(PHONE_QUERY), desk = matchMedia(DESKTOP_QUERY), dark = matchMedia('(prefers-color-scheme: dark)'), coarse = matchMedia('(pointer: coarse)'), land = matchMedia('(orientation: landscape)');
+  const phone = matchMedia(PHONE_QUERY), desk = matchMedia(DESKTOP_QUERY), dark = matchMedia('(prefers-color-scheme: dark)'), coarse = matchMedia('(pointer: coarse)');
+  let width = -1;
   const update = () => {
     env.tier = phone.matches ? 'phone' : desk.matches ? 'desktop' : 'tablet';
     env.systemDark = dark.matches;
     env.coarse = coarse.matches;
-    env.landscape = land.matches;
+    if (innerWidth !== width) { width = innerWidth; env.tallH = innerHeight; } else env.tallH = Math.max(env.tallH, innerHeight);
+    env.landscape = innerWidth > env.tallH;
   };
   update();
-  for (const q of [phone, desk, dark, coarse, land]) q.addEventListener?.('change', update);
+  for (const q of [phone, desk, dark, coarse]) q.addEventListener?.('change', update);
+  window.addEventListener('resize', update);
 }
 
 /** Choosing System clears the override. */

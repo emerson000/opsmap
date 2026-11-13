@@ -5,6 +5,11 @@
   --font-cond: 'IBM Plex Sans Condensed', 'Roboto Condensed', 'Arial Narrow', 'DejaVu Sans Condensed', 'Liberation Sans Narrow', sans-serif;
   --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px;
   --bar-h: 40px;
+  /* One stacking scale for the shell. Layers inside a panel use local values 0-2. Map popovers (capture menu,
+     unit menu, area card) sit over the sheet and the bars; an open top-bar menu or the focused command bar
+     rises to popover; toasts and the long-press command bubble are on top of everything. */
+  --z-map-label: 2; --z-sheet: 10; --z-dock: 20; --z-topbar: 30; --z-map-pop: 40; --z-pick: 45;
+  --z-panel: 50; --z-popover: 60; --z-toast: 70; --z-bubble: 80;
 
   --ground: #eee7d3;
   --panel: #f6f1e3;
@@ -87,6 +92,10 @@ textarea.field { height: auto; min-height: 44px; padding: var(--s1); resize: ver
 /* Phone tier (set on <html data-tier>): 44 px tap targets, 16 px form text (iOS zooms the page
    when a focused field is smaller). */
 [data-tier='phone'] .btn { height: 44px; padding: 0 var(--s3); }
+/* Inspector buttons are square at least (Reinforce (+), Reduce (−), Halt All). */
+[data-tier='phone'] .inspector .btn { min-width: 44px; justify-content: center; }
+/* Text links in the inspector (an order's other end, a unit's sector or area) are 44 px tall to the finger. */
+[data-tier='phone'] .inspector button.link { min-height: 44px; display: inline-flex; align-items: center; }
 [data-tier='phone'] .field { height: 44px; font-size: 16px; }
 [data-tier='phone'] textarea.field { height: auto; min-height: 88px; }
 [data-tier='phone'] select.field { font-size: 16px; }

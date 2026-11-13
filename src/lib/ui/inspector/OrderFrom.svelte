@@ -3,7 +3,7 @@
   // pick the friendly that gets the order, from a list ranked like the composer's or on the map with ⌖ Map.
   // Choosing one opens that unit's order composer with this end already filled in (ui.compose).
   import { onMount } from 'svelte';
-  import type { PickSlot } from '../shell.svelte';
+  import { env, type PickSlot } from '../shell.svelte';
   import type { Option } from '../compose';
   import Picker from './Picker.svelte';
 
@@ -22,7 +22,9 @@
   let query = $state('');
   let reason = $state('');
   let input: HTMLInputElement | undefined = $state();
-  onMount(() => input?.focus({ preventScroll: true }));
+  /** Portrait phone: the list shows at once and the input waits for a tap (the keyboard would cover the list). */
+  const phone = env.tier === 'phone' && !env.landscape;
+  onMount(() => { if (!phone) input?.focus({ preventScroll: true }); });
 
   function choose(o: Option) {
     if (o.why) { reason = `${o.label}: ${o.why}`; return; }
@@ -43,7 +45,7 @@
   <div class="body">
     <Picker items={options} bind:value={query} bind:input label="Unit that gets the order" placeholder="A friendly unit…"
       testid="order-from-unit" mapTestid="order-from-map" pickLabel="Pick the unit" pickSlots={() => slots} {command}
-      onchoose={choose} oninput={() => (reason = '')} />
+      onchoose={choose} oninput={() => (reason = '')} listOpen={phone} />
     {#if reason}<p class="reason" role="status">{reason}</p>{/if}
     <code class="preview">› {command}</code>
   </div>
