@@ -1,9 +1,9 @@
 import { DEFAULT_TZ, calendarDay, parts, zonedTime } from '../../core/model/time';
 // Builds everything the map draws from a Doc: a pure projection, recomputed reactively.
 import type { ControlMeasure, Doc, Order, Ring, Unit, View } from '../../core/model/types';
-import { areaShape, polarToXY, radiusForDate, RING_R } from '../../core/model/geometry';
+import { areaShape, orderRing, polarToXY, radiusForDate, RING_R, ringTargetRadius } from '../../core/model/geometry';
 import { forceRatio } from '../../core/model/forceRatio';
-import { annularSectorPath, arcTextPath, attackArrow, axisOutline, axisOutlineThrough, bentCurve, curvePath, labelAt, moveArrow, obstacleMark, type Curve, type Pt } from './arrows';
+import { annularSectorPath, arcTextPath, attackArrow, axisOutline, axisOutlineThrough, bentCurve, curvePath, labelAt, moveArrow, obstacleMark, withdrawArrow, type Curve, type Pt } from './arrows';
 import { BEYOND_R, CHEVRON_R, HQ_CLEAR, MAP_EDGE_R, RIM_LABEL_R, SCALE, SECTOR_HQ_R, UNIT_CLEAR } from './constants';
 import { ringOfRadius } from './interaction';
 import { hashSeed, mulberry32, smoothPath } from './terrain';
@@ -31,7 +31,8 @@ export interface SceneSector {
 }
 export interface SceneRing { key: Ring; r: number; label: string; date: string; paths: string[]; /** Arc center of each label path, degrees (screen, 270 = up). */ centers: number[] }
 export interface SceneOrder {
-  id: string; kind: 'main' | 'support' | 'axis' | 'advance' | 'move' | 'link' | 'assist'; planned: boolean; fromId: string; toId: string;
+  id: string; kind: 'main' | 'support' | 'axis' | 'advance' | 'move' | 'link' | 'assist' | 'withdraw'; planned: boolean; fromId: string; toId: string;
+  /** Withdrawal: the identity color of the unit that withdraws. */ side?: 'friend' | 'threat' | 'other';
   /** Axis of advance: the phase lines it names with `via`. */ via?: string[];
   /** Axis of advance: where it crosses each phase line named with `via` (world space). */ checkpoints?: Pt[];
   /** Link orders: linkup-point position and dependency/handoff kind. */
@@ -242,8 +243,19 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
   for (const sec of sectors) anchors.set(`hq:${sec.id}`, { x: sec.hq.x, y: sec.hq.y, clear: 14 * scale });
 
   // Orders
+  /** Where an order ends: its target's anchor, or for a ring target that ring at the (shown) unit's bearing. */
+  const endOf = (ord: Order): (Pt & { clear: number }) | undefined => {
+    const ring = orderRing(ord.to);
+    if (!ring) return anchors.get(ord.to);
+    const u = byId.get(shownId(ord.from)) ?? byId.get(ord.from);
+    if (!u) return undefined;
+    // The middle of the band, but at least 0.75 ring from the unit so a short trip still reads; never past the band.
+    const [lo, hi] = ring === 'beyond' ? [MAP_EDGE_R, BEYOND_R] : RING_R[ring], out = ord.type === 'withdraw';
+    const r = out ? Math.min(hi - 0.05, Math.max(ringTargetRadius(ring), u.pos.r + 0.75)) : Math.max(lo + 0.05, Math.min(ringTargetRadius(ring), u.pos.r - 0.75));
+    return { ...world(r, u.pos.theta), clear: 0 };
+  };
   const visibleOrder = (ord: Order) => {
-    if (!anchors.has(ord.from) || !anchors.has(ord.to)) return false;
+    if (!anchors.has(ord.from) || !endOf(ord)) return false;
     if (staffPlus || o.showOrders?.includes(ord.id)) return true;
     if (o.selectedMeasureId && (ord.to === o.selectedMeasureId || ord.via?.includes(o.selectedMeasureId))) return true;
     if (o.selectedSectorId && ord.to === `hq:${o.selectedSectorId}`) return true;
@@ -255,7 +267,7 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
       return o.selectedId === ord.from || o.selectedId === ord.to
         || doc.orders.some(m => m.type === 'attack' && m.role === 'main' && m.to === ord.to && m.from === o.selectedId);
     }
-    return (ord.type === 'attack' && ord.role === 'main') || ord.type === 'advance';
+    return (ord.type === 'attack' && ord.role === 'main') || ord.type === 'advance' || ord.type === 'withdraw';
   };
   // Command lines: each attached unit to its parent, in Staff and Detail, or for the selected HQ or member.
   const commandLines: SceneCommandLine[] = [];
@@ -293,9 +305,10 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
   }
   const orders: SceneOrder[] = [];
   for (const ord of shown) {
-    const a = anchors.get(ord.from)!, b = anchors.get(ord.to)!;
+    const a = anchors.get(ord.from)!, b = endOf(ord)!;
     const kind: SceneOrder['kind'] = ord.type === 'attack' ? (ord.role === 'main' ? 'main' : 'support') : ord.type === 'support' ? 'assist' : ord.type;
-    const bend = kind === 'link' ? 0 : kind === 'advance' ? 0.12 : kind === 'axis' ? 0.1 : 0.18;
+    // To a ring the arrow runs straight along the bearing, so in or out from HQ is plain at a glance.
+    const bend = kind === 'link' || orderRing(ord.to) ? 0 : kind === 'advance' ? 0.12 : kind === 'axis' ? 0.1 : 0.18;
     const curve: Curve | null = bentCurve(a, b, { startClear: a.clear, endClear: b.clear, bend });
     if (!curve) continue;
     const out: SceneOrder = { id: ord.id, kind, planned: Boolean(ord.planned), fromId: ord.from, toId: ord.to };
@@ -313,6 +326,14 @@ export function buildScene(doc: Doc, o: SceneOptions): Scene {
       out.label = { ...labelAt(curve, 0.5, 9 * scale), text: 'SPT' };
     } else if (kind === 'advance') Object.assign(out, attackArrow(curve, { width: 3 * scale, headLen: 16 * scale, headHalf: 9 * scale }));
     else if (kind === 'move') Object.assign(out, moveArrow(curve, 10 * scale), { width: 1.5 * scale });
+    else if (kind === 'withdraw') {
+      const from = byId.get(ord.from);
+      out.side = from?.affiliation === 'hostile' || from?.affiliation === 'suspect' ? 'threat' : from?.affiliation === 'friend' || from?.affiliation === 'assumed' ? 'friend' : 'other';
+      // Floors keep the two lines apart and the head open when zoomed out (phones).
+      Object.assign(out, withdrawArrow(curve, { gap: Math.max(5 * scale, 4.5), headLen: 15 * scale, headHalf: 9 * scale }), { width: Math.max(1.6 * scale, 1.4) });
+      // Upright, so W never reads as E or 3 on an arrow pointing down; clear of the head.
+      out.label = { ...labelAt(curve, 0.35, 11 * scale), angle: 0, text: 'W' };
+    }
     else {
       const shape = { halfWidth: 8 * scale, headLen: 24 * scale, headHalf: 17 * scale };
       // A checkpoint under either symbol would hide its mark and fold the route back on itself: skip it.

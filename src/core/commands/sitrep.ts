@@ -1,6 +1,7 @@
 import type { Affiliation, Doc, Unit } from '../model/types';
 import { formatDtg } from '../model/sidc';
 import { localDay, zonedTime } from '../model/time';
+import { orderRing, ringName } from '../model/geometry';
 import { turnDetails, staleFriendly } from './turn';
 import { unresolved } from './resolve';
 
@@ -25,11 +26,14 @@ export function sitrepText(doc: Doc, now: Date = new Date()): string {
   const blocked = active.filter(u => u.affiliation === 'friend' && u.lifecycle === 'blocked');
   const stale = active.filter(u => staleFriendly(u, now));
   const sector = (id: string) => doc.sectors.find(s => s.id === id)?.name.toUpperCase() ?? '';
-  const target = (id: string) => doc.units.find(x => x.id === id)?.designation ?? (() => { const m = doc.measures.find(x => x.id === id); return m ? `${m.type.toUpperCase()} ${m.name}` : id === 'hq' ? 'HQ' : id; })();
+  const target = (id: string) => doc.units.find(x => x.id === id)?.designation ?? (() => { const m = doc.measures.find(x => x.id === id); return m ? `${m.type.toUpperCase()} ${m.name}` : id === 'hq' ? 'HQ' : orderRing(id) ? ringName(orderRing(id)!) : id.startsWith('hq:') ? `${sector(id.slice(3))} HQ` : id; })();
 
+  // Threats being mitigated: a withdrawal order shows them moving away from HQ.
+  const withdrawing = doc.orders.filter(o => o.type === 'withdraw' && enemies.some(u => u.id === o.from));
   const enemy = [
     close.length ? `Inside PL WEEK (${close.length}): ${list(close.map(u => `${name(u)} ${u.affiliation === 'suspect' ? 'suspect' : `${u.strength ?? 100}%`}`))}.` : 'No hostiles or suspects inside PL WEEK.',
     overdue.length ? `Overdue, inside HQ (${overdue.length}): ${list(overdue.map(name))}.` : 'None overdue.',
+    ...(withdrawing.length ? [`WITHDRAWING (${withdrawing.length}): ${list(withdrawing.map(o => `${name(doc.units.find(u => u.id === o.from)!)} to ${target(o.to)}`))}.`] : []),
   ];
   const mains = doc.orders.filter(o => o.type === 'attack' && o.role === 'main').flatMap(o => {
     const u = doc.units.find(x => x.id === o.from);
@@ -55,7 +59,7 @@ export function sitrepText(doc: Doc, now: Date = new Date()): string {
   const completed = closed.filter(u => u.lifecycle === 'done' && u.affiliation !== 'hostile' && u.affiliation !== 'suspect');
   const destroyed = closed.filter(u => u.lifecycle === 'done' && (u.affiliation === 'hostile' || u.affiliation === 'suspect'));
   const withdrawn = closed.filter(u => u.lifecycle === 'dropped');
-  const kinds: Record<string, string> = { attack: 'attack', axis: 'axis', advance: 'advancing on', move: 'moving to', link: 'linked to', support: 'supporting' };
+  const kinds: Record<string, string> = { attack: 'attack', axis: 'axis', advance: 'advancing on', move: 'moving to', link: 'linked to', support: 'supporting', withdraw: 'withdrawing to' };
   const orders = doc.orders.filter(o => within(o.createdAt)).flatMap(o => {
     const from = doc.units.find(u => u.id === o.from);
     if (!from) return [];

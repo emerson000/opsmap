@@ -1,5 +1,5 @@
 <script lang="ts">
-  // The order composer: an order verb (a 3 × 2 radio grid; verbs that do not apply are struck through with the
+  // The order composer: an order verb (a radio grid, three across with Withdraw on its own row; verbs that do not apply are struck through with the
   // reason), its target (a combobox ranked like the command bar, or ⌖ Map), the verb's options, and the command
   // it builds, slot by slot. Run sends that text through the command bar's own parse and dispatch.
   import { onMount, tick, untrack } from 'svelte';
@@ -15,7 +15,7 @@
 
   let { doc, unit, init }: { doc: Doc; unit: Unit; init: Compose } = $props();
 
-  const LABEL: Record<OrderVerb, string> = { attack: 'Attack', moving: 'Moving', axis: 'Axis', support: 'Support', link: 'Link', advancing: 'Advancing' };
+  const LABEL: Record<OrderVerb, string> = { attack: 'Attack', moving: 'Moving', axis: 'Axis', support: 'Support', link: 'Link', advancing: 'Advancing', withdraw: 'Withdraw' };
   const why = (v: OrderVerb): true | string => { const e = slotFor(v, undefined, 'unit'); return e ? enabledFor(e, { kind: 'unit', unit }, doc) : true; };
 
   const start = untrack(() => init);
@@ -52,8 +52,9 @@
   const slots = $derived(draftSlots(draft, doc));
   const text = $derived(draftText(draft, doc));
   /** The slot to underline: the focused one, else the first required slot still empty. */
-  const activeSlot = $derived(focusSlot ?? (target ? null : 'target'));
-  const result = $derived(target ? parse(text, doc) : null);
+  const optional = $derived(verb === 'withdraw');
+  const activeSlot = $derived(focusSlot ?? (target || optional ? null : 'target'));
+  const result = $derived(target || optional ? parse(text, doc) : null);
   const pickSlots = (): PickSlot[] => slots.map(s => ({ text: s.text, state: s.key === 'target' ? 'active' : s.filled ? 'filled' : 'empty' }));
   const pls = $derived(doc.measures.filter(m => m.type === 'pl'));
 
@@ -64,7 +65,7 @@
     reason = ''; verb = v;
   }
   function runIt() {
-    if (!target) { runError = 'Choose a target first.'; targetInput?.focus(); return; }
+    if (!target && !optional) { runError = 'Choose a target first.'; targetInput?.focus(); return; }
     const res = runText(text, true);
     if (res.ok) close(); else runError = res.error;
   }
@@ -130,7 +131,7 @@
   <div class="row">
     <span class="lab" class:act={activeSlot === 'target'}>Target</span>
     <div class="ctl">
-      <Picker items={options} bind:value={query} chosen={chosen?.key ?? null} bind:input={targetInput} label="Target" placeholder="hq, a unit…"
+      <Picker items={options} bind:value={query} chosen={chosen?.key ?? null} bind:input={targetInput} label="Target" placeholder={optional ? "Next ring out" : "hq, a unit…"}
         testid="composer-target" mapTestid="composer-pick-map" pickLabel="Pick target" {pickSlots}
         onchoose={(o) => { chosen = o; query = o.label; if (phone) { targetInput?.blur(); next(); } }} oninput={() => (chosen = null)}
         onfocus={() => (focusSlot = 'target')} />
@@ -221,6 +222,8 @@
   .x:hover:not(:disabled) { color: var(--ink); border-color: var(--ink); }
   .x:disabled { opacity: 0.35; }
   .verbs { display: grid; grid-template-columns: repeat(3, 1fr); margin: var(--s2); }
+  /* The seventh verb takes the last row: movement away from HQ, apart from the six that converge or connect. */
+  .verbs > :global(:nth-child(7)) { grid-column: 1 / -1; }
   .verb { justify-content: center; margin: 0 -1px -1px 0; padding: 0 2px; letter-spacing: 0.06em; }
   .verb.off { text-decoration: line-through; color: var(--ink-3); cursor: not-allowed; }
   .verb.on { background: var(--ink); color: var(--panel); border-color: var(--ink); }

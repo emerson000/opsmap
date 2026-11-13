@@ -11,7 +11,7 @@ const now = new Date('2026-11-10T15:00:00Z');
 const doc = seedDoc(now);
 const unit = (id: string) => doc.units.find(u => u.id === id)!;
 /** A subject the verb applies to: a friendly for most, a threat for advancing. */
-const SUBJECT: Record<OrderVerb, string> = { attack: 'records', moving: 'records', axis: 'records', support: 'records', link: 'records', advancing: 'leak' };
+const SUBJECT: Record<OrderVerb, string> = { attack: 'records', moving: 'records', axis: 'records', support: 'records', link: 'records', advancing: 'leak', withdraw: 'leak' };
 
 describe('composer targets', () => {
   it.each(ORDER_VERBS)('/%s: every offered target parses to that object, and format() writes the same text back', verb => {

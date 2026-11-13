@@ -7,6 +7,7 @@ import type { Command, ControlMeasure, Doc, Sector, Unit } from '../../core/mode
 import { identities, sizes } from '../../core/commands/apply';
 import { FUNCTIONS } from '../../core/model/functions';
 import { parts } from '../../core/model/time';
+import { orderRing, ringForRadius } from '../../core/model/geometry';
 
 /** The kinds of sidebar view. `area` is an OBJ, EA or NAI; `map` is the Situation view (nothing selected). */
 export type ObjKind = 'unit' | 'area' | 'pl' | 'sector' | 'map';
@@ -64,9 +65,11 @@ export const VERB_SLOTS: readonly VerbSlot[] = [
     enabled: o => o.kind === 'unit' ? (friendly(o.unit) ? open(o) : 'Only a friendly gets an axis') : o.kind === 'area' && o.measure?.type !== 'obj' ? 'An axis ends on an objective' : true },
   { verb: 'advancing', kinds: ['unit', 'sector'], slots: ['‹hostile›', 'on ‹hq|sector hq|‹sector› hq|unit›'], control: 'composer-advancing', label: 'Advancing…', menu: 'form',
     enabled: o => o.kind === 'unit' && !threat(o.unit) ? 'Only a hostile or suspect advances' : o.kind === 'unit' ? open(o) : true },
+  { verb: 'withdraw', kinds: ['unit'], slots: ['‹unit›', '[to ‹near|mid|far|beyond›]'], control: 'composer-withdraw', label: 'Withdraw', menu: 'run',
+    enabled: o => o.kind !== 'unit' || !o.unit ? true : resolved(o.unit) ? open(o) : ringForRadius(o.unit.pos.r) === 'beyond' ? 'Already beyond the map edge' : true },
   { verb: 'support', kinds: ['unit'], slots: ['‹friendly›', '‹friendly›'], control: 'composer-support', label: 'Support…', menu: 'form', enabled: o => friendly(o.unit) ? open(o) : 'Only a friendly supports' },
   { verb: 'link', kinds: ['unit'], slots: ['‹unit›', '‹unit›', '[as dependency|handoff]'], control: 'composer-link', label: 'Link…', menu: 'form', enabled: open },
-  { verb: 'halt', kinds: ['unit', 'area', 'pl', 'sector'], slots: ['‹unit›', '[advance|move|attack|axis|link|support]'], control: 'cancel-order', label: 'Halt', menu: 'run' },
+  { verb: 'halt', kinds: ['unit', 'area', 'pl', 'sector'], slots: ['‹unit›', '[advance|move|attack|axis|link|support|withdraw]'], control: 'cancel-order', label: 'Halt', menu: 'run' },
   { verb: 'bda', kinds: ['unit'], slots: ['‹unit›', '‹0–100%|fc|dmg|des|full›'], control: 'unit-condition', label: 'Condition' },
   { verb: 'block', kinds: ['unit'], slots: ['‹unit›', '[by "‹reason›"]'], control: 'unit-block', label: 'Block…', menu: 'form', rank: 3,
     enabled: o => threat(o.unit) ? 'A threat is not blocked' : o.unit?.lifecycle === 'blocked' ? 'Already blocked' : open(o) },
@@ -126,7 +129,7 @@ export const VERB_SLOTS: readonly VerbSlot[] = [
  */
 export const UNIT_MENU: readonly { key: string; verb: string; form?: string }[] = [
   { key: 'reopen', verb: 'reopen' }, { key: 'attack', verb: 'attack' }, { key: 'move', verb: 'move' }, { key: 'due', verb: 'due' }, { key: 'note', verb: 'note' },
-  { key: 'collapse', verb: 'collapse' }, { key: 'expand', verb: 'expand' }, { key: 'unblock', verb: 'unblock' }, { key: 'block', verb: 'block' }, { key: 'unpin', verb: 'unpin' }, { key: 'halt', verb: 'halt' }, { key: 'key', verb: 'key' },
+  { key: 'collapse', verb: 'collapse' }, { key: 'expand', verb: 'expand' }, { key: 'unblock', verb: 'unblock' }, { key: 'block', verb: 'block' }, { key: 'unpin', verb: 'unpin' }, { key: 'withdraw', verb: 'withdraw' }, { key: 'halt', verb: 'halt' }, { key: 'key', verb: 'key' },
   { key: 'done', verb: 'done' }, { key: 'drop', verb: 'drop' }, { key: 'inspect', verb: 'find' },
 ];
 /** The table entry behind a unit menu item. */
@@ -186,6 +189,7 @@ export function format(cmd: Command, doc: Doc): string {
   const target = (id: unknown) => {
     if (id === 'hq') return 'hq';
     if (typeof id === 'string' && id.startsWith('hq:')) return `${sector(id.slice(3))} hq`;
+    if (typeof id === 'string' && orderRing(id)) return orderRing(id)!;
     const m = doc.measures.find(x => x.id === id);
     return m ? `${m.type.toUpperCase()} ${token(m.name)}` : unit(id);
   };
@@ -217,6 +221,7 @@ export function format(cmd: Command, doc: Doc): string {
       break;
     }
     case 'advancing': add(unit(a.unit), 'on', target(a.target)); break;
+    case 'withdraw': add(unit(a.unit), a.target !== undefined && `to ${target(a.target)}`); break;
     case 'bda': add(unit(a.unit), typeof a.strength === 'number' ? `${a.strength}%` : CONDITION_TOKEN[String(a.condition)] ?? fail('Expected a strength or condition')); break;
     case 'block': add(unit(a.unit), typeof a.note === 'string' && `by ${quoted(a.note)}`); break;
     case 'unblock': case 'unpin': case 'reopen': case 'done': case 'detach': add(unit(a.unit)); break;

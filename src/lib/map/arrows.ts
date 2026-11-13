@@ -121,6 +121,19 @@ export function axisOutlineThrough(points: Pt[], o: { halfWidth: number; headLen
   return `M${ring.map(pt).join(' L')} Z`;
 }
 
+/**
+ * Withdrawal: movement away from HQ. Two parallel lines `gap` apart (a hollow shaft) that stop at the base of an
+ * open V head, so it reads apart from the filled advance arrow, the thin move arrow and the broad axis outline.
+ */
+export function withdrawArrow(c: Curve, o: { gap: number; headLen: number; headHalf: number }) {
+  const h = head(c, Math.min(o.headLen, len(sub(c.p1, c.p0)) * 0.45), o.headHalf);
+  const dir = unit(sub(h.tip, h.base)), n = mul(leftNormal(dir), o.gap / 2);
+  // The lines stop where they meet the head's arms, so the shaft runs into the V.
+  const stop = sub(h.base, mul(dir, -o.headLen * (o.gap / 2) / o.headHalf));
+  const line = (side: number) => `M${pt(add(c.p0, mul(n, side)))} L${pt(add(stop, mul(n, side)))}`;
+  return { shaft: `${line(1)} ${line(-1)}`, head: `${pt(h.left)} ${pt(h.tip)} ${pt(h.right)}` };
+}
+
 /** Movement arrow: a thin line with an open V head. */
 export function moveArrow(c: Curve, headLen: number) {
   const h = head(c, headLen, headLen * 0.5);

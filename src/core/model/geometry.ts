@@ -1,8 +1,23 @@
 import { calendarDay, DEFAULT_TZ } from './time';
-import type { Doc, Ring, Sector } from './types';
+import type { Doc, Order, Ring, Sector, Unit } from './types';
 export type Polar = {r:number;theta:number};
 export type XY = {x:number;y:number};
 export const RING_R = {hq:[0,1],near:[1,2],mid:[2,3],far:[3,4],beyond:[4,4.45]} as const;
+/** Rings from HQ outward. An order may target a ring as `ring:<ring>`: that ring in the unit's own sector, at its bearing. */
+export const RING_ORDER=['hq','near','mid','far','beyond'] as const satisfies readonly Ring[];
+/** The ring an order targets (`ring:far` → `far`), if it targets one. */
+export function orderRing(to:string):Ring|undefined {const r=to.startsWith('ring:')?to.slice(5):'';return r!=='hq'&&(RING_ORDER as readonly string[]).includes(r)?r as Ring:undefined;}
+export const ringIndex=(r:Ring):number=>RING_ORDER.indexOf(r);
+/** A ring as order text names it: `FAR RING`, or `MAP EDGE` for beyond. */
+export const ringName=(r:Ring):string=>r==='beyond'?'MAP EDGE':`${r.toUpperCase()} RING`;
+/** The radius a ring target's arrow ends at: the middle of its band, or just past the outer ring for beyond. */
+export const ringTargetRadius=(r:Ring):number=>r==='beyond'?4.25:(RING_R[r][0]+RING_R[r][1])/2;
+/** A ring-target order whose unit has got there: a withdrawal at or past its ring, a move or advance at or inside it. */
+export function ringOrderReached(o:Order,u:Unit):boolean {
+  const target=orderRing(o.to);if(!target)return false;
+  const at=ringIndex(ringForRadius(u.pos.r)),to=ringIndex(target);
+  return o.type==='withdraw'?at>=to:at<=to;
+}
 export const normalizeDeg = (theta:number):number => ((theta%360)+360)%360;
 // Polar angles increase clockwise from the positive x axis, matching SVG coordinates.
 export function polarToXY(pos:Polar):XY;

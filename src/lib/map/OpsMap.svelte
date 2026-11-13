@@ -633,6 +633,7 @@
     add('unblock', 'Unblock', act('unblock'));
     add('block', 'Block…', ask(`/block ${d} by ""`, `/block ${d} by "`.length));
     add('unpin', 'Unpin', act('unpin'));
+    add('withdraw', 'Withdraw', act('withdraw'));
     if (doc.orders.some(o => o.from === u.id)) add('halt', 'Halt orders', act('halt'));
     add('key', u.keyTerrain ? 'Clear key terrain' : 'Mark key terrain', act('key'));
     add('collapse', 'Collapse task force', act('collapse'));

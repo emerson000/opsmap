@@ -3,10 +3,10 @@ import type { Affiliation, Command, CommandPost, ControlMeasure, Sector, Doc, Ec
 import { designationFrom, effectiveCondition } from '../model/derive';
 import { ECHELONS, echelonIndex } from '../model/echelon';
 import { FUNCTIONS } from '../model/functions';
-import { AO_SIZES, AREA_SIZES, RING_R, aoScale, aoSizeName, placementFits, areaShape, freeSpot, polarToXY, resolvePlacement, ringForRadius, normalizeDeg, radiusForDate, sectorAt, snap, xyToPolar, type AreaSize } from '../model/geometry';
+import { AO_SIZES, AREA_SIZES, RING_R, RING_ORDER, orderRing, ringIndex, ringName, aoScale, aoSizeName, placementFits, areaShape, freeSpot, polarToXY, resolvePlacement, ringForRadius, normalizeDeg, radiusForDate, sectorAt, snap, xyToPolar, type AreaSize } from '../model/geometry';
 import { importJson } from '../model/json';
 import { cloneDoc } from '../model/clone';
-import { advanceDay } from './turn';
+import { advanceDay, completeRingOrders } from './turn';
 import { CommandError, localDay } from './tokenize';
 import { unresolved } from './resolve';
 import { helpText } from './syntax';
@@ -109,16 +109,25 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
     const areaOf=(u:Unit)=>doc.measures.find(m=>m.members?.includes(u.id));
     const release=(m:ControlMeasure,id:string)=>{m.members=(m.members??[]).filter(x=>x!==id);if(!m.members.length)delete m.members;};
     const label=(u:Unit)=>`${u.designation} (${u.fn.toUpperCase()} ${u.echelon?.toUpperCase()??'UNK'})`;
-    /** The center HQ ('hq'), a sector HQ ('hq:<sector id>'), a unit or a control measure. */
-    type Target=Unit|ControlMeasure|'hq'|{sectorHq:Sector};
+    /** The center HQ ('hq'), a sector HQ ('hq:<sector id>'), a ring ('ring:<ring>'), a unit or a control measure. */
+    type Target=Unit|ControlMeasure|'hq'|{sectorHq:Sector}|{ring:Ring};
     const hqTarget=(value:unknown):Target|undefined=>{
       if(value==='hq')return 'hq';
+      if(typeof value==='string'&&value.startsWith('ring:')){const ring=orderRing(value);requireThat(ring,'Invalid ring');return {ring:ring!};}
       if(typeof value==='string'&&value.startsWith('hq:'))return {sectorHq:item(doc.sectors,value.slice(3),'sector')};
     };
     const setOrder=(source:Unit,target:Target,type:Order['type'],role?:Order['role'])=>{
       requireThat(unresolved(source),'Archived or destroyed units cannot receive orders');
-      requireThat(target==='hq'||'sectorHq'in target||target.id!==source.id,'An order cannot target its own unit');
-      if(typeof target==='object'&&'sectorHq'in target){
+      requireThat(target==='hq'||'sectorHq'in target||'ring'in target||target.id!==source.id,'An order cannot target its own unit');
+      if(typeof target==='object'&&'ring'in target){
+        // A ring in the unit's own sector: a withdrawal goes out, a move or an advance comes in.
+        requireThat(type==='withdraw'||type==='move'||type==='advance','Only moving, advancing and withdraw orders can target a ring');
+        const here=ringForRadius(source.pos.r),from=ringIndex(here),to=ringIndex(target.ring);
+        requireThat(from!==to,`${source.designation} is already in the ${target.ring} ring`);
+        if(type==='withdraw')requireThat(to>from,`Withdraw target must be farther from HQ than ${source.designation}`);
+        else requireThat(to<from,`Use /withdraw to move ${source.designation} away from HQ`);
+      }else if(type==='withdraw')throw new CommandError('A withdrawal targets a ring: near, mid, far or beyond');
+      else if(typeof target==='object'&&'sectorHq'in target){
         requireThat(type==='advance'||type==='move','Only advance and move orders can target a sector HQ');
         requireThat(target.sectorHq.id===source.sectorId||source.taskForce,'Cross-sector orders require a task force');
       }else if(target!=='hq'){
@@ -127,12 +136,15 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
       }
       if(type==='attack'){
         requireThat(source.affiliation==='friend'||source.affiliation==='assumed','Only friendly units can attack');
-        requireThat(target!=='hq'&&!('sectorHq'in target)&&('affiliation'in target?(target.affiliation==='hostile'||target.affiliation==='suspect'):target.type==='obj'),'Attack target must be a hostile, suspect, or objective');
+        requireThat(target!=='hq'&&!('sectorHq'in target)&&!('ring'in target)&&('affiliation'in target?(target.affiliation==='hostile'||target.affiliation==='suspect'):target.type==='obj'),'Attack target must be a hostile, suspect, or objective');
         if(role==='main')for(const order of doc.orders)if(order.type==='attack'&&order.role==='main'&&doc.units.find(u=>u.id===order.from)?.sectorId===source.sectorId)order.role='support';
         if(a.planned!==true)source.lifecycle='active';
       }
       doc.orders=doc.orders.filter(o=>!(o.from===source.id&&o.type===type));
-      const order:Order={id:uniqueId('o',doc.orders),type,from:source.id,to:target==='hq'?'hq':'sectorHq'in target?`hq:${target.sectorHq.id}`:target.id,createdAt:at};
+      // A withdrawal and a movement toward HQ cannot both stand: the new one cancels the other.
+      const opposed=(o:Order)=>o.from===source.id&&(type==='withdraw'?o.type==='advance'||o.type==='move':(type==='advance'||type==='move')&&o.type==='withdraw');
+      const replaced=doc.orders.filter(opposed);doc.orders=doc.orders.filter(o=>!opposed(o));
+      const order:Order={id:uniqueId('o',doc.orders),type,from:source.id,to:target==='hq'?'hq':'sectorHq'in target?`hq:${target.sectorHq.id}`:'ring'in target?`ring:${target.ring}`:target.id,createdAt:at};
       if(role)order.role=role;if(a.planned===true)order.planned=true;
       if(type==='axis'){
         requireThat(target!=='hq'&&'type'in target&&target.type==='obj','Axis requires an objective');
@@ -141,8 +153,8 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
         order.planned=true;
       }
       doc.orders.push(order);changed(source);
-      const name=target==='hq'?'HQ':'sectorHq'in target?`${target.sectorHq.name.toUpperCase()} HQ`:'designation'in target?label(target):`${target.type.toUpperCase()} ${target.name}`;
-      log=`${label(source)} ${type==='attack'?'ATTACKS':type==='advance'?'ADVANCES ON':type==='axis'?'AXIS TO':'MOVES TO'} ${name}${role==='main'?' — MAIN EFFORT':role==='support'?' — SUPPORT':''}${order.planned?' — PLANNED':''}`;
+      const name=target==='hq'?'HQ':'sectorHq'in target?`${target.sectorHq.name.toUpperCase()} HQ`:'ring'in target?ringName(target.ring):'designation'in target?label(target):`${target.type.toUpperCase()} ${target.name}`;
+      log=`${label(source)} ${type==='attack'?'ATTACKS':type==='advance'?'ADVANCES ON':type==='axis'?'AXIS TO':type==='withdraw'?'WITHDRAWS TO':'MOVES TO'} ${name}${role==='main'?' — MAIN EFFORT':role==='support'?' — SUPPORT':''}${order.planned?' — PLANNED':''}${replaced.map(o=>` — ${o.type.toUpperCase()} CANCELLED`).join('')}`;
     };
     switch(cmd.verb){
       case 'new': {
@@ -185,6 +197,12 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
       case 'moving': {const u=unit();const target=hqTarget(a.target)??item([...doc.units,...doc.measures],a.target,'target');if(target!=='hq'&&'affiliation'in target&&(target.affiliation==='hostile'||target.affiliation==='suspect')){const hasMain=doc.orders.some(o=>o.type==='attack'&&o.role==='main'&&doc.units.find(x=>x.id===o.from)?.sectorId===u.sectorId);setOrder(u,target,'attack',hasMain?'support':'main');}else setOrder(u,target,'move');break;}
       case 'axis':setOrder(unit(),item(doc.measures,a.target,'objective'),'axis');break;
       case 'advancing': {const u=unit();requireThat(u.affiliation==='hostile'||u.affiliation==='suspect','Only hostiles or suspects can advance');setOrder(u,hqTarget(a.target)??item(doc.units,a.target,'unit'),'advance');break;}
+      case 'withdraw': {
+        // Away from HQ, to a ring (default: the next ring out). It shows a trend: the unit's place and due date do not change.
+        const u=unit(),here=ringForRadius(u.pos.r);
+        requireThat(a.target!==undefined||here!=='beyond',`${u.designation} is already beyond the map edge`);
+        setOrder(u,hqTarget(a.target??`ring:${RING_ORDER[ringIndex(here)+1]}`)??item(doc.units,a.target,'ring'),'withdraw');break;
+      }
       case 'bda': {
         const u=unit();
         if(a.strength!==undefined){const strength=finite(a.strength,'strength');requireThat(strength>=0&&strength<=100,'Strength must be 0–100%');u.strength=strength;if(u.affiliation==='hostile'&&strength===0&&u.condition==='none'){u.condition='destroyed';u.lifecycle='done';}}
@@ -264,14 +282,14 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
       case 'halt': {
         // Cancel the unit's own orders: one by id (the inspector's ✕), one kind, or all of them.
         const u=unit();
-        const kinds=['advance','move','attack','axis','link','support'];
-        requireThat(a.kind===undefined||kinds.includes(String(a.kind)),'Expected advance, move, attack, axis, link or support');
+        const kinds=['advance','move','attack','axis','link','support','withdraw'];
+        requireThat(a.kind===undefined||kinds.includes(String(a.kind)),'Expected advance, move, attack, axis, link, support or withdraw');
         const mine=doc.orders.filter(o=>o.from===u.id&&(a.order===undefined||o.id===a.order)&&(a.kind===undefined||o.type===a.kind));
         requireThat(mine.length,a.order!==undefined?'Unknown order':`${u.designation} has no ${a.kind===undefined?'orders':`${a.kind} order`}`);
         const ids=new Set(mine.map(o=>o.id));
         doc.orders=doc.orders.filter(o=>!ids.has(o.id));
-        const named=(o:Order)=>o.to==='hq'?'HQ':o.to.startsWith('hq:')?`${doc.sectors.find(x=>x.id===o.to.slice(3))?.name.toUpperCase()??''} HQ`:doc.units.find(x=>x.id===o.to)?.designation??(()=>{const m=doc.measures.find(x=>x.id===o.to);return m?`${m.type.toUpperCase()} ${m.name}`:o.to;})();
-        changed(u);log=`${u.designation} HALTED: ${mine.map(o=>`${o.type.toUpperCase()} ON ${named(o)}`).join('; ')} CANCELLED`;
+        const named=(o:Order)=>orderRing(o.to)?ringName(orderRing(o.to)!):o.to==='hq'?'HQ':o.to.startsWith('hq:')?`${doc.sectors.find(x=>x.id===o.to.slice(3))?.name.toUpperCase()??''} HQ`:doc.units.find(x=>x.id===o.to)?.designation??(()=>{const m=doc.measures.find(x=>x.id===o.to);return m?`${m.type.toUpperCase()} ${m.name}`:o.to;})();
+        changed(u);log=`${u.designation} HALTED: ${mine.map(o=>`${o.type.toUpperCase()} ${o.type==='withdraw'?'TO':'ON'} ${named(o)}`).join('; ')} CANCELLED`;
         break;
       }
       case 'cp': {
@@ -410,6 +428,7 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
       case 'sitrep':case 'export':case 'undo':case 'redo':return {doc:original,log:cmd.verb.toUpperCase()};
       default:throw new CommandError(`Unknown command: ${cmd.verb}`);
     }
+    log+=completeRingOrders(doc);
     doc.log.push({id:`log${1+Math.max(0,...doc.log.map(l=>Number(l.id.replace(/^log/,''))||0))}`,at,text:log,...(cmd.raw?{cmd:cmd.raw}:{})});
     return {doc,log};
   }catch(error){return {error:error instanceof Error?error.message:'Invalid command'};}

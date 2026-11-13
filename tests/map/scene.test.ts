@@ -169,3 +169,35 @@ describe('arrows between close symbols', () => {
     }
   });
 });
+
+describe('ring targets and withdrawals', () => {
+  const radial = (doc: Doc, id: string, kind: string) => {
+    const scene = buildScene(doc, { view: 'commander', now });
+    const arrow = scene.orders.find(o => o.fromId === id && o.kind === kind)!;
+    const u = scene.units.find(x => x.id === id)!;
+    const nums = arrow.head!.split(/[ ,]+/).map(Number);
+    const tip = { x: nums[2], y: nums[3] };
+    return { arrow, from: Math.hypot(u.x, u.y), tip: Math.hypot(tip.x, tip.y), cross: Math.abs(u.x * tip.y - u.y * tip.x) / (Math.hypot(u.x, u.y) * Math.hypot(tip.x, tip.y)) };
+  };
+  it('draws a withdrawal straight outward on the unit bearing, in Commander, with W and its side', () => {
+    const doc = fresh();
+    doc.orders.push({ id: 'ow', type: 'withdraw', from: 'leak', to: 'ring:far', createdAt: now.toISOString() });
+    const r = radial(doc, 'leak', 'withdraw');
+    expect(r.tip).toBeGreaterThan(r.from);
+    expect(r.tip).toBeGreaterThan(300); expect(r.tip).toBeLessThan(400);
+    expect(r.cross).toBeLessThan(0.01);
+    expect(r.arrow.label?.text).toBe('W');
+    expect(r.arrow.side).toBe('threat');
+    expect(r.arrow.shaft!.match(/M/g)).toHaveLength(2);
+  });
+  it('keeps a short withdrawal visible inside its band, and an inward ring advance comes in', () => {
+    const doc = fresh();
+    doc.orders.push({ id: 'ow', type: 'withdraw', from: 'landlord', to: 'ring:beyond', createdAt: now.toISOString() });
+    doc.orders.push({ id: 'oa', type: 'advance', from: 'irs', to: 'ring:near', createdAt: now.toISOString() });
+    const w = radial(doc, 'landlord', 'withdraw');
+    expect(w.tip).toBeGreaterThan(400); expect(w.tip).toBeLessThanOrEqual(445);
+    expect(w.arrow.side).toBe('other');
+    const a = radial(doc, 'irs', 'advance');
+    expect(a.tip).toBeLessThan(a.from); expect(a.tip).toBeGreaterThanOrEqual(100);
+  });
+});

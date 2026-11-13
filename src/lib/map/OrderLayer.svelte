@@ -58,7 +58,7 @@
 
 <g class="orders">
   {#each scene.orders as o (o.id)}
-    <g class="order {o.kind}" class:fresh={o.id === freshId} class:planned={o.planned} class:related={related(o)} data-order-id={o.id}>
+    <g class="order {o.kind} {o.side ?? ''}" class:fresh={o.id === freshId} class:planned={o.planned} class:related={related(o)} data-order-id={o.id}>
       {#if o.kind === 'axis'}
         <path d={o.outline} class="axis" />
       {:else if o.kind === 'link'}
@@ -69,7 +69,7 @@
         {/if}
       {:else}
         <path d={o.shaft} class="shaft" stroke-width={o.width} pathLength={o.id === freshId ? 1 : undefined} />
-        {#if o.kind === 'move'}
+        {#if o.kind === 'move' || o.kind === 'withdraw'}
           <polyline points={o.head} class="head open" />
         {:else}
           <polygon points={o.head} class="head" class:open={o.kind === 'support' || o.kind === 'assist'} />
@@ -78,7 +78,7 @@
       {#if o.checkpoints}{#each o.checkpoints as c, i (i)}<circle cx={c.x} cy={c.y} r={3.5 * s} class="checkpoint" />{/each}{/if}
       {#if o.obstacle}<path d={o.obstacle} class="obstacle" />{/if}
       {#if o.label}
-        <text class="tag" font-size={Math.max(7.5 * s, mt)} transform="translate({o.label.x} {o.label.y}) rotate({o.label.angle})" text-anchor="middle" dy="0.35em">{o.label.text}</text>
+        <text class="tag" font-size={o.kind === 'withdraw' ? Math.max(9 * s, mt) : Math.max(7.5 * s, mt)} transform="translate({o.label.x} {o.label.y}) rotate({o.label.angle})" text-anchor="middle" dy="0.35em">{o.label.text}</text>
       {/if}
       {#if o.ratio && o.ratioAt}
         <text class="ratio" class:under={o.ratio.under} font-size={Math.max(9 * s, mt)} transform="translate({o.ratioAt.x} {o.ratioAt.y}) rotate({o.ratioAt.angle})" text-anchor="middle" dy="0.35em">{o.ratio.text}</text>
@@ -120,6 +120,11 @@
   @media (prefers-reduced-motion: reduce) { .order.fresh .shaft, .order.fresh { animation: none; } }
   .order { --c: var(--om-friend); }
   .order.advance { --c: var(--om-hostile); }
+  /* Withdrawal, away from HQ: a hollow double-line shaft into an open V, and W. In the withdrawing unit's color. */
+  .order.withdraw.threat { --c: var(--om-hostile); }
+  .order.withdraw.other { --c: var(--om-ink); }
+  .order.withdraw .shaft { stroke-linecap: round; }
+  .order.withdraw .head.open { stroke-width: 1.8; stroke-linejoin: round; }
   .shaft { fill: none; stroke: var(--c); stroke-linecap: butt; }
   .head { fill: var(--c); stroke: var(--c); stroke-width: 1; stroke-linejoin: miter; }
   .head.open { fill: var(--om-halo); stroke-width: 1.6; }

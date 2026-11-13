@@ -1,6 +1,7 @@
 // The order composer's model: which targets each order verb offers (ranked as the command bar suggests them),
 // and the command text it builds, slot by slot. The composer runs that text through the command bar's parse.
-import type { Doc, Unit } from '../../core/model/types';
+import type { Doc, Ring, Unit } from '../../core/model/types';
+import { orderRing, ringName } from '../../core/model/geometry';
 import { suggest } from '../../core/commands/suggest';
 import { parse } from '../../core/commands/grammar';
 import { unresolved } from '../../core/commands/resolve';
@@ -8,8 +9,8 @@ import type { Sel } from '../model/store.svelte';
 import { AFF_SHORT, dayMonth } from './words';
 import { slotFor, token } from './verbs';
 
-/** The order verbs, in the composer's 3 × 2 grid. */
-export const ORDER_VERBS = ['attack', 'moving', 'axis', 'support', 'link', 'advancing'] as const;
+/** The order verbs, in the composer's grid: three columns, with Withdraw across the last row. */
+export const ORDER_VERBS = ['attack', 'moving', 'axis', 'support', 'link', 'advancing', 'withdraw'] as const;
 export type OrderVerb = typeof ORDER_VERBS[number];
 export const isOrderVerb = (v: unknown): v is OrderVerb => (ORDER_VERBS as readonly unknown[]).includes(v);
 
@@ -20,7 +21,7 @@ export const isOrderVerb = (v: unknown): v is OrderVerb => (ORDER_VERBS as reado
 export interface Option { key: string; text: string; label: string; tag: string; detail?: string; sel: Sel | null; why?: string }
 
 /** The word between the unit and its target. */
-const LEAD: Record<OrderVerb, string> = { attack: '', moving: 'to', axis: 'to', support: '', link: '', advancing: 'on' };
+const LEAD: Record<OrderVerb, string> = { attack: '', moving: 'to', axis: 'to', support: '', link: '', advancing: 'on', withdraw: 'to' };
 
 export function unitOption(u: Unit, doc: Doc): Option {
   return { key: `u:${u.id}`, text: token(u.designation), label: u.designation, tag: AFF_SHORT[u.affiliation], detail: `${u.title} · ${doc.sectors.find(s => s.id === u.sectorId)?.name ?? ''}`, sel: { kind: 'unit', id: u.id } };
@@ -31,6 +32,8 @@ function measureOption(id: string, doc: Doc): Option | null {
   const type = m.type.toUpperCase();
   return { key: `m:${m.id}`, text: `${type} ${token(m.name)}`, label: `${type} ${m.name}`, tag: type, detail: m.date ? dayMonth(m.date) : doc.sectors.find(s => s.id === m.sectorId)?.name, sel: { kind: 'measure', id: m.id } };
 }
+/** A ring in the unit's own sector, at its bearing. */
+const ringOption = (ring: string, detail: string): Option => ({ key: `r:${ring}`, text: ring, label: detail, tag: 'RING', detail: ring === 'beyond' ? 'Past the outer ring' : `The ${ring} ring, at its bearing`, sel: null });
 const hqOption = (): Option => ({ key: 'hq', text: 'hq', label: 'HQ', tag: 'HQ', detail: 'The center: you', sel: null });
 const sectorHqOption = (id: string, doc: Doc): Option | null => {
   const s = doc.sectors.find(x => x.id === id);
@@ -51,6 +54,7 @@ export function targetOptions(verb: OrderVerb, unit: Unit, doc: Doc, recent: rea
     if (s.kind === 'unit') { const u = doc.units.find(x => x.id === s.unitId); if (u && u.id !== unit.id) add(unitOption(u, doc)); continue; }
     const m = /^(OBJ|EA|NAI|PL) (.+)$/.exec(s.label);
     if (m) { add(measureOption(doc.measures.find(x => x.type === m[1].toLowerCase() && x.name === m[2])?.id ?? '', doc)); continue; }
+    if (s.detail && s.detail === ringName(s.insert as Ring)) { add(ringOption(s.insert, s.detail)); continue; }
     if (s.insert === 'hq') add(hqOption());
     else if (s.insert === 'sector hq') add({ key: 'sector hq', text: 'sector hq', label: 'Sector HQ', tag: 'HQ', detail: `${doc.sectors.find(x => x.id === unit.sectorId)?.name ?? ''} HQ: its own sector`, sel: null });
     else if (s.insert === 'nearest hostile') add({ key: 'nearest hostile', text: 'nearest hostile', label: 'Nearest hostile', tag: 'HOS', detail: 'In its own sector', sel: null });
@@ -92,7 +96,7 @@ export function orderingUnits(verb: OrderVerb, doc: Doc, recent: readonly string
 
 /** The option for a target id as Commands name it (unit id, measure id, `hq`, `hq:‹sector›`), if the verb offers it. */
 export function optionFor(target: string, options: Option[]): Option | undefined {
-  const key = target === 'hq' ? 'hq' : target.startsWith('hq:') ? `s:${target.slice(3)}` : options.find(o => o.key === `u:${target}`) ? `u:${target}` : `m:${target}`;
+  const key = target === 'hq' ? 'hq' : orderRing(target) ? `r:${orderRing(target)}` : target.startsWith('hq:') ? `s:${target.slice(3)}` : options.find(o => o.key === `u:${target}`) ? `u:${target}` : `m:${target}`;
   return options.find(o => o.key === key);
 }
 /** The option a map pick names. */
@@ -128,9 +132,10 @@ export function draftText(d: Draft, doc: Doc): string {
 /** What the active slot asks for, in a sentence. */
 export const SLOT_HINT: Record<OrderVerb, string> = {
   attack: 'Target: a hostile or suspect unit, or an objective.',
-  moving: 'Target: a unit, an area or phase line, HQ, a sector HQ or the nearest hostile. A hostile target makes it an attack.',
+  moving: 'Target: a unit, an area or phase line, HQ, a sector HQ, the nearest hostile or an inner ring. A hostile target makes it an attack.',
   axis: 'Target: the objective at the end of the axis. Via: the phase lines it passes, in order.',
   support: 'Target: the friendly it supports, in any sector.',
   link: 'Target: the unit it links up with.',
-  advancing: 'Target: HQ, a sector HQ, or the unit it advances on.',
+  advancing: 'Target: HQ, a sector HQ, the unit it advances on, or an inner ring.',
+  withdraw: 'Target: an outer ring, away from HQ. Leave it empty for the next ring out.',
 };

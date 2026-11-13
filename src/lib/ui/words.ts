@@ -6,6 +6,7 @@ import { forceRatio } from '../../core/model/forceRatio';
 import { localDay } from '../../core/model/time';
 import { shortDate } from '../map/scene';
 import { formatDtg } from '../../core/model/sidc';
+import { orderRing, ringName } from '../../core/model/geometry';
 
 export const AFFILIATIONS: { key: Affiliation; label: string; digit: string; meaning: string }[] = [
   { key: 'pending', label: 'Pending', digit: '0', meaning: 'Captured, not looked at' },
@@ -59,11 +60,11 @@ export function orderEnd(doc: Doc, id: string): OrderEnd {
 
 /** One line per order, from the point of view of `unitId` (or of the measure it targets). */
 export function orderLine(doc: Doc, o: Order, unitId: string, now: Date = new Date()): { text: string; otherId: string | null; other: OrderEnd; ratio?: { text: string; under: boolean } } {
-  const name = (id: string) => id === 'hq' ? 'HQ' : id.startsWith('hq:') ? `${doc.sectors.find(s => s.id === id.slice(3))?.name.toUpperCase() ?? ''} HQ` : doc.units.find(u => u.id === id)?.designation ?? doc.measures.find(m => m.id === id)?.name ?? id;
+  const name = (id: string) => orderRing(id) ? ringName(orderRing(id)!) : id === 'hq' ? 'HQ' : id.startsWith('hq:') ? `${doc.sectors.find(s => s.id === id.slice(3))?.name.toUpperCase() ?? ''} HQ` : doc.units.find(u => u.id === id)?.designation ?? doc.measures.find(m => m.id === id)?.name ?? id;
   const outgoing = o.from === unitId;
   const otherId = outgoing ? o.to : o.from;
   const verb = o.type === 'attack' ? (o.role === 'main' ? 'Main attack' : 'Supporting attack')
-    : o.type === 'advance' ? 'Advancing' : o.type === 'axis' ? 'Axis of advance' : o.type === 'move' ? 'Moving' : o.type === 'support' ? (outgoing ? 'Supporting' : 'Supported by') : `Linkup${o.kind ? ` (${o.kind})` : ''}`;
+    : o.type === 'advance' ? 'Advancing' : o.type === 'withdraw' ? 'Withdrawing' : o.type === 'axis' ? 'Axis of advance' : o.type === 'move' ? 'Moving' : o.type === 'support' ? (outgoing ? 'Supporting' : 'Supported by') : `Linkup${o.kind ? ` (${o.kind})` : ''}`;
   // An axis names the phase lines it passes, with their dates; a date already gone is marked.
   const via = o.type === 'axis' && o.via?.length ? ` via ${o.via.map(id => doc.measures.find(m => m.id === id)).filter(m => m?.date).map(m => {
     const day = shortDate(new Date(m!.date!), doc.settings.tz), passed = localDay(new Date(m!.date!), doc.settings.tz) < localDay(now, doc.settings.tz);

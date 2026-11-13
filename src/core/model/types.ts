@@ -43,8 +43,10 @@ export interface Unit {
 export interface Order {
   id: string;
   /** `support`: a friendly backing another friendly (allowed across sectors). */
-  type: 'attack'|'axis'|'advance'|'move'|'link'|'support';
+  /** `withdraw`: movement away from HQ, to a ring (`to` is `ring:<ring>`). */
+  type: 'attack'|'axis'|'advance'|'move'|'link'|'support'|'withdraw';
   from: string;
+  /** A unit or measure id, `hq`, `hq:<sector id>`, or `ring:<near|mid|far|beyond>`. */
   to: string | 'hq';
   role?: 'main'|'support';
   kind?: 'dependency'|'handoff';

@@ -108,9 +108,19 @@ Moving a dated unit by hand (drag, `/move`, or a sector change) pins it, and aut
 
 ![An axis of advance from WRITE to OBJ SHIP Q4 through PL DRAFT and PL LAUNCH, with a checkpoint circle where it crosses each phase line, and the order as the sidebar lists it](images/axis-of-advance.png)
 
+### Withdrawal and ring targets
+
+`/withdraw <unit> [to near|mid|far|beyond]` (also `/retreat`, `/wd` and `/fallback`) draws a withdrawal: a straight arrow away from HQ along the unit's bearing, with a hollow double-line shaft, an open head and a **W**, in the unit's identity color. Use it for a threat that is being mitigated and is becoming less of a problem, or for any unit falling back to a later ring. Without `to`, it withdraws to the next ring out. The target must be farther out than the unit. `beyond` ends just past the outer ring (`WITHDRAWS TO MAP EDGE`). Withdrawals show in every view, so at a glance what is easing off stands apart from what is converging on HQ.
+
+A withdrawal shows a judgment, not a schedule. It does not move the unit or change its due date. A dated hostile still moves in with its date each morning, but the morning turn gives a withdrawing hostile no advance order on HQ when it crosses a phase line. To move the threat itself out, push its date with `/due`. When the unit reaches its ring (by `/due`, `/move`, a drag or `/unpin`), the order ends and the log adds `— <UNIT> WITHDRAWAL COMPLETE`. A unit has either a withdrawal or a movement toward HQ, not both: `/withdraw` cancels its advance and move orders, and `/advancing` or `/moving` cancels its withdrawal. The SITREP's ENEMY paragraph lists withdrawing threats.
+
+`/moving <unit> to <ring>` and `/advancing <hostile> on <ring>` also take a ring as the target: that ring in the unit's own sector, at its bearing, drawn as a straight arrow. A ring target must be closer to HQ than the unit. Outward is `/withdraw`. Each ends when the unit gets there (`— <UNIT> MOVE COMPLETE`, `— <UNIT> ADVANCE COMPLETE`), on the morning turn too. In a target, a bare ring word means the ring. Put a unit named like a ring in quotes (`"FAR"`).
+
+The unit's sidebar composer has **Withdraw** (its target list holds the outer rings; leave it empty for the next ring out), and the right-click unit menu has **Withdraw**, which withdraws to the next ring out at once, with Undo.
+
 ### Clearing orders
 
-`/halt <unit>` cancels all of a unit's own orders, and `/halt <unit> advance|move|attack|axis|link` only that kind (`/stop` and `/cancel` also work); each order in the inspector has a ✕ that does the same for that one order. Undo restores them.
+`/halt <unit>` cancels all of a unit's own orders, and `/halt <unit> advance|move|attack|axis|link|support|withdraw` only that kind (`/stop` and `/cancel` also work); each order in the inspector has a ✕ that does the same for that one order. Undo restores them.
 
 ### Task forces
 

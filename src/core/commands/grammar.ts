@@ -40,7 +40,9 @@ export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult 
    const sec=doc.sectors.find(s=>s.name.toLowerCase()===t.value.toLowerCase()||s.id===t.value.toLowerCase());
    if(!sec)return;take('sector');take('hq');return `hq:${sec.id}`;
   };
-  const target=(source?:Unit)=>{const shq=sectorHq(source);if(shq)return shq;if(eat('hq'))return 'hq';const type=peek()?.value.toLowerCase();if(['obj','ea','nai','pl'].includes(type??'')){take('type');const t=take('control measure');return resolveMeasure(t.value,doc,type as 'obj',t.start).id;}const t=take('target');return resolveTarget(t.value,doc,t.start,source?.sectorId??selected?.sectorId).id;};
+  /** A bare ring word in a target slot is that ring in the unit's own sector, at its bearing (`ring:<ring>`); quote it to name a unit. */
+  const ringTarget=():string|undefined=>{const t=peek();if(!t||t.quoted)return;const r=ringWord(t.value);if(r==='hq'||!rings.includes(r))return;take('ring');return `ring:${r}`;};
+  const target=(source?:Unit)=>{const shq=sectorHq(source);if(shq)return shq;if(eat('hq'))return 'hq';const ring=ringTarget();if(ring)return ring;const type=peek()?.value.toLowerCase();if(['obj','ea','nai','pl'].includes(type??'')){take('type');const t=take('control measure');return resolveMeasure(t.value,doc,type as 'obj',t.start).id;}const t=take('target');return resolveTarget(t.value,doc,t.start,source?.sectorId??selected?.sectorId).id;};
   const date=()=>{const t=take('date');try{return parseDate(t.value,now,doc.settings.tz);}catch(e){throw new CommandError((e as Error).message,t.start);}};
   const quoted=(label:string)=>{const t=take(label);if(!t.quoted)throw new CommandError(`Quote the ${label}`,t.start);return t.value;};
   switch(verb){
@@ -77,6 +79,7 @@ export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult 
    case 'moving': {const u=subject();expect('to');if(eat('nearest')){expect('hostile');a.target=nearestHostile(doc,u).id;}else a.target=target(u);if(doc.units.some(x=>x.id===a.target&&(x.affiliation==='hostile'||x.affiliation==='suspect'))){const hasMain=doc.orders.some(o=>o.type==='attack'&&o.role==='main'&&doc.units.find(x=>x.id===o.from)?.sectorId===u.sectorId);a.role=hasMain?'support':'main';}break;}
    case 'axis': {subject();expect('to');eat('obj');const t=take('objective');a.target=resolveMeasure(t.value,doc,'obj',t.start).id;const via:string[]=[];if(eat('via')){do{eat('pl');const p=take('phase line');via.push(resolveMeasure(p.value,doc,'pl',p.start).id);}while(eat(','));}a.via=via;break;}
    case 'advancing':{const u=subject();expect('on');a.target=target(u);break;}
+   case 'withdraw':{subject();if(eat('to')){const t=peek(),r=ringTarget();if(!r)throw new CommandError('Expected near, mid, far or beyond',t?.start??input.length);a.target=r;}break;}
    case 'bda': {subject();const t=take('strength or condition'),key=t.value.toLowerCase();if(/^\d+(?:\.\d+)?%$/.test(key))a.strength=Number(key.slice(0,-1));else{const conditions:Record<string,string>={fc:'fully-capable',dmg:'damaged',des:'destroyed',full:'full',ftc:'full',none:'none',destroyed:'destroyed',damaged:'damaged','fully-capable':'fully-capable'};a.condition=conditions[key];if(!a.condition)throw new CommandError('Expected 0–100%, fc, dmg, des, or full',t.start);}break;}
    case 'block':subject();if(eat('by'))a.note=quoted('reason');break;
    case 'unblock':case 'unpin':case 'reopen':case 'done':case 'detach':case 'key':subject();break;
@@ -97,7 +100,7 @@ export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult 
    case 'note':subject();a.note=quoted('text');break;
    case 'rate':subject();a.rating=take('rating').value;break;
    case 'support':subject();{const t=take('supported unit');a.target=resolveUnit(t.value,doc,t.start).id;}break;
-   case 'halt':subject();if(peek()){const t=take('order kind');const k=({advancing:'advance',moving:'move'} as Record<string,string>)[t.value.toLowerCase()]??t.value.toLowerCase();if(!['advance','move','attack','axis','link','support'].includes(k))throw new CommandError('Expected advance, move, attack, axis, link or support',t.start);a.kind=k;}break;
+   case 'halt':subject();if(peek()){const t=take('order kind');const k=({advancing:'advance',moving:'move',withdrawing:'withdraw',retreat:'withdraw'} as Record<string,string>)[t.value.toLowerCase()]??t.value.toLowerCase();if(!['advance','move','attack','axis','link','support','withdraw'].includes(k))throw new CommandError('Expected advance, move, attack, axis, link, support or withdraw',t.start);a.kind=k;}break;
    case 'cp':subject();{const t=take('command post');const v=t.value.toLowerCase();if(!['main','tac','alt','rear','none'].includes(v))throw new CommandError('Expected main, tac, alt, rear or none',t.start);a.cp=v==='none'?null:v;}break;
    case 'sector': {
     const action=take('sector action').value.toLowerCase();a.action=action;

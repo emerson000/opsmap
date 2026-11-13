@@ -2,6 +2,7 @@ import ms from 'milsymbol';
 import type { Doc } from './types';
 import { ECHELONS } from './echelon';
 import { FUNCTION_BY_KEY } from './functions';
+import { orderRing } from './geometry';
 const object=(value:unknown):value is Record<string,unknown>=>typeof value==='object' && value!==null && !Array.isArray(value);
 const string=(value:unknown):value is string=>typeof value==='string';
 const finite=(value:unknown):value is number=>typeof value==='number' && Number.isFinite(value);
@@ -68,7 +69,7 @@ export function importJson(text:string):Doc {
   for(const o of orders) {
     if(o.type==='link'||o.type==='support') requireValid(unitIds.has(o.from)&&unitIds.has(o.to),'link and support endpoints must be unit IDs');
     optional(o,'kind',v=>oneOf(v,['dependency','handoff']));
-    requireValid(oneOf(o.type,['attack','axis','advance','move','link','support'])&&unitIds.has(o.from)&&(o.to==='hq'||typeof o.to==='string'&&o.to.startsWith('hq:')&&sectorIds.has(o.to.slice(3))||unitIds.has(o.to)||measureIds.has(o.to))&&date(o.createdAt),'order');
+    requireValid(oneOf(o.type,['attack','axis','advance','move','link','support','withdraw'])&&unitIds.has(o.from)&&(o.type==='withdraw'?typeof o.to==='string'&&orderRing(o.to)!==undefined:o.to==='hq'||typeof o.to==='string'&&orderRing(o.to)!==undefined&&(o.type==='move'||o.type==='advance')||typeof o.to==='string'&&o.to.startsWith('hq:')&&sectorIds.has(o.to.slice(3))||unitIds.has(o.to)||measureIds.has(o.to))&&date(o.createdAt),'order');
     optional(o,'role',v=>oneOf(v,['main','support']));optional(o,'planned',v=>typeof v==='boolean');
     optional(o,'via',v=>Array.isArray(v)&&v.every(id=>measures.some(m=>m.id===id&&m.type==='pl')));
   }

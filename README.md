@@ -8,7 +8,7 @@ A personal operations map. Your tasks, problems, people and places are drawn as 
 
 - Distance from HQ shows how soon something is due. Life sectors (Work, Household, Family, Wellness, Productivity) are wedges around you.
 - Symbols for friendly efforts, hostile problems, pending inbox items and neutral people and places, with echelon, strength, condition and task-force marks.
-- A command bar with autocomplete and a live preview: `/new`, `/attack`, `/bda`, `/axis`, `/attach`, `/support` and more. An ambiguous unit name stops the command with an error that lists the matches.
+- A command bar with autocomplete and a live preview: `/new`, `/attack`, `/bda`, `/axis`, `/withdraw`, `/attach`, `/support` and more. An ambiguous unit name stops the command with an error that lists the matches.
 - Drag a unit to move it, drag a friendly's handle onto a hostile to order an attack, or right-click for quick actions. Every control shows the command it runs.
 - Control measures: objectives (OBJ), engagement areas (EA), named areas of interest (NAI), phase lines and axes of advance.
 - A five-paragraph SITREP: enemy, friendly, terrain, changes since the morning turn, and commander's intent.

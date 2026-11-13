@@ -1,5 +1,5 @@
 import type { Doc, Unit } from '../model/types';
-import { normalizeDeg, radiusForDate, resolvePlacement } from '../model/geometry';
+import { normalizeDeg, radiusForDate, resolvePlacement, ringOrderReached } from '../model/geometry';
 import { cloneDoc } from '../model/clone';
 import { localDay, parts, calendarDay } from '../model/time';
 import { unresolved } from './resolve';
@@ -11,6 +11,13 @@ export function turnDetails(doc:Doc):{trails:Trail[];crossings:Crossing[]} {
  const entry=[...doc.log].reverse().find(l=>l.cmd?.startsWith('{"verb":"turn"'));
  if(!entry||localDay(new Date(entry.at),doc.settings.tz)!==doc.lastTurn)return {trails:[],crossings:[]};
  try {return JSON.parse(entry.cmd!).args;}catch{return {trails:[],crossings:[]};}
+}
+/** Ring-target orders whose unit has got there are done: removes them and returns the log suffix. */
+export function completeRingOrders(doc:Doc):string {
+  const done=doc.orders.filter(o=>{const u=doc.units.find(x=>x.id===o.from);return u!==undefined&&ringOrderReached(o,u);});
+  if(!done.length)return '';
+  doc.orders=doc.orders.filter(o=>!done.includes(o));
+  return done.map(o=>` — ${doc.units.find(x=>x.id===o.from)!.designation} ${o.type==='withdraw'?'WITHDRAWAL':o.type.toUpperCase()} COMPLETE`).join('');
 }
 const thresholds=[{r:4,pl:'QUARTER'},{r:3,pl:'MONTH'},{r:2,pl:'WEEK'},{r:1,pl:'TODAY'}];
 export function advanceDay(original:Doc,now:Date):TurnResult {
@@ -33,7 +40,8 @@ export function advanceDay(original:Doc,now:Date):TurnResult {
   trails.push({unitId:u.id,from:previous,to:{...u.pos}});
   const crossed=thresholds.filter(t=>previous.r>t.r&&radius<=t.r);
   for(const t of crossed)crossings.push({unitId:u.id,pl:t.pl});
-  if(crossed.length&&u.affiliation==='hostile'&&!doc.orders.some(o=>o.type==='advance'&&o.from===u.id))doc.orders.push({id:id('o',doc.orders),type:'advance',from:u.id,to:'hq',createdAt:at});
+  // A withdrawing unit keeps its withdrawal: its date still moves it in, but no advance on HQ is added.
+  if(crossed.length&&u.affiliation==='hostile'&&!doc.orders.some(o=>(o.type==='advance'||o.type==='withdraw')&&o.from===u.id))doc.orders.push({id:id('o',doc.orders),type:'advance',from:u.id,to:'hq',createdAt:at});
  }
  doc.lastTurn=day;
  // An axis of advance whose `via` phase line falls due today: the checkpoint is due.
@@ -42,8 +50,9 @@ export function advanceDay(original:Doc,now:Date):TurnResult {
   return (o.via??[]).map(id=>doc.measures.find(m=>m.id===id)).filter(m=>m?.date&&localDay(new Date(m.date),tz)===day)
    .map(m=>`AXIS ${unit?.designation??o.from}: PL ${m!.name.toUpperCase()} due today (→ OBJ ${obj?.name.toUpperCase()??o.to})`);
  });
- const log=`${trails.length} hostiles/suspects advanced${crossings.length?`, ${crossings.length} crossed ${[...new Set(crossings.map(c=>`PL ${c.pl}`))].join(', ')}`:''}${checkpoints.length?`; ${checkpoints.join('; ')}`:''}`;
- if(trails.length||crossings.length||checkpoints.length)doc.log.push({id:`log${1+Math.max(0,...doc.log.map(l=>Number(l.id.replace(/^log/,''))||0))}`,at,text:log,cmd:JSON.stringify({verb:'turn',args:{trails,crossings}})});
+ const completed=completeRingOrders(doc);
+ const log=`${trails.length} hostiles/suspects advanced${crossings.length?`, ${crossings.length} crossed ${[...new Set(crossings.map(c=>`PL ${c.pl}`))].join(', ')}`:''}${checkpoints.length?`; ${checkpoints.join('; ')}`:''}${completed}`;
+ if(trails.length||crossings.length||checkpoints.length||completed)doc.log.push({id:`log${1+Math.max(0,...doc.log.map(l=>Number(l.id.replace(/^log/,''))||0))}`,at,text:log,cmd:JSON.stringify({verb:'turn',args:{trails,crossings}})});
  return {doc,log,advanced:trails.length,crossings,trails};
 }
 export function staleFriendly(u:Unit,now:Date):boolean {return u.affiliation==='friend'&&u.lifecycle==='active'&&now.getTime()-Date.parse(u.updatedAt)>=3*86400000;}

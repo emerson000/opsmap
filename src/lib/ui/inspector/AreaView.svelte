@@ -24,7 +24,7 @@
 
   const WORD: Record<string, string> = { obj: 'Objective', ea: 'Engagement area', nai: 'Named area of interest' };
   const SIZE_LABEL: Record<AreaSize, string> = { small: 'Small', medium: 'Medium', large: 'Large', xl: 'XL' };
-  const ORDER_TAG: Record<Order['type'], string> = { attack: 'ATK', axis: 'AXIS', move: 'MOVING', advance: 'ADV', link: 'LINK', support: 'SPT' };
+  const ORDER_TAG: Record<Order['type'], string> = { attack: 'ATK', axis: 'AXIS', move: 'MOVING', advance: 'ADV', link: 'LINK', support: 'SPT', withdraw: 'WDR' };
   const K = 'area';
   let { doc, measure: m, now, onfocus }: { doc: Doc; measure: ControlMeasure; now: Date; onfocus: (id: string) => void } = $props();
 

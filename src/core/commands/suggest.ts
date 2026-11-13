@@ -1,6 +1,7 @@
 import type { Doc, Unit } from '../model/types';
 import { ECHELONS } from '../model/echelon';
 import { FUNCTIONS } from '../model/functions';
+import { RING_ORDER, ringForRadius, ringIndex, ringName } from '../model/geometry';
 import { aliases, SYNTAX, VERBS } from './grammar';
 import { identities as identityTokens, sizes as sizeTokens, functions as functionTokens } from './apply';
 import { unresolved } from './resolve';
@@ -44,6 +45,8 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
  const threats=()=>units(doc.units.filter(u=>unresolved(u)&&['hostile','suspect'].includes(u.affiliation)&&u.id!==source?.id),u=>Number(u.sectorId!==source?.sectorId));
  const dates=()=>['today','tmw','mon','tue','wed','thu','fri','sat','sun','eow','eom','+3d'].map(s=>keyword(s,'date'));
  let hint='';
+ /** Ring targets for the unit in slot 1: inward rings for a move or an advance, outward ones for a withdrawal. */
+ const ringTargets=(outward:boolean):Suggestion[]=>{const here=source?ringIndex(ringForRadius(source.pos.r)):-1;return RING_ORDER.filter((r,i)=>r!=='hq'&&(here<0||(outward?i>here:i<here))).map(r=>({insert:r,label:r,detail:ringName(r),kind:'keyword' as const}));};
 
  if(previous.length===0)candidates=VERBS.filter(v=>v!=='vk'||opts.vikunja).map(v=>({insert:v,label:`/${v}`,detail:SYNTAX[v],kind:'verb'}));
  else if(verb==='vk'&&previous.length===1)candidates=opts.vikunja?['bind','unbind','sync','status'].map(s=>keyword(s)):[];
@@ -126,6 +129,7 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
    if(verb==='collapse'||verb==='expand'){const fold=verb==='collapse';candidates=[...units(doc.units.filter(u=>u.taskForce&&Boolean(u.collapsed)!==fold&&doc.units.some(c=>c.parentId===u.id))),{...keyword('all'),label:`all · every ${fold?'expanded':'collapsed'} task force`}];}
    if(verb==='reopen')candidates=units(doc.units.filter(u=>u.lifecycle==='done'||u.lifecycle==='dropped'));
    // The attacker slot: own units first (friend, then assumed), unresolved only.
+   if(verb==='withdraw')candidates=units(doc.units.filter(unresolved),u=>Number(!['hostile','suspect'].includes(u.affiliation)));
    if(verb==='attack'||verb==='moving'){const rank=(a:string)=>a==='friend'?0:a==='assumed'?1:2;candidates=units(doc.units.filter(unresolved),u=>rank(u.affiliation),true);}
    if(verb==='bda')candidates=units(doc.units.filter(unresolved),u=>-(Number(['hostile','suspect'].includes(u.affiliation))*2+Number(doc.orders.some(o=>o.to===u.id&&o.type==='attack'))));
    if(verb==='id')candidates=units(doc.units.filter(unresolved),u=>Number(!['pending','unknown'].includes(u.affiliation)));
@@ -143,6 +147,10 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
   if((verb==='collapse'||verb==='expand')&&previous.length>=2)candidates=[];
   if(verb==='reinforce'&&previous.length===2)candidates=[keyword('with'),...candidates.filter(c=>c.insert.toLowerCase()!==previous[1].value.toLowerCase())];
   if(verb==='advancing'&&previous.length===2)candidates=[keyword('on')];
+  if((verb==='advancing'&&before==='on')||(verb==='moving'&&before==='to'))candidates.push(...ringTargets(false));
+  if(verb==='withdraw'&&previous.length===2)candidates=[keyword('to')];
+  if(verb==='withdraw'&&previous.length===3&&before==='to')candidates=ringTargets(true);
+  if(verb==='withdraw'&&previous.length>=4)candidates=[];
   if((verb==='advancing'&&before==='on')||(verb==='moving'&&before==='to'))candidates.unshift(keyword('sector hq'),...doc.sectors.map(s=>({insert:`${/\s/.test(s.name)?JSON.stringify(s.name):s.name} hq`,label:`${s.name} HQ`,kind:'keyword' as const})));
  }
  const query=(previous.length===0?fragment.replace(/^\//,''):fragment).toLowerCase();
