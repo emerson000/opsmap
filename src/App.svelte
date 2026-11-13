@@ -65,12 +65,12 @@
   let vvH = $state(typeof window === 'undefined' ? 800 : window.innerHeight);
   let kb = $state(0);
   const topH = $derived(PHONE_BAR_H + safeTop);
-  /** The on-screen keyboard is up: iOS shrinks the visual viewport (kb), Android the layout viewport (vh below its tallest). */
-  const kbUp = $derived(kb > 0 || env.tallH - vh > 120);
   /** A text field in the sheet has focus (the sheet reports it). */
   let fieldFocus = $state(false);
   // Portrait phone, typing in the sheet: the sheet takes the whole height between the top bar and the keyboard.
-  $effect(() => { ui.sheetTyping = phone && !side && fieldFocus && kbUp; });
+  // A touch phone always raises its keyboard for a text field, so the field focus decides, not the viewport: iOS
+  // reports the keyboard late or as a pan, and a desktop window that only gets shorter has no keyboard at all.
+  $effect(() => { ui.sheetTyping = phone && !side && fieldFocus && env.coarse; });
   const sheetAvail = $derived(Math.max(SHEET_HEAD, vh - topH - dockH - kb - 8));
   const popMax = $derived(Math.max(120, vvH - topH - dockH - 8));
   const insets = $derived(side
@@ -234,6 +234,9 @@
     const measure = () => {
       vh = window.innerHeight; vw = window.innerWidth;
       vvH = vv ? vv.height : vh;
+      // iOS pans the visual viewport to show a focused field under the keyboard, which hides the top bar and
+      // makes vh - height - offsetTop read as no keyboard. The shell is fixed and never scrolls: undo the pan.
+      if (vv && vv.offsetTop > 0 && env.tier === 'phone') window.scrollTo(0, 0);
       kb = vv ? Math.max(0, Math.round(vh - vv.height - vv.offsetTop)) : 0;
     };
     measure();

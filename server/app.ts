@@ -116,8 +116,10 @@ export function createApp(config:Config) {
   });
   app.all('/api/*',c=>c.json({error:'Not found'},404));
   // Keep the SPA shell public so the client can render its login screen; APIs and sockets require auth.
-  app.use('*',serveStatic({root:config.clientDir}));
-  app.get('*',async(c,next)=>{if(!c.req.header('accept')?.includes('text/html'))return c.notFound();if(!existsSync(join(config.clientDir,'index.html')))return c.text('Client has not been built',503);return serveStatic({path:join(config.clientDir,'index.html')})(c,next);});
+  // The shell revalidates on every load, so a deploy reaches phones on the next open; hashed assets never change.
+  const cacheHeaders=(path:string,c:Context)=>{c.header('cache-control',/[\\/]assets[\\/]/.test(path)?'public, max-age=31536000, immutable':'no-cache');};
+  app.use('*',serveStatic({root:config.clientDir,onFound:cacheHeaders}));
+  app.get('*',async(c,next)=>{if(!c.req.header('accept')?.includes('text/html'))return c.notFound();if(!existsSync(join(config.clientDir,'index.html')))return c.text('Client has not been built',503);return serveStatic({path:join(config.clientDir,'index.html'),onFound:cacheHeaders})(c,next);});
   return {app,hub,maps,store,auth,vikunja};
 }
 async function boundedText(request:Request,limit:number):Promise<string> {

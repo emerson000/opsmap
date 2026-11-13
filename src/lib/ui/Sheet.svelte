@@ -55,18 +55,18 @@
     clearTimeout(blurTimer);
     fieldFocus = true;
     const t = e.target as Element;
-    if (env.tier === 'phone' && !side) settle(() => reveal(t));
+    if (env.tier === 'phone' && !side) settle(() => reveal(t, 'start'));
   }
   function focusOut() {
     clearTimeout(blurTimer);
     blurTimer = setTimeout(() => { const a = document.activeElement; fieldFocus = !!a && !!sheetEl?.contains(a) && a.matches(TEXT); }, 250);
   }
   // The keyboard came up (or went): keep the focused field in view.
-  // Up: the focused field. Down: whatever was last brought into view (the next slot after a choice).
+  // Up: the focused field, at the top, so a keyboard the viewport has not reported yet cannot cover it. Down: whatever was last brought into view (the next slot after a choice).
   let wasTyping = false;
   $effect(() => {
     const t = typing;
-    if (t) settle(() => { const a = document.activeElement; if (a && sheetEl?.contains(a)) reveal(a); });
+    if (t) settle(() => { const a = document.activeElement; if (a && sheetEl?.contains(a)) reveal(a, 'start'); });
     else if (wasTyping) settle(revealAgain);
     wasTyping = t;
   });

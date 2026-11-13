@@ -96,12 +96,14 @@
   }
   /** After a target is chosen: the next slot to fill (a verb's options, else Run), clear of the pinned foot. */
   function next() {
-    void tick().then(() => settle(() => reveal(el?.querySelector('[data-next]') ?? el?.querySelector('[data-testid="composer-run"]'))));
+    // At the top, so the option rows under it (Role, then Planned) show too.
+    void tick().then(() => settle(() => { const n = el?.querySelector('[data-next]'); if (n) reveal(n, 'start'); else reveal(el?.querySelector('[data-testid="composer-run"]')); }));
   }
   const phone = env.tier === 'phone';
   onMount(() => {
     // After the Orders section has opened and the sheet has grown: the composer's top at the top of the sidebar.
-    settle(() => reveal(el, 'start'));
+    // The second pass waits for the phone sheet to grow; elsewhere it would undo a scroll the user has started.
+    if (phone) settle(() => reveal(el, 'start')); else requestAnimationFrame(() => reveal(el, 'start'));
     // A phone does not focus the target: the keyboard and the list would cover the options and Run. A tap opens them.
     if (!chosen && !phone) targetInput?.focus({ preventScroll: true });
   });

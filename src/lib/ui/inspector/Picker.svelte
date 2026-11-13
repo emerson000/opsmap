@@ -69,6 +69,8 @@
   function choose(o: Option) {
     value = o.label;
     open = false;
+    // In the phone sheet a choice ends the typing: drop the keyboard, so the sheet gives its height back.
+    if (inSheet() && root?.contains(document.activeElement)) (document.activeElement as HTMLElement).blur();
     onchoose(o);
   }
   function keys(e: KeyboardEvent) {

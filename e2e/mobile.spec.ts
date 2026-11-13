@@ -624,8 +624,9 @@ test('the attack composer on a phone: Run, Role and Planned are on top before an
   await list.getByRole('option', { name: /LEAK/ }).click();
   await expect(target).toHaveValue('LEAK');
   await expect(list).toHaveCount(0);
-  await page.waitForTimeout(400);
-  for (const c of controls) expect(await onTop(c), await c.evaluate(e => e.textContent || e.outerHTML.slice(0, 60))).toBe(true);
+  // The field blurs; the sheet leaves typing mode and settles (250 ms blur wait plus the re-scroll).
+  await expect(page.locator('.app')).not.toHaveClass(/typing/);
+  for (const c of controls) await expect.poll(() => onTop(c), { message: await c.evaluate(e => e.textContent || e.outerHTML.slice(0, 60)) }).toBe(true);
   await composer.getByTestId('composer-role').getByRole('radio', { name: 'Main' }).click();
   await expect(composer.getByTestId('composer-preview')).toContainText('/attack RECORDS LEAK main');
 });
