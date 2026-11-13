@@ -71,8 +71,9 @@ export function snap(pos:Polar,sectors:readonly Sector[]):Polar & {sectorId:stri
 /** Ring boundaries match the map: a phase line belongs to the inner band. */
 export function ringForRadius(r:number):Ring {return r<=1?'hq':r<=2?'near':r<=3?'mid':r<=4?'far':'beyond';}
 
-/** Resolve one footprint, preserving its sector and time band. Prefer its dated radius,
- * then search radial offsets in 0.05 steps. HQ penetrators use the outer perimeter arc.
+/** Resolve one footprint, preserving its sector and time band: the free spot nearest the requested one (a fine grid
+ * of radii and bearings, ordered by distance), so a drop lands where it was let go when there is room nearby.
+ * HQ penetrators use the outer perimeter arc.
  * The maximum-clearance fallback keeps an overfull wedge usable without changing its time meaning.
  */
 export function resolvePlacement(doc:Doc,sectorId:string,requested:Polar,ignoreId?:string,footprint?:number):Polar {
@@ -95,7 +96,8 @@ function placement(doc:Doc,sectorId:string,requested:Polar,ignoreId?:string,foot
   const start=sector.startDeg+offset,end=sector.startDeg+sector.widthDeg-offset;
   const center=sector.startDeg+sector.widthDeg/2;
   const wanted=sector.startDeg+normalizeDeg(requested.theta-sector.startDeg);
-  const preferred=ring==='hq'&&requested.r<min?start:wanted<=end?Math.max(start,wanted):center;
+  // Inside the sector, a bearing in its edge margin clamps to the margin; it does not jump to the center.
+  const preferred=ring==='hq'&&requested.r<min?start:wanted<=sector.startDeg+sector.widthDeg?Math.min(end,Math.max(start,wanted)):center;
   const occupied=doc.units.filter(u=>u.id!==ignoreId&&u.lifecycle!=='dropped').map(u=>({...polarToXY(u.pos),r:u.pos.r}));
   const hqs=doc.sectors.map(s=>polarToXY(1,s.startDeg+s.widthDeg/2));
   const gap=ring==='hq'?Math.min(footprint,0.43/k):footprint;
@@ -103,16 +105,21 @@ function placement(doc:Doc,sectorId:string,requested:Polar,ignoreId?:string,foot
     const xy=polarToXY(p);
     return Math.min(p.r/hqMin,...occupied.map(o=>Math.hypot(xy.x-o.x,xy.y-o.y)/(ring==='hq'&&o.r>1?footprint:gap)),...hqs.map(o=>Math.hypot(xy.x-o.x,xy.y-o.y)/hqGap));
   };
-  let best={r:radius,theta:normalizeDeg(preferred)},score=-Infinity;
-  const radii=[radius];
-  for(let step=1;step<=Math.ceil((max-min)/0.05);step++)for(const sign of [1,-1]){
-    const r=radius+step*0.05*sign;if(r>=min&&r<=max)radii.push(r);
+  const target={r:radius,theta:normalizeDeg(preferred)};
+  if(clearance(target)>=1)return {pos:target,fits:true};
+  // Candidates every 0.025 ring radially and about 0.025 ring of arc, nearest the target first.
+  const txy=polarToXY(target),step=0.025,candidates:{p:Polar;d:number}[]=[];
+  const radii=[radius];for(let r=radius-step;r>=min;r-=step)radii.push(r);for(let r=radius+step;r<=max;r+=step)radii.push(r);
+  for(const r of radii){
+    const da=Math.max(0.25,step/Math.max(r,0.1)*180/Math.PI),angles=[preferred,start,end];
+    for(let a=preferred-da;a>=start;a-=da)angles.push(a);
+    for(let a=preferred+da;a<=end;a+=da)angles.push(a);
+    for(const theta of angles){const p={r,theta:normalizeDeg(theta)},xy=polarToXY(p);candidates.push({p,d:Math.hypot(xy.x-txy.x,xy.y-txy.y)});}
   }
-  const angles=[preferred];
-  for(let a=start;a<=end;a+=2)angles.push(a);
-  angles.push(end);angles.sort((a,b)=>Math.abs(a-preferred)-Math.abs(b-preferred));
-  for(const r of radii)for(const theta of angles){
-    const p={r,theta:normalizeDeg(theta)},value=clearance(p);
+  candidates.sort((a,b)=>a.d-b.d);
+  let best=target,score=-Infinity;
+  for(const {p} of candidates){
+    const value=clearance(p);
     if(value>=1)return {pos:p,fits:true};
     if(value>score){score=value;best=p;}
   }
