@@ -48,7 +48,12 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
  /** Ring targets for the unit in slot 1: inward rings for a move or an advance, outward ones for a withdrawal. */
  const ringTargets=(outward:boolean):Suggestion[]=>{const here=source?ringIndex(ringForRadius(source.pos.r)):-1;return RING_ORDER.filter((r,i)=>r!=='hq'&&(here<0||(outward?i>here:i<here))).map(r=>({insert:r,label:r,detail:ringName(r),kind:'keyword' as const}));};
 
- if(previous.length===0)candidates=VERBS.filter(v=>v!=='vk'||opts.vikunja).map(v=>({insert:v,label:`/${v}`,detail:SYNTAX[v],kind:'verb'}));
+ if(previous.length===0){
+  candidates=VERBS.filter(v=>v!=='vk'||opts.vikunja).map(v=>({insert:v,label:`/${v}`,detail:SYNTAX[v],kind:'verb'}));
+  // An alias the user starts typing (`/ret` → /retreat) shows as itself, naming the verb it runs.
+  const typed=fragment.replace(/^\//,'').toLowerCase();
+  if(typed)candidates.push(...Object.entries(aliases).filter(([alias,v])=>/^[a-z]/.test(alias)&&alias.startsWith(typed)&&(v!=='vk'||opts.vikunja)).map(([alias,v])=>({insert:alias,label:`/${alias}`,detail:`/${v} ${SYNTAX[v]??''}`.trim(),kind:'verb' as const})));
+ }
  else if(verb==='vk'&&previous.length===1)candidates=opts.vikunja?['bind','unbind','sync','status'].map(s=>keyword(s)):[];
  else if(verb==='vk')candidates=[];
  else if(before==='due'||(verb==='due'&&previous.length===2)||(verb==='pl'&&previous.length===3&&previous[1]?.value.toLowerCase()==='add'))candidates=dates();

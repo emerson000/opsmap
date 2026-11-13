@@ -148,6 +148,8 @@ Supporting attacks (`/attack <unit> <hostile> support`, or a second attack dragg
 
 ### Command bar suggestions
 
+Typing a command's alias offers the alias itself, with the command it runs: `/ret` offers `/retreat` (`/withdraw`), and `/fall` offers `/fallback`. With only `/` typed, the list shows the commands without their aliases.
+
 Command bar suggestions list units in this order: each command's own grouping first (for example threats first for `/bda`), then the units you last commanded or clicked in this browser tab, most recent first, then units in that unit's sector, then the most recently changed. A unit just captured with `/new` counts as used, and so does clicking a unit that is already selected. The single most recent unit comes before a command's grouping too, except in the attacker slot of `/attack` and `/moving`, which always lists friendlies first. A unit already named in the command goes last, and names that start with what you typed come first. Another user's activity does not change your order.
 
 ### Support between friendlies

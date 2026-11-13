@@ -46,5 +46,18 @@ test('withdraw from the composer, the unit menu and the bar; halt it from the or
   await page.getByTestId('toasts').getByRole('button', { name: 'Undo' }).click();
   await expect(page.locator('g.order.withdraw')).toHaveCount(0);
 
+  // The command bar offers /retreat while you type it; Tab completes it, and it runs as /withdraw.
+  const input = page.getByTestId('command-input');
+  await input.click();
+  await input.fill('/ret');
+  const suggestions = page.getByRole('listbox', { name: 'Suggestions' });
+  await expect(suggestions.getByRole('option').first()).toContainText('/retreat');
+  await expect(suggestions.getByRole('option').first()).toContainText('/withdraw');
+  await input.press('Tab');
+  await expect(input).toHaveValue('/retreat ');
+  await input.pressSequentially('LEAK');
+  await input.press('Enter');
+  await expect(page.getByTestId('command-preview')).toContainText('LEAK (ENG PLT) WITHDRAWS TO MID RING');
+
   expect(errors(page)).toEqual([]);
 });

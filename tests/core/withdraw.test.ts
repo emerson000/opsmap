@@ -92,6 +92,18 @@ describe('/withdraw', () => {
     expect(text).toMatch(/LEAK withdrawing to → FAR RING/);
   });
 
+  it('autocomplete offers the retreat and fallback aliases as you type them, then runs as /withdraw', () => {
+    const doc = seedDoc(now);
+    expect(suggest('/ret', 4, doc).items).toEqual([expect.objectContaining({ insert: 'retreat', label: '/retreat', detail: expect.stringMatching(/^\/withdraw ‹unit›/) })]);
+    expect(suggest('/fall', 5, doc).items.map(s => s.label)).toEqual(['/fallback']);
+    expect(suggest('/wd', 3, doc).items.map(s => s.label)).toContain('/wd');
+    expect(suggest('/withd', 6, doc).items.map(s => s.label)).toEqual(['/withdraw']);
+    // Nothing typed: verbs only, no alias clutter.
+    expect(suggest('/', 1, doc).items.some(s => s.label === '/retreat')).toBe(false);
+    expect(suggest('/retreat ', 9, doc).items[0]?.kind).toBe('unit');
+    expect(suggest('/retreat LEAK ', 14, doc).items.map(s => s.insert)).toEqual(['to']);
+  });
+
   it('suggests hostiles first, then to, then only outward rings', () => {
     const doc = seedDoc(now);
     const units = suggest('/withdraw ', 10, doc).items.map(s => s.label);

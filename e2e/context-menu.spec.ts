@@ -45,7 +45,9 @@ test('right-click menus on desktop', async ({ browser, baseURL }) => {
   await expect(page.getByTestId('command-preview')).toContainText('✓');
 
   // A direct action runs at once. Threats read Destroyed and Bypassed, and have no Attack.
-  await symbol('leak').click({ button: 'right' });
+  // At the symbol's center with the mouse: Playwright's stability check on this pulsing threat can stall.
+  const leak = (await symbol('leak').boundingBox())!;
+  await page.mouse.click(leak.x + leak.width / 2, leak.y + leak.height / 2, { button: 'right' });
   await expect(menu.locator('[data-action="attack"]')).toHaveCount(0);
   await expect(menu.locator('[data-action="done"] .cm-label')).toHaveText('Destroyed');
   await expect(menu.locator('[data-action="reopen"]')).toHaveCount(0);
