@@ -26,6 +26,7 @@
   import { boot, session, live, isAdmin, importShared, localMapText, markLocalImported, others, setSelection, color, initials, nameOf, currentMap } from './lib/sync/sync.svelte';
   import { copyText, download, pickFile, stamp } from './lib/ui/files';
   import { quoteName } from './lib/ui/words';
+  import { watchForUpdates } from './lib/ui/update';
 
   const LOG_W = 264, RAIL_W = 28, BAR_H = 40, CMD_H = 84, PHONE_BAR_H = 40, SHEET_HEAD = 52;
 
@@ -67,6 +68,16 @@
   const topH = $derived(PHONE_BAR_H + safeTop);
   /** A text field in the sheet has focus (the sheet reports it). */
   let fieldFocus = $state(false);
+  /** Phone: a field other than the command bar has focus, so the bar steps aside for it. Losing focus waits a
+   * moment, so a tap that blurs the field lands on the layout it started on. */
+  let otherField = $state(false);
+  let otherTimer: ReturnType<typeof setTimeout> | undefined;
+  const FIELD = 'input:not([type=checkbox]):not([type=radio]):not([type=range]):not([type=button]):not([type=submit]), textarea, select, [contenteditable="true"]';
+  function trackFocus() {
+    clearTimeout(otherTimer);
+    const now = () => { const a = document.activeElement; return !!a && a.matches(FIELD) && !a.closest('[data-dock]'); };
+    if (now()) otherField = true; else otherTimer = setTimeout(() => { otherField = now(); }, 250);
+  }
   // Portrait phone, typing in the sheet: the sheet takes the whole height between the top bar and the keyboard.
   // A touch phone always raises its keyboard for a text field, so the field focus decides, not the viewport: iOS
   // reports the keyboard late or as a pan, and a desktop window that only gets shorter has no keyboard at all.
@@ -245,7 +256,10 @@
     window.addEventListener('resize', measure);
     // The server runs the daily turn (v2); the client only keeps its clock fresh.
     const tick = setInterval(() => { now = new Date(); }, 15_000);
-    return () => { for (const t of ['gesturestart', 'gesturechange', 'gestureend']) document.removeEventListener(t, noPageZoom); unsubscribe(); clearInterval(tick); vv?.removeEventListener('resize', measure); vv?.removeEventListener('scroll', measure); window.removeEventListener('resize', measure); };
+    const stopUpdates = watchForUpdates();
+    document.addEventListener('focusin', trackFocus);
+    document.addEventListener('focusout', trackFocus);
+    return () => { stopUpdates(); document.removeEventListener('focusin', trackFocus); document.removeEventListener('focusout', trackFocus); for (const t of ['gesturestart', 'gesturechange', 'gestureend']) document.removeEventListener(t, noPageZoom); unsubscribe(); clearInterval(tick); vv?.removeEventListener('resize', measure); vv?.removeEventListener('scroll', measure); window.removeEventListener('resize', measure); };
   });
 </script>
 
@@ -254,7 +268,7 @@
 {#if session.phase !== 'ready'}
 <Login />
 {:else}
-<div class="app {env.tier}" class:kb={kb > 0} class:typing={ui.sheetTyping} style="--left-w:{leftW}px; --right-w:{INSPECTOR_W}px; --cmd-h:{CMD_H}px; --kb:{kb}px; --dock-h:{dockH + kb}px; --top-h:{topH}px; --pop-max:{popMax}px">
+<div class="app {env.tier}" class:kb={kb > 0} class:typing={ui.sheetTyping} class:fielded={otherField} style="--left-w:{leftW}px; --right-w:{INSPECTOR_W}px; --cmd-h:{CMD_H}px; --kb:{kb}px; --dock-h:{dockH + kb}px; --top-h:{topH}px; --pop-max:{popMax}px">
   <div class="probe" aria-hidden="true" bind:clientHeight={safeTop}></div>
   <div class="map-layer">
     <OpsMap bind:this={map} {theme} {insets} {now} {trails} {remote}
@@ -285,7 +299,7 @@
     <div class="right"><Inspector {doc} {now} {theme} onfocus={focus} /></div>
   {/if}
 
-  <div class="bottom" bind:clientHeight={dockH}><div class="bar-wrap">
+  <div class="bottom" data-dock bind:clientHeight={dockH}><div class="bar-wrap">
     {#if orientation}<div class="orientation" data-testid="orientation">
       <span>Center is you (HQ). Rings are time to impact: today, week, month, quarter. Frame = for or against you. Echelon = effort, not urgency.</span>
       {#if phone || env.coarse}<span class="gest-hint">Long-press a symbol to move it · drag its round handle onto a problem to attack · long-press ground to capture.</span>{/if}
@@ -350,6 +364,8 @@
   }
   /* Typing in the sheet: the bar steps aside, so the sheet reaches down to the keyboard. */
   .app.phone.typing .bottom { display: none; }
+  /* Any other field (a menu, a dialog, a select): the bar steps aside too. */
+  .app.phone.fielded .bottom { display: none; }
   .app.phone.kb .bottom { padding-bottom: 8px; }
   .app.phone .bar-wrap { max-width: none; }
   .app.phone .toast-layer { top: calc(var(--top-h) + 8px); left: 8px; right: 8px; }

@@ -615,8 +615,13 @@ test('the attack composer on a phone: Run, Role and Planned are on top before an
   await page.waitForTimeout(300);
   const controls = [composer.getByTestId('composer-run'), ...await composer.getByTestId('composer-role').getByRole('radio').all(), composer.getByTestId('composer-planned'), target];
   for (const c of controls) expect(await onTop(c), await c.evaluate(e => e.textContent || e.outerHTML.slice(0, 60))).toBe(true);
+  // Every pixel counts: the foot is only its buttons (no command line, no hint).
+  await expect(composer.locator('.foot .slots')).toBeHidden();
+  await expect(composer.locator('.foot .effect')).toBeHidden();
   // A tap opens the list in the flow: it pushes Role down instead of covering it.
   await target.click();
+  // The command bar steps aside while another field has focus.
+  await expect(page.getByTestId('command-input')).toBeHidden();
   const list = composer.getByRole('listbox');
   await expect(list).toBeVisible();
   const lb = (await list.boundingBox())!, rb = (await composer.getByTestId('composer-role').boundingBox())!;
@@ -744,4 +749,44 @@ test('the capture menu opens above the open sheet, clear of the top bar', async 
   for (const item of await menu.getByRole('menuitem').all()) expect(await onTop(item), await item.innerText()).toBe(true);
   await menu.getByRole('menuitem', { name: 'Cancel' }).click();
   await expect(menu).toHaveCount(0);
+});
+
+test('landscape phone: the composer in the side column keeps its target and Run uncovered', async ({ page }) => {
+  const vp = page.viewportSize()!;
+  await page.setViewportSize({ width: vp.height, height: vp.width });
+  await page.waitForTimeout(400);
+  const input = page.getByTestId('command-input');
+  await input.fill('/find RECORDS');
+  await input.press('Enter');
+  await input.blur();
+  await page.getByTestId('unit-order').click();
+  const composer = page.getByTestId('composer');
+  await expect(composer).toBeVisible();
+  // The foot is in the flow here: a pinned one would cover the verbs and the target in a ~350 px column.
+  expect(await composer.locator('.foot').evaluate(e => getComputedStyle(e).position)).toBe('static');
+  await expect(page.getByTestId('echo-line')).toHaveCount(0);
+  const target = composer.getByTestId('composer-target');
+  await target.scrollIntoViewIfNeeded();
+  expect(await onTop(target)).toBe(true);
+  const run = composer.getByTestId('composer-run');
+  await run.scrollIntoViewIfNeeded();
+  expect(await onTop(run)).toBe(true);
+});
+
+test('phone area view: an opened list keeps its label in view; the member list hides the echo line', async ({ page, browserName }) => {
+  const t = await touchFor(page, browserName);
+  const inspector = page.getByTestId('inspector');
+  await tap(t, await measurePoint(page, 'obj-settled'));
+  await inspector.getByTestId('measure-order').click();
+  await expect(page.getByTestId('sheet')).toHaveAttribute('data-size', 'full');
+  const from = inspector.getByTestId('order-from');
+  await expect(from.getByRole('listbox')).toBeVisible();
+  await page.waitForTimeout(400);
+  // The panel's title and ✕ stay above the field, not scrolled out of the sheet.
+  await expect(from.locator('.ch')).toBeInViewport({ ratio: 1 });
+  expect(await onTop(from.getByRole('button', { name: /Close/ }))).toBe(true);
+  await from.getByRole('button', { name: /Close/ }).click();
+  await inspector.getByTestId('measure-add-members').click();
+  await expect(inspector.getByTestId('measure-join-list')).toBeVisible();
+  await expect(page.getByTestId('echo-line')).toBeHidden();
 });

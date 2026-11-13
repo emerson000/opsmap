@@ -255,7 +255,7 @@
   .actions .btn { flex: 1; justify-content: center; padding: 0 4px; }
   .btn.primary { background: var(--ink); color: var(--panel); border-color: var(--ink); }
   .k { margin-left: 4px; opacity: 0.7; font-family: var(--font-mono); letter-spacing: 0; }
-  /* Phone: 44 px targets, and the preview with Run / To bar / Cancel stays pinned at the bottom of the sheet. */
+  /* Phone: 44 px targets, and Run / To bar / Cancel stay pinned at the bottom of the sheet. */
   :global([data-tier='phone']) .composer .btn { min-height: 44px; }
   :global([data-tier='phone']) .composer .x { width: 44px; height: 44px; }
   /* The sheet's tab names the unit and the foot has Cancel: no caption row, so Run and the options fit a short phone. */
@@ -263,14 +263,17 @@
   /* Labels beside their controls, on the line of the first 44 px control (an open list flows below it). */
   :global([data-tier='phone']) .row { grid-template-columns: 52px minmax(0, 1fr); }
   :global([data-tier='phone']) .lab { padding-top: 0; line-height: 44px; }
-  /* The sidebar body has 12 px of padding at the bottom: the foot pins to its very edge. About 90 px: one line of
-     command, one line of effect (the whole text in its tooltip), and the buttons. */
+  /* The sidebar body has 12 px of padding at the bottom: the foot pins to its very edge. */
   :global([data-tier='phone']) .foot { position: sticky; bottom: calc(-1 * var(--s3)); z-index: 1; padding: var(--s1) var(--s2); box-shadow: 0 -4px 10px rgba(0, 0, 0, 0.12); }
-  :global([data-tier='phone']) .slots, :global([data-tier='phone']) .effect { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  /* Every pixel counts on a phone: the foot is the buttons, plus a line only when something is wrong. The command
+     itself is one tap away (To bar), and the target field says what it wants. */
+  :global([data-tier='phone']) .slots, :global([data-tier='phone']) .effect:not(.err) { display: none; }
   :global([data-tier='phone']) .effect { margin-top: 0; }
-  :global([data-tier='phone']) .effect.err { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; }
-  :global([data-tier='phone']) .actions { margin-top: var(--s1); }
+  :global([data-tier='phone']) .effect.err { margin-bottom: var(--s1); display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  :global([data-tier='phone']) .actions { margin-top: 0; }
   /* An open target list flows in the composer: the foot steps back into the flow so it never covers the list. */
   :global([data-tier='phone']) .composer:has(:global([role='listbox'])) .foot { position: static; box-shadow: none; }
+  /* Landscape phone: the side column is only about 350 px tall, so a pinned foot would cover the verbs and target. */
+  :global(.sheet.side) .composer .foot { position: static; box-shadow: none; }
   :global([data-tier='phone']) .check { min-height: 44px; font-size: 16px; }
 </style>

@@ -189,13 +189,15 @@
     {/if}
   </div>
   {/key}
-  <!-- Portrait phone: only at full, and not under the composer (it has its own line); at peek and half the command bar's own result line is enough. -->
-  {#if !(env.tier === 'phone' && !env.landscape && (ui.sheet !== 'full' || composing))}<EchoBar />{/if}
+  <!-- Phone: never under the composer (it has its own line); portrait only at full, since at peek and half the command bar's own result line is enough. -->
+  {#if !(env.tier === 'phone' && (composing || !env.landscape && ui.sheet !== 'full'))}<EchoBar />{/if}
 </aside>
 
 <style>
   .inspector { height: 100%; display: flex; flex-direction: column; background: var(--panel-glass); border-left: 2px solid var(--rule-strong); }
   .inspector:focus { outline: none; }
+  /* Phone: the member list has its own command line, so the echo line gives its rows back (a short phone shows ~2 more). */
+  :global([data-tier='phone']) .inspector:has(:global([data-testid='measure-join-list'])) :global(.echo) { display: none; }
   .inspector:focus-visible { box-shadow: inset 0 0 0 2px var(--accent); }
   /* A long-press shows the command bubble, not the browser's callout or a text selection. */
   .inspector :global(button), .inspector :global([role='radio']) { -webkit-touch-callout: none; -webkit-user-select: none; user-select: none; }

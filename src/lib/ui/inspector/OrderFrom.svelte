@@ -61,4 +61,6 @@
   .body { display: flex; flex-direction: column; gap: var(--s1); padding: var(--s2); }
   .reason { margin: 0; font-size: 12px; color: var(--hostile); }
   .preview { font: 400 11px/1.4 var(--font-mono); color: var(--ink-2); overflow-wrap: anywhere; }
+  /* Phone: no command line under the picker; the list it opens needs the room. */
+  :global([data-tier='phone']) .from .preview { display: none; }
 </style>

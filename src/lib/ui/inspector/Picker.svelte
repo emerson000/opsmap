@@ -41,14 +41,16 @@
   let root: HTMLDivElement | undefined = $state();
   /** In the portrait phone sheet (not the landscape column or a desktop sidebar). */
   const inSheet = () => env.tier === 'phone' && !env.landscape && !!root?.closest('[data-testid="sheet"]');
-  // The list opened in the sheet: full height, and the input at the top of the sheet with the list below it.
+  // The list opened in the sheet: full height, and the field at the top of the sheet with the list below it.
   $effect(() => {
     if (!open || !root) return;
     const el = root;
     untrack(() => {
       if (!inSheet()) return;
       if (ui.sheet !== 'full') ui.sheet = 'full';
-      void tick().then(() => settle(() => reveal(el, 'start')));
+      // Its label (a composer row, a field row, or a panel with its title and ✕) stays in view above the input.
+      const box = el.closest('.row, .field-row, .from') ?? el;
+      void tick().then(() => settle(() => reveal(box, 'start')));
     });
   });
   let active = $state(-1);
