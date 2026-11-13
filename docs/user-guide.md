@@ -96,6 +96,10 @@ The browser synthesizes three quiet console cues (no audio files): two rising to
 
 Moving a dated unit by hand (drag, `/move`, or a sector change) pins it, and auto-advance then skips it. `/unpin <unit>` (or Unpin in the inspector) clears the pin and returns it to the ring its due date gives, in the same sector; the due date is kept. `/due <unit> <date>` also clears the pin.
 
+### Strength and condition
+
+`/bda <unit> <0–100%>` sets a unit's strength: for a threat, how much of the problem remains (0% destroys a hostile); for a friendly, its capacity. `/bda <unit> clear` removes the strength, so the unit is no longer assessed, and keeps its condition. `/bda <unit> fc|dmg|des|full` sets the condition, and `none` clears it. In the sidebar, the Strength field's **Clear** button, or emptying the field, runs `/bda <unit> clear`.
+
 ### Command posts
 
 `/cp <unit> main|tac|alt|rear` marks a unit as a headquarters of that type (the HQ staff, with MAIN, TAC, ALT or REAR in place of the icon, in every view); `/cp <unit> none` clears it, restoring its icon. The inspector has the same choice. Suggested meanings: MAIN home base, TAC where you work today, ALT the fallback, REAR errands and logistics.

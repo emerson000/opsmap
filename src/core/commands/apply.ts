@@ -205,6 +205,8 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
       }
       case 'bda': {
         const u=unit();
+        // `clear`: no strength assessed. The condition stays; a destroyed unit stays destroyed.
+        if(a.strength===null){requireThat(u.strength!==undefined,`${u.designation} has no strength to clear`);delete u.strength;changed(u);log=`BDA ${u.designation} STRENGTH CLEARED`;break;}
         if(a.strength!==undefined){const strength=finite(a.strength,'strength');requireThat(strength>=0&&strength<=100,'Strength must be 0–100%');u.strength=strength;if(u.affiliation==='hostile'&&strength===0&&u.condition==='none'){u.condition='destroyed';u.lifecycle='done';}}
         else {const conditions=['none','fully-capable','damaged','destroyed','full'];requireThat(conditions.includes(String(a.condition)),'Invalid condition');u.condition=a.condition as Unit['condition'];if(u.condition==='destroyed')u.lifecycle='done';}
         if(effectiveCondition(u)==='destroyed')doc.orders=doc.orders.filter(o=>o.from!==u.id&&o.to!==u.id);

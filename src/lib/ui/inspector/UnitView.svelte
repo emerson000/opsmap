@@ -65,7 +65,8 @@
     try { run('due', { dueAt: parseDate(value, new Date(), doc.settings.tz) }); } catch (e) { toast(e instanceof Error ? e.message : 'Invalid date'); }
   }
   function setStrength(value: string) {
-    if (value.trim() === '') return;
+    // An emptied field clears the strength (/bda ‹unit› clear).
+    if (value.trim() === '') { if (unit.strength !== undefined) run('bda', { strength: null }); return; }
     const n = Number(value);
     if (!Number.isFinite(n)) { toast('Strength must be a number from 0 to 100'); return; }
     run('bda', { strength: n });
@@ -354,6 +355,10 @@
       <input class="field num" type="number" min="0" max="100" step="5" value={unit.strength ?? ''} placeholder="—"
         onchange={(e) => setStrength(e.currentTarget.value)} aria-label="Strength percent" />
       {#if k}<span class="k k-{k}">{k.toUpperCase()} {unit.strength}%</span>{/if}
+      {#if unit.strength !== undefined}
+        {@const t = line('bda', { strength: null })}
+        <button class="btn" type="button" data-testid="unit-strength-clear" title="Clear the strength ({t})" use:echoes={t} onclick={() => run('bda', { strength: null })}>Clear</button>
+      {/if}
     </div>
     <span class="note">{threat ? 'Problem remaining. 0% destroys it.' : 'Capacity, for information only.'}</span>
   </Field>

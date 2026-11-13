@@ -119,3 +119,28 @@ test('long-press shows a control’s command without running it; single-letter k
   expect(errors(page)).toEqual([]);
   await page.context().close();
 });
+
+test('unit view: Clear removes the strength, as does emptying the field', async ({ browser, baseURL }) => {
+  const page = await userPage(browser, 'alice', baseURL!, true);
+  await openMap(page);
+  const inspector = page.getByTestId('inspector');
+  await command(page, '/find IRS');
+  const strength = inspector.getByLabel('Strength percent');
+  await expect(strength).toHaveValue('70');
+
+  // The Clear button runs /bda IRS clear, with the same log line as the bar.
+  const line = await sameAsBar(page, () => inspector.getByTestId('unit-strength-clear').click(), '/bda IRS clear');
+  expect(line).toContain('BDA IRS STRENGTH CLEARED');
+  await expect(strength).toHaveValue('');
+  await expect(inspector.getByTestId('unit-strength-clear')).toHaveCount(0);
+
+  // Emptying the field clears it too.
+  await strength.fill('40');
+  await strength.press('Enter');
+  await expect(strength).toHaveValue('40');
+  await strength.fill('');
+  await strength.blur();
+  await expect(page.getByTestId('command-preview')).toContainText('BDA IRS STRENGTH CLEARED');
+  await expect(strength).toHaveValue('');
+  expect(errors(page)).toEqual([]);
+});

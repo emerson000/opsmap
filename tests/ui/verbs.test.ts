@@ -44,7 +44,7 @@ function samples(doc: Doc): Record<string, Command[]> {
     'support': [c('support', { unit: 'records', target: 'irsrsp' })],
     'link': [c('link', { unit: 'records', target: 'irsrsp' }), c('link', { unit: 'records', target: 'irsrsp', kind: 'handoff' })],
     'halt': [c('halt', { unit: 'irsrsp' }), c('halt', { unit: 'irsrsp', kind: 'attack' })],
-    'bda': [c('bda', { unit: 'leak', strength: 45 }), c('bda', { unit: 'leak', condition: 'damaged' }), c('bda', { unit: 'leak', condition: 'none' })],
+    'bda': [c('bda', { unit: 'leak', strength: 45 }), c('bda', { unit: 'leak', condition: 'damaged' }), c('bda', { unit: 'leak', condition: 'none' }), c('bda', { unit: 'irs', strength: null })],
     'block': [c('block', { unit: 'records' }), c('block', { unit: 'records', note: 'Waiting on "bank"' })],
     'unblock': [c('unblock', { unit: 'passport' })],
     'unpin': [c('unpin', { unit: 'pinned' })],

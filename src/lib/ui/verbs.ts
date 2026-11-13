@@ -70,7 +70,7 @@ export const VERB_SLOTS: readonly VerbSlot[] = [
   { verb: 'support', kinds: ['unit'], slots: ['‹friendly›', '‹friendly›'], control: 'composer-support', label: 'Support…', menu: 'form', enabled: o => friendly(o.unit) ? open(o) : 'Only a friendly supports' },
   { verb: 'link', kinds: ['unit'], slots: ['‹unit›', '‹unit›', '[as dependency|handoff]'], control: 'composer-link', label: 'Link…', menu: 'form', enabled: open },
   { verb: 'halt', kinds: ['unit', 'area', 'pl', 'sector'], slots: ['‹unit›', '[advance|move|attack|axis|link|support|withdraw]'], control: 'cancel-order', label: 'Halt', menu: 'run' },
-  { verb: 'bda', kinds: ['unit'], slots: ['‹unit›', '‹0–100%|fc|dmg|des|full›'], control: 'unit-condition', label: 'Condition' },
+  { verb: 'bda', kinds: ['unit'], slots: ['‹unit›', '‹0–100%|clear|fc|dmg|des|full|none›'], control: 'unit-condition', label: 'Condition' },
   { verb: 'block', kinds: ['unit'], slots: ['‹unit›', '[by "‹reason›"]'], control: 'unit-block', label: 'Block…', menu: 'form', rank: 3,
     enabled: o => threat(o.unit) ? 'A threat is not blocked' : o.unit?.lifecycle === 'blocked' ? 'Already blocked' : open(o) },
   { verb: 'unblock', kinds: ['unit'], slots: ['‹unit›'], control: 'unit-unblock', label: 'Unblock', menu: 'run', rank: 3, enabled: o => o.unit?.lifecycle === 'blocked' ? true : 'Not blocked' },
@@ -222,7 +222,7 @@ export function format(cmd: Command, doc: Doc): string {
     }
     case 'advancing': add(unit(a.unit), 'on', target(a.target)); break;
     case 'withdraw': add(unit(a.unit), a.target !== undefined && `to ${target(a.target)}`); break;
-    case 'bda': add(unit(a.unit), typeof a.strength === 'number' ? `${a.strength}%` : CONDITION_TOKEN[String(a.condition)] ?? fail('Expected a strength or condition')); break;
+    case 'bda': add(unit(a.unit), a.strength === null ? 'clear' : typeof a.strength === 'number' ? `${a.strength}%` : CONDITION_TOKEN[String(a.condition)] ?? fail('Expected a strength or condition')); break;
     case 'block': add(unit(a.unit), typeof a.note === 'string' && `by ${quoted(a.note)}`); break;
     case 'unblock': case 'unpin': case 'reopen': case 'done': case 'detach': add(unit(a.unit)); break;
     case 'key': if (a.value !== undefined) fail('/key toggles: leave out value'); add(unit(a.unit)); break;

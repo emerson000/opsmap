@@ -105,8 +105,8 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
  else if(['obj','ea','nai','pl'].includes(verb)&&previous[1]?.value.toLowerCase()==='rename'&&previous.length>=3){candidates=[];hint='Type the new name in quotes';}
  else if(verb==='find'&&previous.length===2&&['obj','ea','nai','pl'].includes(previous[1].value.toLowerCase())){const type=previous[1].value.toLowerCase();candidates=doc.measures.filter(m=>m.type===type).map(m=>({insert:/\s/.test(m.name)?JSON.stringify(m.name):m.name,label:`${type.toUpperCase()} ${m.name}`,kind:'keyword' as const}));}
  else if(verb==='bda'&&previous.length===2){
-  const conditions:Record<string,string>={fc:'fully capable',dmg:'damaged (slash)',des:'destroyed (X)',full:'full to capacity'};
-  candidates=['100%','75%','50%','25%','0%','fc','dmg','des','full'].map(s=>({...keyword(s),label:conditions[s]?`${s} · ${conditions[s]}`:s}));
+  const conditions:Record<string,string>={clear:'remove the strength %',fc:'fully capable',dmg:'damaged (slash)',des:'destroyed (X)',full:'full to capacity',none:'no condition'};
+  candidates=['100%','75%','50%','25%','0%',...(source?.strength!==undefined?['clear']:[]),'fc','dmg','des','full',...(source&&source.condition!=='none'?['none']:[])].map(s=>({...keyword(s),label:conditions[s]?`${s} · ${conditions[s]}`:s}));
   hint=`now ${source?.strength===undefined?'not assessed':`${source.strength}% (${source.strength>=85?'green':source.strength>=70?'amber':source.strength>=50?'red':'black'})`}`;
  }
 

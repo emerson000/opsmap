@@ -94,7 +94,7 @@ describe('opsmap_command matches the command bar',()=>{
   const STEPS:[string,string?][]=[
     ['/new friend inf "Response team" in Household near as RSP'],['/new hostile "Leaky sink" in Household near as SINK'],['/new hostile "Sink in garage" in Work near as GSINK'],
     ['/new pending "Paperwork" as PAPER','GSINK'],['/new "Groceries"','RSP'],
-    ['/bda sin 50%'],['/bda sin 50%','RSP'],['/bda sin 40%','GSINK'],
+    ['/bda sin 50%'],['/bda sin 50%','RSP'],['/bda sin 40%','GSINK'],['/bda SINK clear'],['/bda SINK clear'],['/bda SINK 60%'],
     ['/id PAPER friend'],['/size RSP plt'],['/fn PAPER recon'],['/rename PAPER "Tax papers" as TAX'],['/move TAX to Household mid'],
     ['/attack RSP SINK main'],['/moving RSP to nearest hostile'],['/obj add "GOAL" in Household near'],['/pl add "LAUNCH" 2026-12-24'],['/axis RSP to OBJ GOAL via PL LAUNCH'],['/obj rename GOAL "FINAL GOAL"'],['/pl rename LAUNCH "LIFTOFF"'],['/pl rename LIFTOFF "LIFTOFF"'],['/ea rename GOAL "X"'],
     ['/advancing SINK on sector hq'],['/advancing SINK on Household hq'],['/moving RSP to sector hq'],
