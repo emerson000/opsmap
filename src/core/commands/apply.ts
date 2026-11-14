@@ -104,8 +104,8 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
       delete p.taskForce;delete p.collapsed;changed(p);
       return ` — TF ${p.designation} DISSOLVED${cancelBoundary([p])}`;
     };
-    /** Place a unit by hand: free spot near the requested position, pinned against auto-advance. */
-    const relocate=(u:Unit,sectorId:string,pos:{r:number;theta:number})=>{u.sectorId=sectorId;u.pos=resolvePlacement(doc,sectorId,pos,u.id);if(u.dueAt)u.posOverride=true;changed(u);};
+    /** Place a unit by hand: free spot near the requested position, pinned against auto-advance unless `pin` is false. */
+    const relocate=(u:Unit,sectorId:string,pos:{r:number;theta:number},pin=true)=>{u.sectorId=sectorId;u.pos=resolvePlacement(doc,sectorId,pos,u.id);if(pin&&u.dueAt)u.posOverride=true;changed(u);};
     const areaOf=(u:Unit)=>doc.measures.find(m=>m.members?.includes(u.id));
     const release=(m:ControlMeasure,id:string)=>{m.members=(m.members??[]).filter(x=>x!==id);if(!m.members.length)delete m.members;};
     const label=(u:Unit)=>`${u.designation} (${u.fn.toUpperCase()} ${u.echelon?.toUpperCase()??'UNK'})`;
@@ -365,11 +365,12 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
             for(const u of units){
               const previous=areaOf(u);
               if(previous&&previous.id!==m.id){release(previous,u.id);from+=`; ${u.designation} LEFT ${previous.type.toUpperCase()} ${previous.name}`;}
-              if(at)relocate(u,at.sectorId,at);
+              // Joining places the unit but does not pin it: auto-advance still moves a dated unit.
+              if(at)relocate(u,at.sectorId,at,false);
               else if(!m.members?.includes(u.id)){
                 // Into the area: next to its center, in the sector under that center.
                 const center=xyToPolar(areaShape(doc,m).center),sectorId=sectorAt(center.theta,doc.sectors)?.id??m.sectorId??u.sectorId;
-                relocate(u,sectorId,center);
+                relocate(u,sectorId,center,false);
               }
               if(!m.members?.includes(u.id))m.members=[...(m.members??[]),u.id];
               changed(u);moved.push(u);

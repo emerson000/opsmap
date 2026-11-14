@@ -40,11 +40,12 @@ describe('area membership and size', () => {
     expect(ea(doc).members).toBeUndefined();
   });
 
-  it('join moves units inside, pins dated ones, and the area grows to enclose them', () => {
+  it('join moves units inside without pinning them, and the area grows to enclose them', () => {
     const before = seedDoc(now);
     const doc = run(before, '/ea join SATURDAY LEAK RECORDS IRSRSP');
     expect(ea(doc).members).toEqual(['leak', 'records', 'irsrsp']);
-    expect(unit(doc, 'leak').posOverride).toBe(true);
+    expect(unit(doc, 'leak').dueAt).toBeDefined();
+    expect(unit(doc, 'leak').posOverride).toBeUndefined();
     const shape = areaShape(doc, ea(doc));
     expect(shape.members).toBe(3);
     for (const id of ['leak', 'records', 'irsrsp']) expect(dist(polarToXY(unit(doc, id).pos), shape.center)).toBeLessThanOrEqual(shape.radius - AREA_MARGIN + 1e-9);
@@ -105,6 +106,7 @@ describe('area membership and size', () => {
     expect(join).toMatchObject({ verb: 'ea', args: { action: 'join', measure: 'ea-saturday', units: ['records'] } });
     const joined = ok(apply(doc, join, now)).doc;
     expect(ea(joined).members).toEqual(['records']);
+    expect(unit(joined, 'records').posOverride).toBeUndefined();
     const inside = areaShape(joined, ea(joined)).center;
     expect(dropCommand(joined, 'records', { x: inside.x * SCALE + 5, y: inside.y * SCALE })).toMatchObject({ verb: 'move' });
     const leave = dropCommand(joined, 'records', { x: 0, y: -250 });

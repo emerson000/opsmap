@@ -94,7 +94,7 @@ The browser synthesizes three quiet console cues (no audio files): two rising to
 
 ### Pins
 
-Moving a dated unit by hand (drag, `/move`, or a sector change) pins it, and auto-advance then skips it. `/unpin <unit>` (or Unpin in the inspector) clears the pin and returns it to the ring its due date gives, in the same sector; the due date is kept. `/due <unit> <date>` also clears the pin.
+Moving a dated unit by hand (drag, `/move`, or a sector change) pins it, and auto-advance then skips it. Joining an OBJ, EA or NAI (`/obj join`, the area's Members picker, or a drop inside the area) does not pin the unit, so a dated unit in an area keeps moving in with its date. `/unpin <unit>` (or Unpin in the inspector) clears the pin and returns it to the ring its due date gives, in the same sector; the due date is kept. `/due <unit> <date>` also clears the pin.
 
 ### Strength and condition
 
