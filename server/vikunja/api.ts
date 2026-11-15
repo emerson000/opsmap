@@ -6,8 +6,11 @@ export interface VkProject { id: number; title: string; parent_project_id: numbe
 export interface VkBucket { id: number; title: string; position?: number; }
 export interface VkTask {
   id: number; title: string; description: string; done: boolean; due_date: string | null; percent_done: number;
-  project_id: number; bucket_id?: number; updated: string; labels?: VkLabel[] | null; [key: string]: unknown;
+  project_id: number; bucket_id?: number; updated: string; labels?: VkLabel[] | null;
+  /** Related tasks by kind, from this task's side (Vikunja stores the inverse on the other task). */
+  related_tasks?: Partial<Record<VkRelationKind, { id: number }[] | null>> | null; [key: string]: unknown;
 }
+export type VkRelationKind = 'subtask' | 'parenttask' | 'related' | 'duplicateof' | 'duplicates' | 'blocking' | 'blocked' | 'precedes' | 'follows' | 'copiedfrom' | 'copiedto';
 export interface VkLabel { id: number; title: string; hex_color?: string }
 export interface VkWebhook { id: number; target_url: string; events: string[]; }
 
@@ -33,6 +36,10 @@ export interface VkApi {
   createLabel(title: string, hexColor: string): Promise<VkLabel>;
   addLabel(taskId: number, labelId: number): Promise<void>;
   removeLabel(taskId: number, labelId: number): Promise<void>;
+  /** `taskId` gets `otherId` under `kind`; Vikunja adds the inverse to the other task. */
+  addRelation(taskId: number, otherId: number, kind: VkRelationKind): Promise<void>;
+  /** Removes both sides. */
+  removeRelation(taskId: number, otherId: number, kind: VkRelationKind): Promise<void>;
   webhooks(projectId: number): Promise<VkWebhook[]>;
   createWebhook(projectId: number, targetUrl: string, events: string[], secret: string): Promise<VkWebhook>;
   deleteWebhook(projectId: number, webhookId: number): Promise<void>;
@@ -115,6 +122,8 @@ export class HttpVkApi implements VkApi {
   async createLabel(title: string, hexColor: string) { return (await this.call<VkLabel>('PUT', '/labels', { title, hex_color: hexColor })).data; }
   async addLabel(taskId: number, labelId: number) { await this.call('PUT', `/tasks/${taskId}/labels`, { label_id: labelId }); }
   async removeLabel(taskId: number, labelId: number) { await this.call('DELETE', `/tasks/${taskId}/labels/${labelId}`); }
+  async addRelation(taskId: number, otherId: number, kind: VkRelationKind) { await this.call('PUT', `/tasks/${taskId}/relations`, { other_task_id: otherId, relation_kind: kind }); }
+  async removeRelation(taskId: number, otherId: number, kind: VkRelationKind) { await this.call('DELETE', `/tasks/${taskId}/relations/${kind}/${otherId}`); }
   async webhooks(projectId: number) { return (await this.call<VkWebhook[]>('GET', `/projects/${projectId}/webhooks`)).data ?? []; }
   async createWebhook(projectId: number, targetUrl: string, events: string[], secret: string) {
     return (await this.call<VkWebhook>('PUT', `/projects/${projectId}/webhooks`, { target_url: targetUrl, events, secret })).data;

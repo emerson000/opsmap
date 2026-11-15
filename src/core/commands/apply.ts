@@ -444,7 +444,8 @@ const threatOf=(u:Unit)=>u.affiliation==='hostile'||u.affiliation==='suspect';
 /** Unit lifecycle as a Vikunja status: done and dropped are both "done". */
 export type VkStatus='todo'|'active'|'blocked'|'done';
 /** Changes pulled from a Vikunja task, already mapped to opsmap fields. */
-export interface VkChanges {title?:string;dueAt?:string|null;note?:string;strength?:number;status?:VkStatus;sectorId?:string;affiliation?:Affiliation;}
+/** `parentId`: the task force the unit is attached to (Vikunja's parent task), or null for none. */
+export interface VkChanges {title?:string;dueAt?:string|null;note?:string;strength?:number;status?:VkStatus;sectorId?:string;affiliation?:Affiliation;parentId?:string|null;}
 function pushLog(doc:Doc,at:string,text:string,raw?:string):void {
   doc.log.push({id:`log${1+Math.max(0,...doc.log.map(l=>Number(l.id.replace(/^log/,''))||0))}`,at,text,...(raw?{cmd:raw}:{})});
 }
@@ -512,7 +513,16 @@ function vikunja(doc:Doc,cmd:Command,now:Date):MutationResult {
       if(c.note!==undefined&&c.note!==(get(id).note??'')){if(c.note)step('note',{unit:id,note:c.note});else{const u=get(id);delete u.note;u.updatedAt=at;logs.push(`${u.designation} NOTE CLEARED`);}}
       if(c.strength!==undefined&&c.strength!==get(id).strength&&c.status!=='done')step('bda',{unit:id,strength:c.strength});
       settle(id,c.status);
+      if(c.parentId!==undefined&&c.parentId!==(get(id).parentId??null)){if(c.parentId===null)step('detach',{unit:id});else step('attach',{unit:id,parent:item(cur.units,c.parentId,'task force').id});}
       log=`VIKUNJA: ${logs.join('; ')||`${get(id).designation} IN STEP`}`;
+    }else if(action==='relate'){
+      // A Vikunja relation between two linked tasks: related, blocked by (dependency) or precedes (handoff).
+      step('link',{unit:item(cur.units,a.unit,'unit').id,target:item(cur.units,a.target,'unit').id,...(a.kind!==undefined?{kind:a.kind}:{})});
+      log=`VIKUNJA: ${logs.join('; ')}`;
+    }else if(action==='unrelate'){
+      const o=item(cur.orders,a.order,'order');requireThat(o.type==='link','Not a link order');
+      step('halt',{unit:o.from,order:o.id});
+      log=`VIKUNJA: ${logs.join('; ')}`;
     }else if(action==='gone'){
       const u=item(cur.units,a.unit,'unit');
       if(u.lifecycle!=='done'&&u.lifecycle!=='dropped')step('drop',{unit:u.id});

@@ -2,7 +2,9 @@
 // new projects get list and kanban views with To-Do, Doing and Done buckets, Done is the done bucket;
 // marking a task done moves it to Done, undone moves it to the default bucket, and a project move puts the
 // task in the new project's default bucket. `tick()` advances the clock that stamps `updated`.
-import type { VkApi, VkBucket, VkLabel, VkProject, VkTask, VkView, VkWebhook } from '../../server/vikunja/api';
+import type { VkApi, VkBucket, VkLabel, VkProject, VkRelationKind, VkTask, VkView, VkWebhook } from '../../server/vikunja/api';
+
+const INVERSE: Record<VkRelationKind, VkRelationKind> = { subtask: 'parenttask', parenttask: 'subtask', related: 'related', duplicateof: 'duplicates', duplicates: 'duplicateof', blocking: 'blocked', blocked: 'blocking', precedes: 'follows', follows: 'precedes', copiedfrom: 'copiedto', copiedto: 'copiedfrom' };
 
 interface Board { view: VkView; buckets: VkBucket[] }
 export class FakeVikunja implements VkApi {
@@ -76,8 +78,8 @@ export class FakeVikunja implements VkApi {
   }
   async updateTask(task: VkTask) {
     this.calls.push(`updateTask ${task.id}`);
-    // Vikunja's task update ignores labels: they have their own endpoints.
-    const { bucket_id: _ignored, updated: _u, labels: _l, ...fields } = task;
+    // Vikunja's task update ignores labels and relations: they have their own endpoints.
+    const { bucket_id: _ignored, updated: _u, labels: _l, related_tasks: _r, ...fields } = task;
     return structuredClone(this.edit(task.id, { ...fields, due_date: fields.due_date ?? '0001-01-01T00:00:00Z' }));
   }
   async deleteTask(id: number) { this.calls.push(`deleteTask ${id}`); this.tasksById.delete(id); this.bucketOfTask.delete(id); }
@@ -101,6 +103,31 @@ export class FakeVikunja implements VkApi {
   labelsOf(taskId: number) { return (this.tasksById.get(taskId)!.labels ?? []).map(l => l.title).sort(); }
   /** As a user would: a label by title, made if missing. */
   label(title: string): VkLabel { const found = [...this.labelsById.values()].find(l => l.title === title); if (found) return found; const l = { id: this.id(), title }; this.labelsById.set(l.id, l); return l; }
+  /** Relations as Vikunja keeps them: both sides, no duplicates, no parent cycles. */
+  relate(taskId: number, otherId: number, kind: VkRelationKind) {
+    const t = this.tasksById.get(taskId)!, o = this.tasksById.get(otherId)!;
+    if ((t.related_tasks?.[kind] ?? []).some(x => x.id === otherId)) throw new Error('The task relation already exists.');
+    if (kind === 'parenttask' || kind === 'subtask') {
+      const [child, parent] = kind === 'parenttask' ? [taskId, otherId] : [otherId, taskId];
+      for (let at: number | undefined = parent, seen = 0; at !== undefined && seen < 100; seen++) {
+        if (at === child) throw new Error('This task relation would create a cycle.');
+        at = this.tasksById.get(at)?.related_tasks?.parenttask?.[0]?.id;
+      }
+    }
+    t.related_tasks = { ...t.related_tasks, [kind]: [...(t.related_tasks?.[kind] ?? []), { id: otherId }] };
+    o.related_tasks = { ...o.related_tasks, [INVERSE[kind]]: [...(o.related_tasks?.[INVERSE[kind]] ?? []), { id: taskId }] };
+    t.updated = this.tick();
+  }
+  unrelate(taskId: number, otherId: number, kind: VkRelationKind) {
+    const t = this.tasksById.get(taskId)!, o = this.tasksById.get(otherId);
+    t.related_tasks = { ...t.related_tasks, [kind]: (t.related_tasks?.[kind] ?? []).filter(x => x.id !== otherId) };
+    if (o) o.related_tasks = { ...o.related_tasks, [INVERSE[kind]]: (o.related_tasks?.[INVERSE[kind]] ?? []).filter(x => x.id !== taskId) };
+    t.updated = this.tick();
+  }
+  /** Ids related to a task under one kind. */
+  relatedOf(taskId: number, kind: VkRelationKind) { return (this.tasksById.get(taskId)?.related_tasks?.[kind] ?? []).map(x => x.id).sort(); }
+  async addRelation(taskId: number, otherId: number, kind: VkRelationKind) { this.calls.push(`addRelation ${taskId} ${kind} ${otherId}`); this.relate(taskId, otherId, kind); }
+  async removeRelation(taskId: number, otherId: number, kind: VkRelationKind) { this.calls.push(`removeRelation ${taskId} ${kind} ${otherId}`); this.unrelate(taskId, otherId, kind); }
   async webhooks(projectId: number) { return structuredClone(this.hooks.get(projectId) ?? []); }
   async createWebhook(projectId: number, target_url: string, events: string[]) {
     const w = { id: this.id(), target_url, events }; this.hooks.set(projectId, [...(this.hooks.get(projectId) ?? []), w]); return { ...w };

@@ -3,13 +3,13 @@
 // (`vk_links.base`): a field changed on one side is copied across; changed on both, the newer side wins.
 // Pulled changes become ordinary ops (`vk` add, pull, gone) by the system user with via "vikunja".
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
-import type { Affiliation, Command, Doc, Unit } from '../../src/core/model/types';
+import type { Affiliation, Command, Doc, Order, Unit } from '../../src/core/model/types';
 import type { VkChanges, VkStatus } from '../../src/core/commands/apply';
 import { localDay } from '../../src/core/model/time';
 import type { Maps } from '../maps';
 import type { Hub, Op } from '../hub';
 import type { Store, User } from '../db';
-import type { VkApi, VkLabel, VkProject, VkTask } from './api';
+import type { VkApi, VkLabel, VkProject, VkRelationKind, VkTask } from './api';
 
 export interface VkFields { title: string; due: string | null; note: string; progress: number | null; status: VkStatus | null; sector: string | null; affiliation: Affiliation | null }
 const FIELDS = ['title', 'due', 'note', 'progress', 'status', 'sector', 'affiliation'] as const;
@@ -42,7 +42,17 @@ class LabelSet {
     this.ids.set(a, made.id); return made.id;
   }
 }
-const EVENTS = ['task.created', 'task.updated', 'task.deleted'];
+const EVENTS = ['task.created', 'task.updated', 'task.deleted', 'task.relation.created', 'task.relation.deleted'];
+
+/** Link orders ↔ Vikunja relations, from the order's source: a plain link is related, `/link A B as dependency`
+ *  is A blocked by B, `/link A B as handoff` is A precedes B. A task force attachment is the parent task. */
+type EdgeKind = 'link' | 'dependency' | 'handoff';
+const RELATION: Record<EdgeKind, VkRelationKind> = { link: 'related', dependency: 'blocked', handoff: 'precedes' };
+/** One relation between two units; a plain link has no direction, so its ends are sorted. */
+const edgeKey = (kind: EdgeKind, from: string, to: string) => JSON.stringify(kind === 'link' ? [kind, ...[from, to].sort()] : [kind, from, to]);
+/** The relations both sides last agreed on: each unit's parent task, and the relations between open units.
+ *  `refused`: relations made in Vikunja that opsmap would not take (a link across sectors), not tried again. */
+interface RelationBase { parents: Record<string, number | null>; edges: string[]; refused: string[] }
 const SYSTEM = 'system', VIA = 'vikunja';
 
 /** Vikunja's title limit; opsmap's longest note in one op. */
@@ -90,6 +100,7 @@ export class VikunjaSync {
     const db = this.store.db;
     db.exec(`CREATE TABLE IF NOT EXISTS vk_links(map_id TEXT NOT NULL,unit_id TEXT NOT NULL,task_id INTEGER NOT NULL,base TEXT NOT NULL,PRIMARY KEY(map_id,unit_id));
       CREATE TABLE IF NOT EXISTS vk_maps(map_id TEXT PRIMARY KEY,secret TEXT NOT NULL,hooks TEXT NOT NULL DEFAULT '[]',owner TEXT,hooks_checked TEXT,last_delivery TEXT);`);
+    if (!(db.prepare('PRAGMA table_info(vk_maps)').all() as { name: string }[]).some(c => c.name === 'relations')) db.exec('ALTER TABLE vk_maps ADD COLUMN relations TEXT');
     // Every change on a bound map, except the sync's own, pushes after a short pause.
     this.onEvent = event => {
       // A deleted map takes its webhooks with it.
@@ -395,6 +406,8 @@ export class VikunjaSync {
         const bucketOf = board.kanban ? await api.bucketsOfTasks(board.project, board.kanban) : new Map<number, number>();
         for (const t of await api.tasks(board.project, board.list)) tasks.set(t.id, { ...t, bucket_id: bucketOf.get(t.id) });
       }
+      // Every task read this cycle, for the relations pass (the loops below take tasks out of `tasks`).
+      const fetched = new Map(tasks);
 
       // One unit or task that fails (a Vikunja error, a rejected value) does not hold up the rest.
       const problems: string[] = [];
@@ -422,7 +435,7 @@ export class VikunjaSync {
             // Still there, outside this A/O's sector projects (a removed sector, or moved away): a task is never
             // treated as deleted while it exists; it goes back to its unit's sector. In an archived project it waits.
             if (frozen.has(remote.project_id)) return;
-            t = remote;
+            t = remote; fetched.set(id, remote);
           }
           stats.pushed += await this.merge(api, labels, mapId, u, t, boards, stats);
         });
@@ -456,7 +469,7 @@ export class VikunjaSync {
             });
             // The unit went away while Vikunja answered (an undo of its capture): take the new task back.
             if (!this.hub(mapId).doc.units.some(x => x.id === u.id)) { await api.deleteTask(made.id).catch(() => undefined); return; }
-            links[u.id] = made.id; this.setBase(mapId, u.id, made.id, f); stats.created++;
+            links[u.id] = made.id; this.setBase(mapId, u.id, made.id, f); stats.created++; fetched.set(made.id, { ...made, related_tasks: null });
             await this.place(api, made, f.status, boards);
             await this.label(api, labels, made, u.affiliation);
           });
@@ -483,6 +496,7 @@ export class VikunjaSync {
           stats.added++;
         });
       }
+      await this.relations(api, mapId, fetched, guard, stats);
       info.lastSync = new Date().toISOString();
       for (const k of ['pushed', 'pulled', 'created', 'added'] as const) info[k] += stats[k];
       const summary = `${stats.pushed} pushed, ${stats.pulled} pulled, ${stats.created} tasks created, ${stats.added} new units`;
@@ -498,6 +512,95 @@ export class VikunjaSync {
       console.error('Vikunja sync failed', mapId, info.lastError);
       throw error;
     }
+  }
+
+  private relationBase(mapId: string): RelationBase {
+    const row = this.store.db.prepare('SELECT relations FROM vk_maps WHERE map_id=?').get(mapId) as { relations: string | null } | undefined;
+    const saved = row?.relations ? JSON.parse(row.relations) as Partial<RelationBase> : {};
+    return { parents: saved.parents ?? {}, edges: saved.edges ?? [], refused: saved.refused ?? [] };
+  }
+  /** Relations between linked units whose tasks were read this cycle, merged against the agreed set: one added
+   *  or removed on one side is copied across. A unit's parent task merges like a field (the newer change wins). */
+  private async relations(api: VkApi, mapId: string, fetched: Map<number, VkTask>, guard: (what: string, fn: () => Promise<void>) => Promise<void>, stats: { pushed: number; pulled: number }): Promise<void> {
+    const base = this.relationBase(mapId);
+    const doc = () => this.hub(mapId).doc;
+    const byTask = () => new Map(doc().units.filter(u => u.vk !== undefined && fetched.has(u.vk)).map(u => [u.vk!, u]));
+    const seen = (u: Unit | undefined): u is Unit => u?.vk !== undefined && fetched.has(u.vk);
+    /** Linked tasks related to `t` under `kind` (relations to tasks outside the A/O are not opsmap's). */
+    const related = (t: VkTask, kind: VkRelationKind, units: Map<number, Unit>) => (t.related_tasks?.[kind] ?? []).map(x => x.id).filter(id => units.has(id));
+
+    // Parent task ↔ task force: a unit is attached to at most one, so a task with several parents has no opinion.
+    const parents: Record<string, number | null> = {};
+    for (const id of doc().units.map(u => u.id)) {
+      const units = byTask(), u = doc().units.find(x => x.id === id);
+      if (!seen(u)) continue;
+      const t = fetched.get(u.vk!)!, parent = u.parentId ? doc().units.find(x => x.id === u.parentId) : undefined;
+      const ours = !u.parentId ? null : seen(parent) ? parent.vk! : undefined;
+      const named = related(t, 'parenttask', units), theirs = named.length === 0 ? null : named.length === 1 ? named[0] : undefined;
+      const agreed = base.parents[u.id];
+      if (ours === undefined || theirs === undefined) { if (agreed !== undefined) parents[u.id] = agreed; continue; }
+      if (ours === theirs) { parents[u.id] = ours; continue; }
+      const newer = Date.parse(u.updatedAt) >= Date.parse(t.updated) ? 'ours' : 'theirs';
+      const take = agreed !== undefined ? (ours === agreed ? 'theirs' : theirs === agreed ? 'ours' : newer) : (ours === null) !== (theirs === null) ? (ours === null ? 'theirs' : 'ours') : newer;
+      await guard(u.designation, async () => {
+        if (take === 'ours') {
+          for (const other of named) await api.removeRelation(t.id, other, 'parenttask');
+          if (ours !== null) await api.addRelation(t.id, ours, 'parenttask');
+          parents[u.id] = ours; stats.pushed++;
+        } else {
+          this.system(mapId, { action: 'pull', unit: u.id, changes: { parentId: theirs === null ? null : units.get(theirs)!.id } });
+          parents[u.id] = theirs; stats.pulled++;
+        }
+      });
+    }
+
+    // Link orders ↔ related, blocked by and precedes, between open units only: /done ends a unit's orders, but
+    // its task keeps its relations in Vikunja.
+    const units = byTask(), unit = (id: string) => doc().units.find(u => u.id === id);
+    const open = (u: Unit | undefined): u is Unit => seen(u) && u.lifecycle !== 'done' && u.lifecycle !== 'dropped';
+    const ours = new Map<string, Order[]>();
+    for (const o of doc().orders) {
+      if (o.type !== 'link' || !open(unit(o.from)) || !open(unit(o.to))) continue;
+      const key = edgeKey(o.kind ?? 'link', o.from, o.to); ours.set(key, [...ours.get(key) ?? [], o]);
+    }
+    const theirs = new Map<string, { kind: EdgeKind; from: string; to: string }>();
+    const add = (kind: EdgeKind, from: Unit | undefined, to: Unit | undefined) => { if (open(from) && open(to) && from.id !== to.id) theirs.set(edgeKey(kind, from.id, to.id), { kind, from: from.id, to: to.id }); };
+    for (const [id, t] of fetched) {
+      const u = units.get(id); if (!open(u)) continue;
+      for (const other of related(t, 'related', units)) add('link', u, units.get(other));
+      for (const other of related(t, 'blocked', units)) add('dependency', u, units.get(other));
+      for (const other of related(t, 'blocking', units)) add('dependency', units.get(other), u);
+      for (const other of related(t, 'precedes', units)) add('handoff', u, units.get(other));
+      for (const other of related(t, 'follows', units)) add('handoff', units.get(other), u);
+    }
+    const agreed = new Set(base.edges), refused = new Set(base.refused), edges = new Set<string>(), stillRefused = new Set<string>();
+    for (const key of new Set([...ours.keys(), ...theirs.keys()])) {
+      const mine = ours.get(key), remote = theirs.get(key);
+      if (mine && remote) { edges.add(key); continue; }
+      const [kind, from, to] = JSON.parse(key) as [EdgeKind, string, string];
+      const a = unit(from)!, b = unit(to)!, what = `${a.designation} / ${b.designation}`;
+      if (mine) {
+        // Removed in Vikunja: the link order goes. New in opsmap: the relation is made.
+        await guard(what, async () => {
+          if (agreed.has(key)) { for (const o of mine) this.system(mapId, { action: 'unrelate', order: o.id }); stats.pulled++; return; }
+          await api.addRelation(a.vk!, b.vk!, RELATION[kind]); edges.add(key); stats.pushed++;
+        });
+      } else if (agreed.has(key)) {
+        await guard(what, async () => { await api.removeRelation(a.vk!, b.vk!, RELATION[kind]); stats.pushed++; });
+      } else if (refused.has(key)) stillRefused.add(key);
+      else {
+        // New in Vikunja: a link order. A plain link has no direction, so the other way round is tried too.
+        const ends = kind === 'link' ? [[remote!.from, remote!.to], [remote!.to, remote!.from]] : [[remote!.from, remote!.to]];
+        let error: unknown;
+        for (const [x, y] of ends) {
+          try { this.system(mapId, { action: 'relate', unit: x, target: y, ...(kind === 'link' ? {} : { kind }) }); edges.add(key); stats.pulled++; error = undefined; break; } catch (e) { error = e; }
+        }
+        if (error !== undefined) { stillRefused.add(key); await guard(`relation ${what}`, async () => { throw error; }); }
+      }
+    }
+    const live = new Set(doc().units.map(u => u.id));
+    for (const [id, task] of Object.entries(base.parents)) if (!(id in parents) && live.has(id) && !seen(unit(id))) parents[id] = task;
+    this.store.db.prepare('UPDATE vk_maps SET relations=? WHERE map_id=?').run(JSON.stringify({ parents, edges: [...edges], refused: [...stillRefused] }), mapId);
   }
 
   /** Three-way merge of one linked unit and its task. Returns 1 when the task was updated. */

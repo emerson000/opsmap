@@ -396,6 +396,99 @@ describe('Vikunja identity labels', () => {
   });
 });
 
+describe('Vikunja relations', () => {
+  const cycle = () => sync.run(hub().mapId);
+  const id = (d: string) => unit(d).vk!;
+  const links = () => doc().orders.filter(o => o.type === 'link').map(o => `${o.from}>${o.to}${o.kind ? ` ${o.kind}` : ''}`).sort();
+
+  it('a task force attachment is the parent task: bind pushes existing ones; /attach and /detach follow', async () => {
+    await bind();
+    expect(vk.relatedOf(id('PACKING'), 'parenttask')).toEqual([id('MOVE')]);
+    expect(vk.relatedOf(id('MOVE'), 'subtask')).toEqual([id('MOVERS'), id('PACKING')].sort());
+    run('/attach TOOLS to MOVE');
+    run('/detach MOVERS');
+    await cycle();
+    expect(vk.relatedOf(id('TOOLS'), 'parenttask')).toEqual([id('MOVE')]);
+    expect(vk.relatedOf(id('MOVERS'), 'parenttask')).toEqual([]);
+    // Attached to another task force: the old parent task is replaced.
+    run('/attach TOOLS to Q4RPT');
+    await cycle();
+    expect(vk.relatedOf(id('TOOLS'), 'parenttask')).toEqual([id('Q4RPT')]);
+    vk.calls.length = 0;
+    expect(await cycle()).toMatch(/^0 pushed, 0 pulled/);
+    expect(vk.calls.filter(c => c.includes('Relation'))).toEqual([]);
+  });
+
+  it('a subtask made in Vikunja attaches the unit to the parent task’s unit; removing it detaches', async () => {
+    await bind();
+    vk.relate(id('FILES'), id('Q4RPT'), 'parenttask');
+    await cycle();
+    expect(unit('FILES').parentId).toBe('q4rpt');
+    expect(unit('Q4RPT').taskForce).toBe(true);
+    expect(doc().log.at(-1)).toMatchObject({ text: 'VIKUNJA: FILES ATTACHED TO TF Q4RPT', via: 'vikunja' });
+    // Made from the parent's side too.
+    vk.relate(id('Q4RPT'), id('TOOLS'), 'subtask');
+    await cycle();
+    expect(unit('TOOLS').parentId).toBe('q4rpt');
+    vk.unrelate(id('FILES'), id('Q4RPT'), 'parenttask');
+    await cycle();
+    expect(unit('FILES').parentId).toBeUndefined();
+    expect(doc().log.at(-1)?.text).toBe('VIKUNJA: FILES DETACHED');
+    // A task with two parent tasks is the user's to settle: the unit keeps its task force.
+    vk.relate(id('TOOLS'), id('MOVE'), 'parenttask');
+    await cycle();
+    expect(unit('TOOLS').parentId).toBe('q4rpt');
+  });
+
+  it('link orders are relations: related, blocked by (dependency) and precedes (handoff); /halt removes them', async () => {
+    await bind();
+    run('/link RECORDS IRSRSP');
+    run('/link LEAK RECORDS as dependency');
+    run('/link Q4RPT TOOLS as handoff');
+    await cycle();
+    expect(vk.relatedOf(id('RECORDS'), 'related')).toEqual([id('IRSRSP')]);
+    expect(vk.relatedOf(id('LEAK'), 'blocked')).toEqual([id('RECORDS')]);
+    expect(vk.relatedOf(id('RECORDS'), 'blocking')).toEqual([id('LEAK')]);
+    expect(vk.relatedOf(id('Q4RPT'), 'precedes')).toEqual([id('TOOLS')]);
+    expect(await cycle()).toMatch(/^0 pushed, 0 pulled/);
+    run('/halt LEAK link');
+    await cycle();
+    expect(vk.relatedOf(id('LEAK'), 'blocked')).toEqual([]);
+    expect(vk.relatedOf(id('RECORDS'), 'related')).toEqual([id('IRSRSP')]);
+  });
+
+  it('relations made in Vikunja become link orders; removed there, the order is cancelled', async () => {
+    await bind();
+    vk.relate(id('IRSRSP'), id('RECORDS'), 'blocking');
+    vk.relate(id('TOOLS'), id('Q4RPT'), 'follows');
+    await cycle();
+    expect(links()).toEqual(['q4rpt>tools handoff', 'records>irsrsp dependency']);
+    expect(doc().log.some(l => l.text === 'VIKUNJA: LINKUP RECORDS / IRSRSP — DEPENDENCY' && l.via === 'vikunja')).toBe(true);
+    vk.unrelate(id('RECORDS'), id('IRSRSP'), 'blocked');
+    await cycle();
+    expect(links()).toEqual(['q4rpt>tools handoff']);
+    expect(doc().log.at(-1)?.text).toMatch(/^VIKUNJA: RECORDS HALTED: LINK ON IRSRSP CANCELLED$/);
+  });
+
+  it('a relation opsmap cannot take (a link across sectors) is reported once and left in Vikunja', async () => {
+    await bind();
+    vk.relate(id('TOOLS'), id('FILES'), 'related');
+    expect(await cycle()).toMatch(/1 failed: relation .*Cross-sector orders require a task force/);
+    expect(links()).toEqual([]);
+    expect(await cycle()).not.toMatch(/failed/);
+    expect(vk.relatedOf(id('TOOLS'), 'related')).toEqual([id('FILES')]);
+  });
+
+  it('a finished unit loses its link orders, but its task keeps its relations', async () => {
+    await bind();
+    run('/link RECORDS IRSRSP');
+    await cycle();
+    run('/done RECORDS');
+    await cycle();
+    expect(vk.relatedOf(id('IRSRSP'), 'related')).toEqual([id('RECORDS')]);
+  });
+});
+
 describe('Vikunja webhooks', () => {
   const target = () => `https://opsmap.example/api/vikunja/hook/${hub().mapId}`;
   const hooksOn = (project: number) => vk.hooks.get(project) ?? [];
@@ -403,11 +496,11 @@ describe('Vikunja webhooks', () => {
     const secret = (store.db.prepare('SELECT secret FROM vk_maps').get() as { secret: string }).secret;
     return createHmac('sha256', secret).update(body).digest('hex');
   };
-  it('bind registers one webhook per sector project, for task created, updated and deleted', async () => {
+  it('bind registers one webhook per sector project, for tasks and their relations created, updated and deleted', async () => {
     await bind();
     for (const s of doc().sectors) {
       expect(hooksOn(s.vk!)).toHaveLength(1);
-      expect(hooksOn(s.vk!)[0]).toMatchObject({ target_url: target(), events: ['task.created', 'task.updated', 'task.deleted'] });
+      expect(hooksOn(s.vk!)[0]).toMatchObject({ target_url: target(), events: ['task.created', 'task.updated', 'task.deleted', 'task.relation.created', 'task.relation.deleted'] });
     }
   });
   it('a webhook deleted or changed in Vikunja is made again: at once on /vk sync, otherwise every 10 minutes', async () => {
@@ -420,7 +513,7 @@ describe('Vikunja webhooks', () => {
     await sync.request(hub().mapId, { action: 'sync' }, user, 'web');
     expect(hooksOn(work)).toHaveLength(1);
     expect(hooksOn(family)).toHaveLength(1);
-    expect(hooksOn(family)[0].events).toEqual(['task.created', 'task.updated', 'task.deleted']);
+    expect(hooksOn(family)[0].events).toEqual(['task.created', 'task.updated', 'task.deleted', 'task.relation.created', 'task.relation.deleted']);
   });
   it('a new sector gets its webhook on the next cycle', async () => {
     await bind();
