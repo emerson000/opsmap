@@ -790,3 +790,25 @@ test('phone area view: an opened list keeps its label in view; the member list h
   await expect(inspector.getByTestId('measure-join-list')).toBeVisible();
   await expect(page.getByTestId('echo-line')).toBeHidden();
 });
+
+test.describe('iOS 26', () => {
+  // Safari on iOS 26: the form bar (up, down, done) floats over the page above the keyboard, inside the visual viewport.
+  test.use({ userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_6 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Mobile/15E148 Safari/605.1.15' });
+  test('with the keyboard up, the command bar sits above the floating form bar', async ({ page }) => {
+    const input = page.getByTestId('command-input');
+    await input.click();
+    // The keyboard: iOS shrinks only the visual viewport.
+    const vvH = await page.evaluate(() => {
+      const h = innerHeight - 300;
+      Object.defineProperty(visualViewport!, 'height', { configurable: true, get: () => h });
+      Object.defineProperty(visualViewport!, 'offsetTop', { configurable: true, get: () => 0 });
+      visualViewport!.dispatchEvent(new Event('resize'));
+      return h;
+    });
+    await page.waitForTimeout(200);
+    const bar = (await page.locator('[data-dock]').boundingBox())!;
+    expect(bar.y + bar.height).toBeLessThanOrEqual(vvH - 58 + 1);
+    expect(bar.y + bar.height).toBeGreaterThan(vvH - 58 - 20);
+    await expect(input).toBeFocused();
+  });
+});

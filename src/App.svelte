@@ -55,6 +55,11 @@
   let map = $state<ReturnType<typeof OpsMap>>();
 
   const leftW = $derived(ui.logOpen ? LOG_W : RAIL_W);
+  /** iOS 26 and later (WebKit with CSS anchor positioning, or Safari's Version/26): the keyboard's form bar floats over the page. */
+  const FLOATING_FORM_BAR = typeof navigator !== 'undefined' && (/iPhone|iPad|iPod/.test(navigator.userAgent) || (/Macintosh/.test(navigator.userAgent) && navigator.maxTouchPoints > 1))
+    && (Number(/Version\/(\d+)/.exec(navigator.userAgent)?.[1] ?? 0) >= 26 || (typeof CSS !== 'undefined' && CSS.supports?.('anchor-name: --a')));
+  /** The floating form bar and its gap above the keyboard, in CSS px (measured on an iPhone: 46 px bar, 11 px gap). */
+  const FORM_BAR_H = 58;
 
   // Phone geometry. Safe-area insets come from probes styled with env(); the keyboard overlap comes
   // from visualViewport (iOS shrinks only the visual viewport; Android with interactive-widget=
@@ -248,7 +253,11 @@
       // iOS pans the visual viewport to show a focused field under the keyboard, which hides the top bar and
       // makes vh - height - offsetTop read as no keyboard. The shell is fixed and never scrolls: undo the pan.
       if (vv && vv.offsetTop > 0 && env.tier === 'phone') window.scrollTo(0, 0);
-      kb = vv ? Math.max(0, Math.round(vh - vv.height - vv.offsetTop)) : 0;
+      const raw = vv ? Math.max(0, Math.round(vh - vv.height - vv.offsetTop)) : 0;
+      // iOS 26 floats the form bar (up, down, done) over the page above the keyboard, and the visual viewport
+      // does not leave it out: count it as keyboard, or it covers the command bar.
+      const bar = raw > 0 && FLOATING_FORM_BAR ? FORM_BAR_H : 0;
+      kb = raw + bar; vvH -= bar;
     };
     measure();
     vv?.addEventListener('resize', measure);
