@@ -3,9 +3,10 @@
 // workspace on first use, reused by name); its parent Asana's parent task. Due dates are days (`due_on`): a `due_at`
 // is read as its day in the map's zone, and a write sets the day and clears the time. One session serves one sync
 // cycle, so it keeps what it read (the project's workspace and sections, the workspace's tags, the tasks) for that cycle.
+import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { Affiliation } from '../../../src/core/model/types';
 import { localDay } from '../../../src/core/model/time';
-import { RateLimited, RemoteAuthError, type ProviderSession, type RemoteRoot, type RemoteStatus, type RemoteTask, type Snapshot, type TaskWrite } from '../../tasksync/contract';
+import { RateLimited, RemoteAuthError, type ProviderSession, type RemoteRoot, type RemoteStatus, type RemoteTask, type Snapshot, type TaskWrite, type WebhookResult } from '../../tasksync/contract';
 import { NOTE_LIMIT } from '../../tasksync/merge';
 import { IDENTITY_NAMES, affiliationOfName } from '../identity';
 import { AsHttpError, type AsApi, type AsNewTask, type AsProject, type AsRef, type AsSection, type AsTag, type AsTask, type AsTaskFields } from './api';
@@ -38,13 +39,39 @@ export function projectRef(text: string): { gid?: string; url: boolean } {
 const dueOf = (t: AsTask, tz: string) => t.due_at ? localDay(new Date(t.due_at), tz) : t.due_on ?? null;
 const sectionIn = (t: AsTask, project: string) => t.memberships.find(m => m.project?.gid === project)?.section?.gid ?? null;
 
+/** Webhook creations in flight, by the map's secret (the engine's, passed to ensureWebhooks and receiveWebhook). Asana
+ *  sends its handshake while `POST /webhooks` is still open; it is answered only then, and only once per creation. */
+export type Handshakes = Map<string, { answered: boolean }>;
+/** The webhook ensureWebhooks keeps (ts_maps.hooks): one per bound project. */
+const hookGid = (state: unknown) => state && typeof state === 'object' && typeof (state as { gid?: unknown }).gid === 'string' ? (state as { gid: string }).gid : undefined;
+/** The secret Asana's handshake gave (ts_maps.state, stored through WebhookResult.store). */
+const hookSecret = (state: unknown) => state && typeof state === 'object' && typeof (state as { secret?: unknown }).secret === 'string' ? (state as { secret: string }).secret : undefined;
+export const asanaHookCount = (state: unknown) => hookGid(state) ? 1 : 0;
+/** A handshake (`X-Hook-Secret`), echoed and stored only while a creation for this map is open; or a delivery, signed with
+ *  that secret (`X-Hook-Signature`: hex HMAC-SHA256 of the body as received). A heartbeat (`events: []`) starts no cycle. */
+export function receiveAsanaWebhook(headers: Headers, body: string, mapSecret: string, state: unknown, handshakes: Handshakes): WebhookResult {
+  const refused: WebhookResult = { status: 401, trigger: false }, offered = headers.get('x-hook-secret');
+  if (offered !== null) {
+    const waiting = handshakes.get(mapSecret);
+    if (!waiting || waiting.answered || !/^[\x21-\x7e]{1,256}$/.test(offered)) return refused;
+    waiting.answered = true;
+    return { status: 200, headers: { 'X-Hook-Secret': offered }, store: { secret: offered }, trigger: false };
+  }
+  const secret = hookSecret(state), signature = headers.get('x-hook-signature');
+  if (!secret || !signature) return refused;
+  const want = Buffer.from(createHmac('sha256', secret).update(body).digest('hex')), got = Buffer.from(signature.trim().toLowerCase());
+  if (want.length !== got.length || !timingSafeEqual(want, got)) return refused;
+  let events: unknown; try { events = (JSON.parse(body) as { events?: unknown }).events; } catch { /* signed but not JSON: sync anyway */ }
+  return Array.isArray(events) && events.length === 0 ? { status: 200, trigger: false, live: true } : { status: 200, trigger: true };
+}
+
 export class AsanaSession implements ProviderSession {
   private readonly workspaces = new Map<string, string>();   // project gid → workspace gid
   private readonly sections = new Map<string, AsSection[]>();
   private tagIndex?: Map<string, AsTag>;
   /** Tasks as Asana last sent them this cycle. */
   private readonly raw = new Map<string, AsTask>();
-  constructor(private readonly api: AsApi, readonly label = 'Asana') {}
+  constructor(private readonly api: AsApi, readonly label = 'Asana', private readonly handshakes: Handshakes = new Map()) {}
 
   private remember(p: AsProject, workspace?: string): RemoteRoot { const ws = p.workspace?.gid ?? workspace; if (ws) this.workspaces.set(p.gid, ws); return { id: p.gid, title: p.name }; }
   /** The project, or undefined when this token cannot see it. */
@@ -212,12 +239,40 @@ export class AsanaSession implements ProviderSession {
     return this.toRemote(t, root, tz);
   }
   async deleteTask(_root: RemoteRoot, id: string): Promise<void> { await this.api.deleteTask(id); }
+
+  /** One webhook on the project, posting to `target`. One Asana deactivated (after failed deliveries) or a second one is
+   *  deleted; a missing one is made. A refusal other than a rate limit or a refused token is a webhook failure (the
+   *  engine keeps polling and retries), never a sync error. */
+  async ensureWebhooks(root: RemoteRoot, _containers: string[], target: string, secret: string): Promise<unknown> {
+    try {
+      const mine = (await this.api.webhooks(await this.workspace(root), root.id)).filter(h => h.target === target), live = mine.find(h => h.active !== false);
+      for (const h of mine) if (h !== live) await this.forget(h.gid);
+      return { gid: live?.gid ?? (await this.create(root.id, target, secret)).gid };
+    } catch (error) {
+      if (error instanceof AsHttpError && error.status !== 429 && error.status !== 401) throw new Error(error.message);
+      throw error;
+    }
+  }
+  async removeWebhooks(_root: RemoteRoot, state: unknown): Promise<void> { const gid = hookGid(state); if (gid) await this.forget(gid); }
+  /** Asana answers `POST /webhooks` only after the handshake, so the handshake is expected for exactly this long. */
+  private async create(project: string, target: string, secret: string) {
+    const waiting = { answered: false }; this.handshakes.set(secret, waiting);
+    try { return await this.api.createWebhook(project, target); }
+    catch (error) {
+      // What Asana answers when the target did not echo the handshake (it waits a while first).
+      if (error instanceof AsHttpError && (error.status === 400 || error.status === 403)) throw new Error(`${this.label} could not complete the webhook handshake with PUBLIC_URL (HTTP ${error.status})`);
+      throw error;
+    } finally { if (this.handshakes.get(secret) === waiting) this.handshakes.delete(secret); }
+  }
+  private async forget(gid: string): Promise<void> {
+    try { await this.api.deleteWebhook(gid); } catch (error) { if (!(error instanceof AsHttpError && error.status === 404)) throw error; }
+  }
 }
 
 /** Asana's refusals as the contract's: 429 is a rate limit (Retry-After, else 60 s); 401 and 403 a refused token. */
 export const translate = (error: unknown): unknown => error instanceof AsHttpError ? error.status === 429 ? new RateLimited(error.retryAfterS ?? 60) : error.status === 401 || error.status === 403 ? new RemoteAuthError(error.message) : error : error;
-export function asanaSession(api: AsApi, label?: string): ProviderSession {
-  const session = new AsanaSession(api, label);
+export function asanaSession(api: AsApi, label?: string, handshakes?: Handshakes): ProviderSession {
+  const session = new AsanaSession(api, label, handshakes);
   return new Proxy(session, { get(target, key, receiver) {
     const value = Reflect.get(target, key, receiver);
     return typeof value === 'function' ? async (...args: unknown[]) => { try { return await value.apply(target, args); } catch (error) { throw translate(error); } } : value;

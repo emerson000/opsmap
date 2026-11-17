@@ -215,7 +215,7 @@ export class TaskSyncEngine implements SyncService {
     const blocked=this.blocked(p),hooks=this.tables.hooks(mapId);
     if(blocked||!session.ensureWebhooks||!p.capabilities.webhooks) {
       // Turned off since they were made (or PUBLIC_URL moved): take them down, unless the address only failed to resolve.
-      if(hooks!==null&&session.removeWebhooks&&!this.reach?.value.failed){await session.removeWebhooks(root,hooks).catch(()=>undefined);this.tables.set(mapId,{hooks:null,hooks_checked:null});}
+      if(hooks!==null&&session.removeWebhooks&&!this.reach?.value.failed){await session.removeWebhooks(root,hooks).catch(()=>undefined);this.tables.set(mapId,{hooks:null,hooks_checked:null,state:null});}
       this.tables.setDelivery(mapId,{root});return;
     }
     if(!rec.failure&&handshakeMissing(p.capabilities,rec,now))this.fail(rec,handshakeReason(p.capabilities,p.descriptor.label),now);
@@ -251,7 +251,8 @@ export class TaskSyncEngine implements SyncService {
     const now=iso(this.now()),rec=this.tables.delivery(mapId);
     rec.handshakeAt=now;rec.failures=0;delete rec.failure;this.tables.setDelivery(mapId,rec);
     if(result.store!==undefined)this.tables.set(mapId,{state:JSON.stringify(result.store)});
-    if(result.trigger){this.tables.set(mapId,{last_delivery:now});this.schedule(mapId,500);}
+    if(result.trigger||result.live)this.tables.set(mapId,{last_delivery:now});
+    if(result.trigger)this.schedule(mapId,500);
     return result;
   }
   /** Unbound or deleted: remove its webhooks and sync state. Tasks stay in the service. */

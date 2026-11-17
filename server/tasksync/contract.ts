@@ -10,7 +10,7 @@ export interface Capabilities { fields:ReadonlySet<FieldKey>; relations:Readonly
   webhooks:false|{ https:boolean; publicAddress:boolean; handshakeTimeoutMs?:number }  /* D19 requirements; false = provider has none */;
   pollMs:number; idlePollMs:number; webhookHint?:string /* shown in status when deliveries do not arrive */ }
 export type DeliveryMode='off'|'pending'|'live'|'failed';
-export interface Delivery { mode:DeliveryMode; reason:string /* user-facing, e.g. "PUBLIC_URL is a private address (100.x): ‹Label› needs a public HTTPS address" */; nextPollMs:number; lastDelivery?:string; retryAt?:string }
+export interface Delivery { mode:DeliveryMode; reason:string /* user-facing, e.g. "webhooks off: ‹Label› needs a public HTTPS address; PUBLIC_URL is a private address (100.x)" */; nextPollMs:number; lastDelivery?:string; retryAt?:string }
 export interface RemoteRoot { id:string; title:string }
 export interface RemoteContainer { id:string; name:string; archived?:boolean }
 export interface RemoteTask { id:string; title:string; note:string; due:string|null /* YYYY-MM-DD in the map zone */; status:RemoteStatus|null /* null: a state opsmap does not track */;
@@ -20,7 +20,7 @@ export interface RemoteTask { id:string; title:string; note:string; due:string|n
   parents?:string[] /* every parent task, when the service allows several; `parent` is then the first */ }
 export interface Snapshot { tasks:RemoteTask[]; unmatched:{ container:RemoteContainer; open:number }[] }
 export type TaskWrite=Partial<Pick<RemoteTask,'title'|'note'|'due'|'dueAt'|'status'|'progress'|'container'|'parent'>>&{ affiliation?:Affiliation|null /* null: remove the identity tags or labels opsmap manages */ };
-export interface WebhookResult { status:number; headers?:Record<string,string>; store?:unknown; trigger:boolean }
+export interface WebhookResult { status:number; headers?:Record<string,string>; store?:unknown; trigger:boolean; /** A signed delivery that starts no cycle (a heartbeat) but shows the webhooks work: counts as live. `trigger` implies it. */ live?:boolean }
 export class RateLimited extends Error { constructor(readonly retryAfterS:number){ super(`rate limited, retrying in ${retryAfterS}s`); } }
 export class RemoteAuthError extends Error {}
 

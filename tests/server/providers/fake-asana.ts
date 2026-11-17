@@ -5,6 +5,10 @@
 // Not probed: whether deleting a parent deletes its subtasks. `onParentDelete` picks: 'orphan' (the default; the children
 // stay, top-level, in no project unless they were multi-homed) or 'cascade' (the children, and theirs, are deleted too).
 // `tick()` advances the clock that stamps `modified_at`. `failNext` and `rateLimit` make the next call to a method fail.
+// Webhooks (documented, not probed): `createWebhook` sends the handshake (`X-Hook-Secret`) to `handshake` before it
+// resolves, and makes the webhook only when the answer is 200 or 204 with the same header; `handshakeUnanswered`
+// makes it fail as Asana does when the target never answers. `delivery()` signs a body as Asana would.
+import { createHmac, randomBytes } from 'node:crypto';
 import { AsHttpError } from '../../../server/providers/asana/api';
 import type { AsApi, AsMembership, AsNewTask, AsProject, AsSection, AsTag, AsTask, AsTaskFields, AsUser, AsWebhook } from '../../../server/providers/asana/api';
 
@@ -21,6 +25,12 @@ export class FakeAsana implements AsApi {
   tagsById = new Map<string, AsTag & { workspace: string; color?: string }>();
   hooks = new Map<string, AsWebhook & { workspace: string }>();
   calls: string[] = [];
+  /** Where the handshake goes: the target's answer to a POST with `X-Hook-Secret`. */
+  handshake?: (target: string, headers: Headers) => { status: number; headers?: Record<string, string> };
+  /** The target never answers the handshake: createWebhook fails after Asana's wait, with this status. */
+  handshakeUnanswered: false | 400 | 403 = false;
+  /** Each webhook's secret, as Asana keeps it. */
+  hookSecrets = new Map<string, string>();
   /** What deleting a task does to its subtasks (not probed against Asana). */
   onParentDelete: 'orphan' | 'cascade' = 'orphan';
   private nextId = 5000;
@@ -129,8 +139,20 @@ export class FakeAsana implements AsApi {
   async removeTag(task: string, tag: string) { this.enter('removeTag', task, tag); const r = this.rec(task, 'POST', `/tasks/${task}/removeTag`); r.tags = r.tags.filter(t => t !== tag); this.touch(r); }
   async webhooks(workspace: string, resource?: string) { this.enter('webhooks', workspace); return [...this.hooks.values()].filter(h => h.workspace === workspace && (!resource || h.resource?.gid === resource)).map(({ workspace: _w, ...h }) => structuredClone(h)); }
   async createWebhook(resource: string, target: string) {
-    this.enter('createWebhook', resource, target); const workspace = this.projectsById.get(resource)?.workspaceGid ?? '';
-    const h = { gid: this.id(), target, active: true, resource: { gid: resource }, workspace }; this.hooks.set(h.gid, h); const { workspace: _w, ...rest } = h; return structuredClone(rest);
+    this.enter('createWebhook', resource, target); const workspace = this.projectsById.get(resource)?.workspaceGid;
+    if (!workspace) throw notFound('POST', '/webhooks', 'resource: Not a recognized ID');
+    const refused = new AsHttpError(this.handshakeUnanswered || 400, 'Asana POST /webhooks: The remote server did not respond with the handshake secret.');
+    if (this.handshakeUnanswered || !this.handshake) throw refused;
+    const secret = randomBytes(16).toString('hex'), answer = this.handshake(target, new Headers({ 'x-hook-secret': secret, 'content-type': 'application/json' }));
+    if (![200, 204].includes(answer.status) || Object.entries(answer.headers ?? {}).find(([k]) => k.toLowerCase() === 'x-hook-secret')?.[1] !== secret) throw refused;
+    const h = { gid: this.id(), target, active: true, resource: { gid: resource }, workspace }; this.hooks.set(h.gid, h); this.hookSecrets.set(h.gid, secret);
+    const { workspace: _w, ...rest } = h; return structuredClone(rest);
   }
-  async deleteWebhook(gid: string) { this.enter('deleteWebhook', gid); if (!this.hooks.delete(gid)) throw notFound('DELETE', `/webhooks/${gid}`); }
+  /** As Asana does after repeated failed deliveries. */
+  deactivate(gid: string) { this.hooks.get(gid)!.active = false; }
+  /** A delivery of `events` from webhook `gid`, signed with its secret (X-Hook-Signature: hex HMAC-SHA256 of the raw body). */
+  delivery(gid: string, events: unknown[], body = JSON.stringify({ events })) {
+    return { body, headers: new Headers({ 'content-type': 'application/json', 'x-hook-signature': createHmac('sha256', this.hookSecrets.get(gid)!).update(body).digest('hex') }) };
+  }
+  async deleteWebhook(gid: string) { this.enter('deleteWebhook', gid); if (!this.hooks.delete(gid)) throw notFound('DELETE', `/webhooks/${gid}`); this.hookSecrets.delete(gid); }
 }

@@ -166,10 +166,10 @@ describe('task sync engine: capabilities', () => {
 describe('task sync engine: delivery modes', () => {
   it.each([
     ['unset', undefined, ['93.184.216.34'], 'webhooks need PUBLIC_URL to be an address Fake can reach'],
-    ['loopback', 'http://127.0.0.1:8080', ['127.0.0.1'], 'webhooks need PUBLIC_URL to be an address Fake can reach'],
-    ['a .lan name', 'http://opsmap.lan', ['192.168.1.20'], 'PUBLIC_URL is a private name (.lan): Fake needs a public HTTPS address'],
-    ['a tailnet name', 'https://opsmap.ribbon.ts.net', ['100.101.1.2'], 'PUBLIC_URL is a private name (.ts.net): Fake needs a public HTTPS address'],
-    ['a name that resolves to a tailnet address', 'https://ops.example.com', ['100.101.1.2'], 'PUBLIC_URL is a private address (100.101.1.2): Fake needs a public HTTPS address'],
+    ['loopback', 'http://127.0.0.1:8080', ['127.0.0.1'], 'webhooks off: Fake needs a public HTTPS address; PUBLIC_URL is a loopback address'],
+    ['a .lan name', 'http://opsmap.lan', ['192.168.1.20'], 'webhooks off: Fake needs a public HTTPS address; PUBLIC_URL is a private name (.lan)'],
+    ['a tailnet name', 'https://opsmap.ribbon.ts.net', ['100.101.1.2'], 'webhooks off: Fake needs a public HTTPS address; PUBLIC_URL is a private name (.ts.net)'],
+    ['a name that resolves to a tailnet address', 'https://ops.example.com', ['100.101.1.2'], 'webhooks off: Fake needs a public HTTPS address; PUBLIC_URL is a private address (100.101.1.2)'],
   ])('PUBLIC_URL %s: off, with no webhook calls, no error and the reason in status', async (_name, hookBase, ips, reason) => {
     const t = await setup({ hookBase, ips });
     expect(await t.bind()).not.toMatch(/failed/);

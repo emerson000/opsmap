@@ -2,6 +2,15 @@ import { inspect } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { HttpAsApi, AsHttpError, TASK_FIELDS } from '../../../server/providers/asana/api';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { once } from 'node:events';
+import { createHmac } from 'node:crypto';
+import { startServer } from '../../../server/app';
+import type { Config } from '../../../server/config';
+import { ProviderRegistry } from '../../../server/tasksync/registry';
+import { PROVIDERS } from '../../../server/providers';
 
 // HttpAsApi against a local stub of Asana's REST API. Nothing here reaches the real Asana.
 describe('HttpAsApi over HTTP', () => {
@@ -109,5 +118,35 @@ describe('HttpAsApi over HTTP', () => {
     server.close(); server = createServer(() => {}); await new Promise<void>(ok => server.listen(0, '127.0.0.1', ok));
     const b = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
     await expect(new HttpAsApi('t', b, 50).me()).rejects.toThrow();
+  });
+});
+
+// The generic hook route with Asana: the signature is checked over the raw body exactly as it was posted, and a
+// handshake nobody asked for is refused.
+describe('Asana webhook route', () => {
+  let dir: string, runtime: ReturnType<typeof startServer>, url: string;
+  beforeEach(async () => {
+    dir = mkdtempSync(join(tmpdir(), 'opsmap-as-'));
+    const clientDir = join(dir, 'client'); mkdirSync(clientDir); writeFileSync(join(clientDir, 'index.html'), '<!doctype html>');
+    const settings: Config = { port: 0, host: '127.0.0.1', publicUrl: 'http://localhost', dataDir: dir, clientDir, devUsers: ['alice'], adminEmails: ['alice@dev.local'], group: 'g', tz: 'UTC' };
+    runtime = startServer(settings, { schedule: false, registry: ProviderRegistry.fromEnv({ ASANA_SYNC: '1' }, PROVIDERS) });
+    if (!runtime.server.listening) await once(runtime.server, 'listening');
+    url = `http://127.0.0.1:${(runtime.server.address() as { port: number }).port}`;
+  });
+  afterEach(async () => { await runtime.close(); rmSync(dir, { recursive: true, force: true }); });
+
+  it('accepts a delivery signed over the raw body, refuses a tampered or unsigned one and an unasked handshake', async () => {
+    runtime.store.db.prepare(`INSERT INTO ts_maps(map_id,provider,secret,state) VALUES('main','asana','engine-secret','{"secret":"hook-secret"}')`).run();
+    // Spacing that re-serializing the JSON would lose.
+    const body = '{ "events" : [ { "action": "changed", "resource": { "gid": "7001" } } ] }\n';
+    const post = (headers: Record<string, string>, text = body) => fetch(`${url}/api/tasksync/asana/hook/main`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: text });
+    const sig = createHmac('sha256', 'hook-secret').update(body).digest('hex');
+    expect((await post({ 'x-hook-signature': sig })).status).toBe(200);
+    expect((await post({ 'x-hook-signature': sig }, body.replace('7001', '7002'))).status).toBe(401);
+    expect((await post({})).status).toBe(401);
+    const handshake = await post({ 'x-hook-secret': 'b'.repeat(32) }, '');
+    expect(handshake.status).toBe(401);
+    expect(handshake.headers.get('x-hook-secret')).toBeNull();
+    expect((runtime.store.db.prepare("SELECT state FROM ts_maps WHERE map_id='main'").get() as { state: string }).state).toBe('{"secret":"hook-secret"}');
   });
 });

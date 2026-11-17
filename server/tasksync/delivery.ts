@@ -33,10 +33,11 @@ export function webhooksBlockedWhy(setting:WebhookSetting,publicUrl:string|undef
   if(!publicUrl)return {reason:unreachable,note:'Instant updates need a public address for this server.'};
   if(setting==='on')return undefined;
   if(!reach)return {reason:'PUBLIC_URL is not checked yet',note:'Checking whether instant updates can work.'};
+  // "webhooks off: ‹Label› needs a public HTTPS address; PUBLIC_URL is a private name (.ts.net)"
+  const https=caps.webhooks.https?' HTTPS':'',off=(why:string)=>`webhooks off: ${label} needs a public${https} address; ${why}`;
+  if(caps.webhooks.publicAddress&&!reach.publicAddress)return {reason:off(reach.reason??'PUBLIC_URL is not public'),note:`Instant updates need a public${https} address.`};
   if(reach.loopback)return {reason:unreachable,note:reachable};
-  const needs=`${label} needs a public${caps.webhooks.https?' HTTPS':''} address`;
-  if(caps.webhooks.publicAddress&&!reach.publicAddress)return {reason:`${reach.reason??'PUBLIC_URL is not public'}: ${needs}`,note:`Instant updates need a public${caps.webhooks.https?' HTTPS':''} address.`};
-  if(caps.webhooks.https&&!reach.https)return {reason:`PUBLIC_URL is not HTTPS: ${needs}`,note:'Instant updates need an HTTPS address.'};
+  if(caps.webhooks.https&&!reach.https)return {reason:off('PUBLIC_URL is not HTTPS'),note:'Instant updates need an HTTPS address.'};
   return undefined;
 }
 export const webhooksBlocked=(setting:WebhookSetting,publicUrl:string|undefined,reach:Reachability|undefined,caps:Capabilities,label:string):string|undefined=>webhooksBlockedWhy(setting,publicUrl,reach,caps,label)?.reason;
@@ -74,10 +75,11 @@ export function deliveryStatus(d:Delivery,count:number,hint?:string):string {
   const polling=`polling every ${every(d.nextPollMs)}`;
   if(d.mode==='off')return `${polling} (${d.reason})`;
   if(d.mode==='failed')return `webhooks failed: ${d.reason}${d.retryAt?`, retrying at ${clock(d.retryAt)}`:''} · ${polling}`;
-  if(d.mode==='live')return `${count} webhooks · last delivery ${clock(d.lastDelivery!)}`;
+  const hooks=`${count} webhook${count===1?'':'s'}`;
+  if(d.mode==='live')return `${hooks} · last delivery ${clock(d.lastDelivery!)}`;
   if(!count)return `no webhooks yet (next sync registers them), ${polling}`;
-  if(d.lastDelivery)return `${count} webhooks · last delivery ${clock(d.lastDelivery)} · ${polling}`;
-  return `${count} webhooks, none delivered yet${hint?`: ${hint}`:''} · ${polling}`;
+  if(d.lastDelivery)return `${hooks} · last delivery ${clock(d.lastDelivery)} · ${polling}`;
+  return `${hooks}, none delivered yet${hint?`: ${hint}`:''} · ${polling}`;
 }
 /** The delivery mode as the sidebar shows it: one line, with the full reason for its tooltip. */
 export interface DeliverySummary { mode:Delivery['mode']; summary:string; reason:string }

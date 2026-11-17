@@ -16,7 +16,7 @@ describe('delivery summary', () => {
     expect(deliverySummary({ mode: 'failed', reason: 'refused', nextPollMs: 60_000 }, 0).summary).toBe('Checking every 1 min. Instant updates failed; trying again later.');
     const reach = { https: true, publicAddress: false, reason: 'PUBLIC_URL is a private address (100.101.1.2)' };
     const why = webhooksBlockedWhy('auto', 'https://opsmap.example.ts.net', reach, cloud, 'Fake')!;
-    expect(why).toEqual({ reason: 'PUBLIC_URL is a private address (100.101.1.2): Fake needs a public HTTPS address', note: 'Instant updates need a public HTTPS address.' });
+    expect(why).toEqual({ reason: 'webhooks off: Fake needs a public HTTPS address; PUBLIC_URL is a private address (100.101.1.2)', note: 'Instant updates need a public HTTPS address.' });
     expect(deliverySummary({ mode: 'off', reason: why.reason, nextPollMs: 120_000 }, 0, why.note)).toEqual({ mode: 'off', summary: 'Checking every 2 min. Instant updates need a public HTTPS address.', reason: why.reason });
   });
   it('keeps the status reasons as they were', () => {
