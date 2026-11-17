@@ -5,10 +5,10 @@ import { join } from 'node:path';
 import { once } from 'node:events';
 import { createHmac, randomUUID } from 'node:crypto';
 import WebSocket from 'ws';
-import { startServer } from '../../server/app';
-import type { Config } from '../../server/config';
-import { ProviderRegistry } from '../../server/tasksync/registry';
-import { PROVIDERS } from '../../server/providers';
+import { startServer } from '../../../server/app';
+import type { Config } from '../../../server/config';
+import { ProviderRegistry } from '../../../server/tasksync/registry';
+import { PROVIDERS } from '../../../server/providers';
 
 // The HTTP and WebSocket edges of the Vikunja sync, with a Vikunja that cannot be reached.
 describe('Vikunja over HTTP and WebSocket', () => {
@@ -41,7 +41,7 @@ describe('Vikunja over HTTP and WebSocket', () => {
   });
 
   it('webhook: only a delivery signed with the map secret is accepted', async () => {
-    runtime.store.db.prepare("INSERT INTO vk_maps(map_id,secret) VALUES('main','s3cret')").run();
+    runtime.store.db.prepare("INSERT INTO ts_maps(map_id,provider,secret) VALUES('main','vikunja','s3cret')").run();
     const body = JSON.stringify({ event_name: 'task.updated', time: new Date().toISOString(), data: {} });
     // The generic route, and the old one that Vikunja webhooks registered before task sync became provider-neutral.
     for (const path of ['/api/tasksync/vikunja/hook', '/api/vikunja/hook']) {
@@ -52,7 +52,7 @@ describe('Vikunja over HTTP and WebSocket', () => {
     expect((await post('x', 'nope')).status).toBe(401);
     }
     expect((await fetch(`${url}/api/tasksync/asana/hook/main`, { method: 'POST', body: '{}' })).status).toBe(404);
-    expect((runtime.store.db.prepare("SELECT last_delivery FROM vk_maps WHERE map_id='main'").get() as { last_delivery: string | null }).last_delivery).not.toBeNull();
+    expect((runtime.store.db.prepare("SELECT last_delivery FROM ts_maps WHERE map_id='main'").get() as { last_delivery: string | null }).last_delivery).not.toBeNull();
   });
 
   it('the welcome describes Vikunja, and /tasks requests are answered over the socket', async () => {

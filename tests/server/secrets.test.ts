@@ -8,8 +8,8 @@ import { Store } from '../../server/db';
 import { Credentials } from '../../server/tasksync/credentials';
 import { ProviderRegistry } from '../../server/tasksync/registry';
 import { vikunjaProvider } from '../../server/providers/vikunja';
-import { VkHttpError } from '../../server/vikunja/api';
-import { FakeVikunja } from './fake-vikunja';
+import { VkHttpError } from '../../server/providers/vikunja/api';
+import { FakeVikunja } from './providers/fake-vikunja';
 
 describe('SecretBox', () => {
   const box = SecretBox.fromKey(randomBytes(32));

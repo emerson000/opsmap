@@ -1,9 +1,8 @@
-// Vikunja as a task provider: on when VIKUNJA_URL is set. For now it gives the descriptor, the capabilities and the
-// token check; the sync itself still runs through server/vikunja/sync.ts (wrapped as a SyncService in
-// server/vikunja/service.ts) until the provider-neutral engine takes it over with a full adapter here.
-import { HttpVkApi, VkHttpError, type VkApi } from '../../vikunja/api';
-import { VikunjaService } from '../../vikunja/service';
-import { RemoteAuthError, type Capabilities, type ProviderDescriptor, type ProviderFactory, type ProviderSession, type TaskProvider } from '../../tasksync/contract';
+// Vikunja as a task provider: on when VIKUNJA_URL is set. The descriptor, the capabilities, the token check, the
+// session (adapter.ts) and webhook signatures; the task sync engine does the rest.
+import { HttpVkApi, VkHttpError, type VkApi } from './api';
+import { receiveVikunjaWebhook, vikunjaSession } from './adapter';
+import { RemoteAuthError, type Capabilities, type ProviderDescriptor, type ProviderFactory, type ProviderSession, type TaskProvider, type WebhookResult } from '../../tasksync/contract';
 import type { ProviderModule } from '../../tasksync/registry';
 
 export type ApiFactory = (url: string, token: string) => VkApi;
@@ -11,7 +10,8 @@ export class VikunjaProvider implements TaskProvider {
   readonly descriptor: ProviderDescriptor;
   readonly capabilities: Capabilities = {
     fields: new Set(['title', 'due', 'note', 'progress', 'status', 'container', 'affiliation', 'parent']), relations: new Set(['link', 'dependency', 'handoff']),
-    maxTitle: 250, maxNote: 10000, webhooks: { https: false, publicAddress: false }, pollMs: 60_000, idlePollMs: 300_000,
+    // Vikunja has no description limit: opsmap's note limit applies.
+    maxTitle: 250, maxNote: 16000, webhooks: { https: false, publicAddress: false }, pollMs: 60_000, idlePollMs: 300_000,
     webhookHint: 'if changes in Vikunja take a minute to arrive, set VIKUNJA_OUTGOINGREQUESTS_ALLOWNONROUTABLEIPS=true on Vikunja (it refuses private addresses)',
   };
   constructor(readonly url: string, readonly makeApi: ApiFactory = (u, token) => new HttpVkApi(u, token)) {
@@ -22,13 +22,14 @@ export class VikunjaProvider implements TaskProvider {
       urls: { root: `${url}/projects/{root}`, container: `${url}/projects/{container}`, task: `${url}/tasks/{id}` },
     };
   }
-  /** An API client with this token, for the Vikunja sync. */
+  /** An API client with this token. */
   api(token: string): VkApi { return this.makeApi(this.url, token); }
   async verify(token: string): Promise<{ username: string }> {
     try { return { username: (await this.api(token).me()).username }; }
     catch (error) { if (error instanceof VkHttpError && (error.status === 401 || error.status === 403)) throw new RemoteAuthError(error.message); throw error; }
   }
-  connect(_token: string): ProviderSession { throw new Error('Vikunja syncs through its own service until the task sync engine runs it'); }
+  connect(token: string): ProviderSession { return vikunjaSession(this.api(token), this.descriptor.label); }
+  receiveWebhook(headers: Headers, body: string, secret: string): WebhookResult { return receiveVikunjaWebhook(headers, body, secret); }
 }
 export const vikunjaProvider = (url: string, makeApi?: ApiFactory) => new VikunjaProvider(url, makeApi);
 /** VIKUNJA_URL: the Vikunja origin (any path is dropped). */
@@ -40,7 +41,7 @@ export const vikunjaFactory: ProviderFactory = env => {
 };
 export const vikunja: ProviderModule = {
   id: 'vikunja', factory: vikunjaFactory,
-  // Webhooks registered before task sync became provider-neutral post here; the sync re-creates them on its next check.
+  // The path Vikunja webhooks have posted to since before task sync became provider-neutral: the engine keeps
+  // registering them there, so existing webhooks stay valid; the generic path works too.
   legacyRoutes: [{ provider: 'vikunja', hook: '/api/vikunja/hook/:map' }],
-  sync: ({ maps, provider, credentials, publicUrl }) => new VikunjaService(maps, provider as VikunjaProvider, credentials, publicUrl),
 };

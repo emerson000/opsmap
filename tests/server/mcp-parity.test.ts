@@ -170,6 +170,25 @@ describe('opsmap_command matches the command bar',()=>{
     expect(requested).toEqual([{action:'bind',provider:'fake',name:'Ops'},{action:'bind',provider:'fake',name:'Ops'},{action:'bind',provider:'vikunja',name:'Ops'},{action:'bind',provider:'vikunja',name:'Ops'}]);
     expect(await call('opsmap_help',{verb:'/vk'},false,sync)).toEqual({verb:'tasks',syntax:SYNTAX.tasks,help:`/tasks ${SYNTAX.tasks}`});
   });
+  it('unbinds a bound map the same way from both',async()=>{
+    const sync:SyncService={request:async()=>'not asked',webhook:()=>({status:404,trigger:false}),nudge:()=>{},start:()=>{},stop:async()=>{}};
+    served.registry=registry;served.sync=sync;features.taskSync=registry.descriptors();
+    engine.stop();engine.start();await settle();
+    // Bound as the task sync binds: a system op on each map.
+    const bound={verb:'tasks',args:{action:'bound',provider:'vikunja',label:'Vikunja',root:'39',title:'Ops',by:user.id,containers:{work:'40',household:'41'}}};
+    for(const hub of [bar,field])hub.internal('system','system',bound,'vikunja');
+    await settle();
+    expect(engine.doc.settings.taskSync).toMatchObject({provider:'vikunja',root:'39'});
+    expect(plain(field.doc)).toEqual(plain(bar.doc));
+    for(const text of ['/vk unbind','/vk unbind','/tasks unbind']) {
+      const b=await viaBar(text),m=await call('opsmap_command',{text,map:'field'},true,sync);
+      if(b.ok)expect(m,text).toMatchObject({ok:true,log:b.log});
+      else expect(m,text).toMatchObject({ok:false,error:b.error,...(b.at!==undefined?{at:b.at}:{})});
+      expect(plain(field.doc),text).toEqual(plain(bar.doc));
+    }
+    expect(bar.doc.log.at(-1)?.text).toBe('VIKUNJA UNBOUND FROM OPS');
+    expect(bar.doc.settings.taskSync).toBeUndefined();
+  });
   it('answers the shell verbs with their content',async()=>{
     await viaMcp('/new friend "Response team" as RSP');
     expect(await viaMcp('/find RSP')).toMatchObject({ok:true,log:'LOCATE RSP',unit:{designation:'RSP',title:'Response team',affiliation:'friend'}});

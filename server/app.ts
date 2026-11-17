@@ -18,7 +18,9 @@ import { SecretBox } from './secrets';
 import { ProviderRegistry } from './tasksync/registry';
 import { Credentials } from './tasksync/credentials';
 import { taskRequestArgs, taskSyncRoutes } from './tasksync/routes';
-import { createSyncService, LEGACY_ROUTES } from './providers';
+import { LEGACY_ROUTES } from './providers';
+import { TaskSyncEngine } from './tasksync/engine';
+import { pollOverride, webhookSetting } from './tasksync/delivery';
 export interface AppOptions { /** The task services; from the environment when not given. */ registry?:ProviderRegistry }
 export function createApp(config:Config,options:AppOptions={}) {
   const store=new Store(join(config.dataDir,'opsmap.db')),maps=new Maps(store,config.tz),hub=maps.default,auth=new Auth(store,config),app=new Hono();
@@ -26,7 +28,8 @@ export function createApp(config:Config,options:AppOptions={}) {
   // a service is configured); a map syncs with its binder's token.
   const registry=options.registry??ProviderRegistry.fromEnv(process.env);
   const credentials=registry.list().length?new Credentials(store,SecretBox.fromFile(config.secretKeyFile??join(config.dataDir,'secrets','master.key')),registry):undefined;
-  const sync=createSyncService({maps,registry,credentials,publicUrl:config.publicUrl});
+  // Polling always runs; webhooks to PUBLIC_URL speed it up where the service can reach it (TASKSYNC_WEBHOOKS, TASKSYNC_POLL_SECONDS).
+  const sync=credentials?new TaskSyncEngine(maps,registry,credentials,config.publicUrl,1000,pollOverride(process.env),{webhooks:webhookSetting(process.env.TASKSYNC_WEBHOOKS)}):undefined;
   app.use('*',async(c,next)=>{c.header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");c.header('X-Content-Type-Options','nosniff');c.header('Referrer-Policy','same-origin');c.header('X-Frame-Options','DENY');await next();});
   app.onError((err,c)=>{console.error('Request failed',c.req.path,errorCode(err));return c.json({error:'Request failed'},500);});
   app.get('/healthz',c=>c.json({ok:true,maps:maps.hubs.size}));
@@ -144,6 +147,8 @@ export function startServer(config:Config,options:{schedule?:boolean}&AppOptions
             const base={t:'welcome',me:{...user,admin:auth.admin(user)},users:store.users(),seq:hub.seq,map:hub.mapId,maps:maps.list(),taskSync:registry.descriptors(),...(fallback?{fallback:true}:{})};
             // Always replace the cache on reconnect, including after a restored or forked database.
             send(ws,{...base,doc:hub.doc});presence(hub.mapId);if(previous&&previous!==hub.mapId)presence(previous);
+            // Someone opened the map: pull soon when the task service's webhooks are not delivering.
+            sync?.nudge(hub.mapId);
           }else if(msg.t==='ping')send(ws,{t:'pong'});
           else if(!client.ready)throw new Error('Send hello first');
           else if(msg.t==='presence') {

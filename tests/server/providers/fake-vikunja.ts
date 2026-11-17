@@ -2,7 +2,7 @@
 // new projects get list and kanban views with To-Do, Doing and Done buckets, Done is the done bucket;
 // marking a task done moves it to Done, undone moves it to the default bucket, and a project move puts the
 // task in the new project's default bucket. `tick()` advances the clock that stamps `updated`.
-import type { VkApi, VkBucket, VkLabel, VkProject, VkRelationKind, VkTask, VkView, VkWebhook } from '../../server/vikunja/api';
+import type { VkApi, VkBucket, VkLabel, VkProject, VkRelationKind, VkTask, VkView, VkWebhook } from '../../../server/providers/vikunja/api';
 
 const INVERSE: Record<VkRelationKind, VkRelationKind> = { subtask: 'parenttask', parenttask: 'subtask', related: 'related', duplicateof: 'duplicates', duplicates: 'duplicateof', blocking: 'blocked', blocked: 'blocking', precedes: 'follows', follows: 'precedes', copiedfrom: 'copiedto', copiedto: 'copiedfrom' };
 

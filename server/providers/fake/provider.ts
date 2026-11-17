@@ -79,10 +79,11 @@ export class FakeProvider implements TaskProvider {
         const t=this.tasks.get(current.id);if(!t||t.deleted||t.root!==root.id)throw new Error(`No ${this.descriptor.label} task ${current.id}`);
         this.write(t,changes);t.updatedAt=this.now();return this.view(t);
       }),
+      deleteTask:(root,id)=>call('deleteTask',[root.id,id],()=>{const t=this.tasks.get(id);if(t?.root===root.id)this.tasks.delete(id);}),
       ...(this.capabilities.relations.size?{relate:(root:RemoteRoot,from:string,to:string,kind:RelationKind,add:boolean)=>call('relate',[root.id,from,to,kind,add],()=>{
         const t=this.tasks.get(from);if(!t)return;const rest=(t.relations??[]).filter(r=>!(r.kind===kind&&r.to===to));t.relations=add?[...rest,{kind,to}]:rest;
       })}:{}),
-      ensureWebhooks:(root,containers,target,secret,state,force)=>call('ensureWebhooks',[root.id,containers,target,force],()=>({hooks:containers.length,target,secret:secret.length,previous:state??null})),
+      ensureWebhooks:(root,containers,target,secret,_state,force)=>call('ensureWebhooks',[root.id,containers,target,force],()=>({hooks:containers.length,target,secret:secret.length})),
       removeWebhooks:(root,state)=>call('removeWebhooks',[root.id,state],()=>undefined),
     };
   }

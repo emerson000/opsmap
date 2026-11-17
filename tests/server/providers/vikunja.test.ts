@@ -1,19 +1,23 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { createHmac } from 'node:crypto';
-import { Store } from '../../server/db';
-import { Maps } from '../../server/maps';
-import { AFFILIATION_LABELS, VikunjaSync, htmlToText, textToHtml } from '../../server/vikunja/sync';
-import { ProviderRegistry } from '../../server/tasksync/registry';
-import { parse } from '../../src/core/commands/grammar';
-import { seedDoc } from '../../src/core/model/seed';
-import type { Doc, Unit } from '../../src/core/model/types';
+import { Store } from '../../../server/db';
+import { Maps } from '../../../server/maps';
+import { SecretBox } from '../../../server/secrets';
+import { AFFILIATION_LABELS, htmlToText, textToHtml } from '../../../server/providers/vikunja/adapter';
+import { VikunjaProvider } from '../../../server/providers/vikunja';
+import { TaskSyncEngine } from '../../../server/tasksync/engine';
+import { Credentials } from '../../../server/tasksync/credentials';
+import { ProviderRegistry } from '../../../server/tasksync/registry';
+import { parse } from '../../../src/core/commands/grammar';
+import { seedDoc } from '../../../src/core/model/seed';
+import type { Doc, Unit } from '../../../src/core/model/types';
 import { FakeVikunja } from './fake-vikunja';
 /** A remote id in the document (an opaque string) as the fake Vikunja's number. */
 const vkId = (x: { remote?: string } | undefined) => x?.remote === undefined ? undefined : Number(x.remote);
 const providers = ProviderRegistry.fromEnv({ VIKUNJA_URL: 'https://todo.example' }).info();
 
 const user = { id: 'u1', email: 'a@dev.local', name: 'Alice', initials: 'AL', color: '#000' };
-let store: Store, maps: Maps, vk: FakeVikunja, sync: VikunjaSync;
+let store: Store, maps: Maps, vk: FakeVikunja, sync: TaskSyncEngine, registry: ProviderRegistry, credentials: Credentials;
 const hub = () => maps.default;
 const doc = () => hub().doc;
 const unit = (d: string) => doc().units.find(u => u.designation === d)!;
@@ -26,15 +30,22 @@ const run = (text: string) => {
 };
 const bind = () => sync.request(hub().mapId, { action: 'bind', name: 'Ops' }, user, 'web');
 const taskOf = (d: string) => vk.tasksById.get(vkId(unit(d))!)!;
+/** An engine on this store: `hookBase` is PUBLIC_URL; the address resolves as a public one. Long debounce: cycles run when a test asks. */
+const engine = (hookBase: string | undefined, creds = credentials) => new TaskSyncEngine(maps, registry, creds, hookBase, 3_600_000, undefined, { resolve: async () => ['93.184.216.34'] });
+/** A delivery to the Vikunja hook: accepted (200) or not. */
+const webhook = (mapId: string, body: string, signature: string | undefined) => sync.webhook('vikunja', mapId, new Headers(signature === undefined ? {} : { 'x-vikunja-signature': signature }), body).status === 200;
 
 beforeEach(async () => {
   store = new Store(':memory:');
   maps = new Maps(store, 'Europe/London');
   hub().import(user.id, seedDoc(new Date()));
   vk = new FakeVikunja();
-  // No debounce timers in tests: cycles run when a test asks.
+  registry = new ProviderRegistry([new VikunjaProvider('https://todo.example', () => vk)]);
   // Alice has connected her token; anyone else has none.
-  sync = new VikunjaSync(maps, id => id === user.id ? vk : undefined, 'https://todo.example', 'https://opsmap.example', 3_600_000, 3_600_000);
+  credentials = new Credentials(store, SecretBox.fromKey(Buffer.alloc(32, 7)), registry);
+  await credentials.save(user.id, 'vikunja', 'tk_good_token');
+  // No debounce timers in tests: cycles run when a test asks.
+  sync = engine('https://opsmap.example');
 });
 
 describe('Vikunja sync', () => {
@@ -205,12 +216,12 @@ describe('Vikunja sync', () => {
 
   it('accepts only webhooks signed with the map secret', async () => {
     await bind();
-    const secret = (store.db.prepare('SELECT secret FROM vk_maps').get() as { secret: string }).secret;
+    const secret = (store.db.prepare('SELECT secret FROM ts_maps').get() as { secret: string }).secret;
     const body = JSON.stringify({ event_name: 'task.updated' });
-    expect(sync.webhook(hub().mapId, body, createHmac('sha256', secret).update(body).digest('hex'))).toBe(true);
-    expect(sync.webhook(hub().mapId, body, createHmac('sha256', 'wrong').update(body).digest('hex'))).toBe(false);
-    expect(sync.webhook(hub().mapId, body, undefined)).toBe(false);
-    expect(sync.webhook('other', body, 'x')).toBe(false);
+    expect(webhook(hub().mapId, body, createHmac('sha256', secret).update(body).digest('hex'))).toBe(true);
+    expect(webhook(hub().mapId, body, createHmac('sha256', 'wrong').update(body).digest('hex'))).toBe(false);
+    expect(webhook(hub().mapId, body, undefined)).toBe(false);
+    expect(webhook('other', body, 'x')).toBe(false);
   });
 
   it('status reports the binding', async () => {
@@ -497,7 +508,7 @@ describe('Vikunja webhooks', () => {
   const target = () => `https://opsmap.example/api/vikunja/hook/${hub().mapId}`;
   const hooksOn = (project: number) => vk.hooks.get(project) ?? [];
   const sign = (body: string) => {
-    const secret = (store.db.prepare('SELECT secret FROM vk_maps').get() as { secret: string }).secret;
+    const secret = (store.db.prepare('SELECT secret FROM ts_maps').get() as { secret: string }).secret;
     return createHmac('sha256', secret).update(body).digest('hex');
   };
   it('bind registers one webhook per sector project, for tasks and their relations created, updated and deleted', async () => {
@@ -529,7 +540,7 @@ describe('Vikunja webhooks', () => {
     await bind();
     const body = JSON.stringify({ event_name: 'task.updated', data: { task: { id: vkId(unit('LEAK')) } } });
     vk.edit(vkId(unit('LEAK'))!, { title: 'Changed in Vikunja' });
-    expect(sync.webhook(hub().mapId, body, sign(body))).toBe(true);
+    expect(webhook(hub().mapId, body, sign(body))).toBe(true);
     await new Promise(r => setTimeout(r, 700));
     await sync.run(hub().mapId);                       // wait for the scheduled cycle to settle
     expect(unit('LEAK').title).toBe('Changed in Vikunja');
@@ -544,10 +555,10 @@ describe('Vikunja webhooks', () => {
     maps.remove(info.id);
     await new Promise(r => setTimeout(r, 20));
     expect(projects.every(p => hooksOn(p).length === 0)).toBe(true);
-    expect(store.db.prepare('SELECT * FROM vk_maps WHERE map_id=?').get(info.id)).toBeUndefined();
+    expect(store.db.prepare('SELECT * FROM ts_maps WHERE map_id=?').get(info.id)).toBeUndefined();
   });
   it('without a reachable PUBLIC_URL there are no webhooks, and status says it polls', async () => {
-    const local = new VikunjaSync(maps, id => id === user.id ? vk : undefined, 'https://todo.example', undefined, 3_600_000, 3_600_000);
+    const local = engine(undefined);
     await local.request(hub().mapId, { action: 'bind', name: 'Ops' }, user, 'web');
     expect(doc().sectors.every(s => hooksOn(vkId(s)!).length === 0)).toBe(true);
     expect(await local.request(hub().mapId, { action: 'status' }, user, 'web')).toMatch(/polling every minute \(webhooks need PUBLIC_URL/);
@@ -563,7 +574,7 @@ describe('Vikunja tokens', () => {
     expect(doc().settings.taskSync?.by).toBe(user.id);
     expect(await sync.request(hub().mapId, { action: 'sync' }, bob, 'web')).toMatch(/^VIKUNJA SYNC — /);
     // The binder's token is gone: syncing says so instead of using anyone else's.
-    const orphan = new VikunjaSync(maps, () => undefined, 'https://todo.example', undefined, 3_600_000, 3_600_000);
+    const orphan = engine(undefined, new Credentials(store, SecretBox.fromKey(Buffer.alloc(32, 9)), registry));
     await expect(orphan.run(hub().mapId)).rejects.toThrow(/No Vikunja token for u1: connect it in the menu → Vikunja/);
     expect(await orphan.request(hub().mapId, { action: 'status' }, bob, 'web')).toMatch(/by u1 \(no token: connect it in the menu → Vikunja\)/);
     await orphan.stop();

@@ -1,10 +1,10 @@
 // The suite every task provider adapter must pass (server/tasksync/contract.ts). It drives the adapter only through
 // the contract, so the engine can rely on these behaviors for any provider. `deleteRemote` removes a task the way a
-// user would in the service itself; without it, that test is skipped.
+// user would in the service itself; a subject without it fails that test unless it says `noRemoteDelete` (and why).
 import { describe, expect, it } from 'vitest';
 import type { FieldKey, ProviderSession, RemoteTask, TaskProvider, TaskWrite } from '../../server/tasksync/contract';
 
-export interface ContractSubject { provider: TaskProvider; token: string; deleteRemote?: (id: string) => Promise<void> }
+export interface ContractSubject { provider: TaskProvider; token: string; deleteRemote?: (id: string) => Promise<void>; /** Why this subject cannot delete a task remotely. */ noRemoteDelete?: string }
 
 const TZ = 'Europe/London';
 /** The fields of a task that the provider declares, for comparing what went in with what came back. */
@@ -69,20 +69,25 @@ export function providerContract(name: string, make: () => ContractSubject) {
       expect(declared((await session.getTask(root, created.id, TZ))!, fields)).toEqual(after);
     });
 
-    it('a created child has its parent and no container', async ({ skip }) => {
+    it('a created child has its parent, and no container or its parent’s', async ({ skip }) => {
       const { provider, session } = open();
       if (!provider.capabilities.fields.has('parent')) skip();
       const root = await session.resolveRoot(unique('Ops'));
       const c = await session.ensureContainers(root, [{ sectorId: 'work', name: 'Work' }], {});
       const parent = await session.createTask(root, { title: 'Move house', container: c.work }, TZ);
       const child = await session.createTask(root, { title: 'Book the van', container: c.work, parent: parent.id }, TZ);
-      expect(child).toMatchObject({ parent: parent.id, container: null });
-      expect((await session.snapshot(root, c, TZ)).tasks.find(t => t.id === child.id)).toMatchObject({ parent: parent.id, container: null });
+      // A provider that keeps subtasks in a container of their own (Vikunja) reports it; one that nests them under
+      // the parent (Asana) reports none, and the sync then takes the parent's sector.
+      expect(child.parent).toBe(parent.id);
+      expect([null, c.work]).toContain(child.container);
+      const seen = (await session.snapshot(root, c, TZ)).tasks.find(t => t.id === child.id);
+      expect(seen).toMatchObject({ parent: parent.id, container: child.container });
     });
 
     it('getTask returns null after a remote delete', async ({ skip }) => {
       const subject = open();
-      if (!subject.deleteRemote) skip();
+      if (subject.noRemoteDelete) skip(subject.noRemoteDelete);
+      expect(subject.deleteRemote, 'deleteRemote (or noRemoteDelete with a reason)').toBeTypeOf('function');
       const root = await subject.session.resolveRoot(unique('Ops'));
       const c = await subject.session.ensureContainers(root, [{ sectorId: 'work', name: 'Work' }], {});
       const task = await subject.session.createTask(root, { title: 'Gone soon', container: c.work }, TZ);

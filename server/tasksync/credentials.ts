@@ -9,7 +9,6 @@ import { migrateTokens, tokenOwner } from './migrate';
 export interface TaskAccount { connected:boolean; username?:string; savedAt?:string }
 export class Credentials {
   constructor(private readonly store:Store,private readonly box:SecretBox,private readonly registry:ProviderRegistry) {
-    store.db.exec('CREATE TABLE IF NOT EXISTS ts_tokens(user_id TEXT NOT NULL,provider TEXT NOT NULL,sealed TEXT NOT NULL,username TEXT NOT NULL,saved_at TEXT NOT NULL,PRIMARY KEY(user_id,provider))');
     migrateTokens(store,box);
   }
   private provider(id:string):TaskProvider {const p=this.registry.get(id);if(!p)throw new Error(`Unknown task service: ${id}`);return p;}

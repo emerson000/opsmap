@@ -1,17 +1,12 @@
 // The task services this server has: each provider module's factory reads its own environment and returns a provider
 // or nothing (server/providers/index.ts lists the modules). Nothing outside server/providers/ names a provider.
 import type { ProviderInfo } from '../../src/core/commands/grammar';
-import type { Maps } from '../maps';
 import type { ProviderDescriptor, ProviderFactory, TaskProvider } from './contract';
-import type { Credentials } from './credentials';
-import type { SyncService } from './service';
 import { PROVIDERS } from '../providers';
 export interface ProviderModule {
   id:string; factory:ProviderFactory;
-  /** Old webhook paths (with :map) that still reach this provider's deliveries, until its webhooks are re-registered. */
+  /** Older webhook paths (with :map) that reach this provider's deliveries; the first is where the engine registers its webhooks. */
   legacyRoutes?:{ provider:string; hook:string }[];
-  /** Until the provider-neutral engine runs every provider: the module's own sync service, when it has one. */
-  sync?(context:{ maps:Maps; provider:TaskProvider; credentials:Credentials; publicUrl:string }):SyncService;
 }
 export class ProviderRegistry {
   private readonly byId=new Map<string,TaskProvider>();

@@ -6,11 +6,9 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 
 const ROOT = join(import.meta.dirname, '..');
-const WORDS = /vikunja|asana|vkapi|\.vk\b|\bvk[_-]/i;
+const WORDS = /vikunja|asana|vkapi|\.vk\b|\bvk[_-]|['"]vk['"]|\bvk:/i;
 const ALLOWED = [
   'server/providers/', 'src/core/model/legacy.ts', 'server/tasksync/migrate.ts',
-  // Temporary: the Vikunja sync itself, until it runs through the provider-neutral engine (Task 4 removes this entry).
-  'server/vikunja/',
 ];
 
 function files(dir: string): string[] {
@@ -28,7 +26,7 @@ describe('architecture', () => {
     expect(violations(paths)).toEqual([]);
   });
   it('reports the file and line', () => {
-    const text: Record<string, string> = { 'src/a.ts': 'ok\nconst x = api.vk;\n', 'server/b.ts': 'VkApi\n', 'server/providers/c.ts': 'vikunja', 'src/d.svelte': 'data-testid="vk-sync"\n// Asana', 'src/e.ts': 'tasks vkWaiting /vk' };
-    expect(violations(Object.keys(text), p => text[p])).toEqual(['src/a.ts:2: const x = api.vk;', 'server/b.ts:1: VkApi', 'src/d.svelte:1: data-testid="vk-sync"', 'src/d.svelte:2: // Asana']);
+    const text: Record<string, string> = { 'src/a.ts': 'ok\nconst x = api.vk;\n', 'server/b.ts': 'VkApi\n', 'server/providers/c.ts': 'vikunja', 'src/d.svelte': 'data-testid="vk-sync"\n// Asana', 'src/e.ts': 'tasks vkWaiting /vk', 'src/f.ts': "verb === 'vk'\nconst a = \"vk\";\nowner vk:u1" };
+    expect(violations(Object.keys(text), p => text[p])).toEqual(['src/a.ts:2: const x = api.vk;', 'server/b.ts:1: VkApi', 'src/d.svelte:1: data-testid="vk-sync"', 'src/d.svelte:2: // Asana', "src/f.ts:1: verb === 'vk'", 'src/f.ts:2: const a = "vk";', 'src/f.ts:3: owner vk:u1']);
   });
 });

@@ -15,9 +15,11 @@ export interface RemoteRoot { id:string; title:string }
 export interface RemoteContainer { id:string; name:string; archived?:boolean }
 export interface RemoteTask { id:string; title:string; note:string; due:string|null /* YYYY-MM-DD in the map zone */; status:RemoteStatus|null /* null: a state opsmap does not track */;
   progress:number|null; container:string|null; parent:string|null; affiliations:Affiliation[] /* identity tags/labels found, possibly several */; updatedAt:string;
-  relations?:{ kind:RelationKind; to:string }[] }
+  relations?:{ kind:RelationKind; to:string }[] /* from this task's side: link, this task depends on `to`, this task hands off to `to` */;
+  dueAt?:string|null /* the due instant (ISO), when the service keeps a time of day */;
+  parents?:string[] /* every parent task, when the service allows several; `parent` is then the first */ }
 export interface Snapshot { tasks:RemoteTask[]; unmatched:{ container:RemoteContainer; open:number }[] }
-export type TaskWrite=Partial<Pick<RemoteTask,'title'|'note'|'due'|'status'|'progress'|'container'|'parent'>>&{ affiliation?:Affiliation|null /* null: remove the identity tags or labels opsmap manages */ };
+export type TaskWrite=Partial<Pick<RemoteTask,'title'|'note'|'due'|'dueAt'|'status'|'progress'|'container'|'parent'>>&{ affiliation?:Affiliation|null /* null: remove the identity tags or labels opsmap manages */ };
 export interface WebhookResult { status:number; headers?:Record<string,string>; store?:unknown; trigger:boolean }
 export class RateLimited extends Error { constructor(readonly retryAfterS:number){ super(`rate limited, retrying in ${retryAfterS}s`); } }
 export class RemoteAuthError extends Error {}
@@ -30,7 +32,8 @@ export interface ProviderSession {
   snapshot(root:RemoteRoot, containers:Record<string,string>, tz:string):Promise<Snapshot>;
   getTask(root:RemoteRoot, id:string, tz:string):Promise<RemoteTask|null>; // null = deleted or no longer visible
   createTask(root:RemoteRoot, fields:TaskWrite&{ title:string; container:string }, tz:string):Promise<RemoteTask>;
-  updateTask(root:RemoteRoot, current:RemoteTask, changes:TaskWrite, tz:string):Promise<RemoteTask>;
+  updateTask(root:RemoteRoot, current:RemoteTask, changes:TaskWrite, tz:string):Promise<RemoteTask>; // a parent change replaces current.parents
+  deleteTask?(root:RemoteRoot, id:string):Promise<void>;                     // takes back a task made for a unit that was undone meanwhile
   relate?(root:RemoteRoot, from:string, to:string, kind:RelationKind, add:boolean):Promise<void>;
   ensureWebhooks?(root:RemoteRoot, containers:string[], target:string, secret:string, state:unknown, force:boolean):Promise<unknown /* new state */>;
   removeWebhooks?(root:RemoteRoot, state:unknown):Promise<void>;

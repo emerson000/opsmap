@@ -1,4 +1,4 @@
-// Vikunja REST API (v1 paths, Vikunja 2.x), only the calls the sync needs. The sync talks to `VkApi`, so tests
+// Vikunja REST API (v1 paths, Vikunja 2.x), only the calls the adapter needs. The adapter talks to `VkApi`, so tests
 // can use an in-memory fake.
 
 export interface VkView { id: number; view_kind: 'list' | 'gantt' | 'table' | 'kanban'; bucket_configuration_mode?: string; done_bucket_id?: number; default_bucket_id?: number; }
@@ -46,7 +46,7 @@ export interface VkApi {
 }
 
 export class VkHttpError extends Error {
-  constructor(readonly status: number, message: string) { super(message); }
+  constructor(readonly status: number, message: string, readonly retryAfterS?: number) { super(message); }
 }
 
 export class HttpVkApi implements VkApi {
@@ -65,7 +65,8 @@ export class HttpVkApi implements VkApi {
     if (!res.ok) {
       let message = `${res.status}`;
       try { message = (JSON.parse(text) as { message?: string }).message ?? message; } catch { /* not JSON */ }
-      throw new VkHttpError(res.status, `Vikunja ${method} ${path.split('?')[0]}: ${message}`);
+      const retry = Number(res.headers.get('retry-after'));
+      throw new VkHttpError(res.status, `Vikunja ${method} ${path.split('?')[0]}: ${message}`, Number.isFinite(retry) && retry > 0 ? retry : undefined);
     }
     return { data: (text ? JSON.parse(text) : null) as T, headers: res.headers };
   }

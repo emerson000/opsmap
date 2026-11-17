@@ -5,7 +5,7 @@ import { providerContract } from './provider-contract';
 import { RateLimited, RemoteAuthError } from '../../server/tasksync/contract';
 
 providerContract('fake', () => { const provider = new FakeProvider(); return { provider, token: 'fake-alice', deleteRemote: async id => provider.remoteDelete(id) }; });
-providerContract('fake without progress, parent or relations', () => ({ provider: new FakeProvider({ fields: ['title', 'due', 'note', 'status', 'container'], relations: [] }), token: 'fake-alice' }));
+providerContract('fake without progress, parent or relations', () => { const provider = new FakeProvider({ fields: ['title', 'due', 'note', 'status', 'container'], relations: [] }); return { provider, token: 'fake-alice', deleteRemote: async id => provider.remoteDelete(id) }; });
 
 describe('FakeProvider', () => {
   it('is registered only for tests that ask for it', () => {
