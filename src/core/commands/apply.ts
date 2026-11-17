@@ -1,5 +1,5 @@
 import ms from 'milsymbol';
-import type { Affiliation, Command, CommandPost, ControlMeasure, Sector, Doc, Echelon, FunctionKey, Order, Ring, Unit, Touched } from '../model/types';
+import { SYNC_FIELDS, type Affiliation, type Command, type CommandPost, type ControlMeasure, type Sector, type Doc, type Echelon, type FunctionKey, type Order, type Ring, type SyncField, type Unit, type Touched } from '../model/types';
 import { claimDesignation, designationOfTitle, effectiveCondition, freeDesignationForTitle } from '../model/derive';
 import { ECHELONS, echelonIndex } from '../model/echelon';
 import { FUNCTIONS } from '../model/functions';
@@ -453,6 +453,8 @@ export interface RemoteChanges {title?:string;dueAt?:string|null;note?:string;st
 function pushLog(doc:Doc,at:string,text:string,raw?:string):void {
   doc.log.push({id:`log${1+Math.max(0,...doc.log.map(l=>Number(l.id.replace(/^log/,''))||0))}`,at,text,...(raw?{cmd:raw}:{})});
 }
+export const FIELD_HELP='Expected identity, state, due, note or progress';
+const syncField=(value:unknown):SyncField=>{requireThat(typeof value==='string'&&(SYNC_FIELDS as readonly string[]).includes(value),FIELD_HELP);return value as SyncField;};
 export const NOT_BOUND='This map is not bound to a task service: /tasks bind "‹project›"';
 export const boundElsewhere=(bound:{label:string;title:string})=>`Bound to ${bound.label} project ${bound.title}: /tasks unbind first`;
 const article=(word:string)=>/^[aeiou]/i.test(word)?'An':'A';
@@ -467,7 +469,10 @@ function tasks(doc:Doc,cmd:Command,now:Date):MutationResult {
     const provider=remoteId(a.provider,'task service'),label=text(a.label,'task service label'),root=remoteId(a.root,`${label} project`),title=text(a.title,`${label} project title`);
     const containers=(a.containers??{}) as Record<string,unknown>;requireThat(typeof containers==='object'&&!Array.isArray(containers),'Invalid sector projects');
     requireThat(!bound||bound.provider===provider&&bound.root===root,bound?boundElsewhere(bound):'');
-    doc.settings.taskSync={provider,label,root,title,...(typeof a.by==='string'&&a.by?{by:a.by}:{})};
+    // Fields bound `without` (D21); a rebind that names none keeps the switches the map has.
+    requireThat(a.off===undefined||Array.isArray(a.off),FIELD_HELP);
+    const named=Array.isArray(a.off)?a.off.map(syncField):undefined,off=named?SYNC_FIELDS.filter(f=>named.includes(f)):bound?.off;
+    doc.settings.taskSync={provider,label,root,title,...(typeof a.by==='string'&&a.by?{by:a.by}:{}),...(off?.length?{off}:{})};
     for(const s of doc.sectors)if(containers[s.id]!==undefined)s.remote=remoteId(containers[s.id],'sector project');
     const log=`${label.toUpperCase()} BOUND TO ${title.toUpperCase()}`;pushLog(doc,at,log,cmd.raw);return {doc,log};
   }
@@ -477,6 +482,12 @@ function tasks(doc:Doc,cmd:Command,now:Date):MutationResult {
   if(action==='unbind'){
     delete doc.settings.taskSync;for(const s of doc.sectors)delete s.remote;for(const u of doc.units)delete u.remote;
     log=`${LABEL} UNBOUND FROM ${bound.title.toUpperCase()}`;
+  }else if(action==='field'){
+    // A per-map switch (D21): the sync stops pushing and pulling that field. A user op, so /undo turns it back.
+    const field=syncField(a.field);requireThat(typeof a.on==='boolean','Expected on or off');
+    const off=SYNC_FIELDS.filter(f=>f===field?!a.on:bound.off?.includes(f)),{off:_off,...rest}=bound;
+    doc.settings.taskSync=off.length?{...rest,off}:rest;
+    log=`${LABEL} ${field.toUpperCase()} SYNC ${a.on?'ON':'OFF'}`;
   }else if(action==='containers'){
     const containers=a.containers as Record<string,unknown>;requireThat(containers&&typeof containers==='object','Invalid sector projects');
     const names:string[]=[];

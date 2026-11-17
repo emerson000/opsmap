@@ -2,8 +2,8 @@
 // each sector a container, each unit a task. The engine talks to the service only through ProviderSession and reads
 // what it may sync from the provider's capabilities; it never asks which provider it has. Pulled changes become
 // ordinary ops (`tasks` add, pull, gone, relate) by the system user, with the provider's id as via.
-import type { Command, Doc, Order, Unit } from '../../src/core/model/types';
-import { boundElsewhere, NOT_BOUND, type RemoteChanges } from '../../src/core/commands/apply';
+import { SYNC_FIELDS, type Command, type Doc, type Order, type Unit } from '../../src/core/model/types';
+import { boundElsewhere, FIELD_HELP, NOT_BOUND, type RemoteChanges } from '../../src/core/commands/apply';
 import { DEFAULT_TZ } from '../../src/core/model/time';
 import type { Maps } from '../maps';
 import type { Hub, Op } from '../hub';
@@ -12,10 +12,10 @@ import { RateLimited, RemoteAuthError, type Delivery, type FieldKey, type Provid
 import type { Credentials } from './credentials';
 import type { ProviderRegistry } from './registry';
 import type { SyncService } from './service';
-import { SyncTables } from './links';
+import { SyncTables, type Base } from './links';
 import { migrateTaskSync } from './migrate';
 import { classifyPublicUrl, lookupAll, type Reachability } from './reachability';
-import { FIELD_KEY, FIELDS, NOTE_LIMIT, dayInstant, mergeFields, sectorOf, syncable, taskFields, unitFields, type Field, type Fields, type Limits } from './merge';
+import { FIELD_KEY, FIELDS, NOTE_LIMIT, SWITCHED, dayInstant, mergeFields, sectorOf, syncable, taskFields, unitFields, type Field, type Fields, type Limits } from './merge';
 import { checkDue, deliveryMode, type DeliveryRecord, deliveryStatus, handshakeMissing, handshakeReason, NUDGE_DELAY_MS, NUDGE_EVERY_MS, pollIntervals, REACH_MS, retryDelay, webhooksBlocked, type WebhookSetting } from './delivery';
 
 export interface Timers { set(fn:()=>void,ms:number):unknown; clear(handle:unknown):void }
@@ -30,7 +30,7 @@ interface Info { lastSync?:string; lastAttempt?:number; lastError?:string; pushe
 interface Stats { pushed:number; pulled:number; created:number; added:number }
 type Guard=(what:string,fn:()=>Promise<void>)=>Promise<void>;
 /** What one cycle works with. */
-interface Cycle { mapId:string; provider:TaskProvider; session:ProviderSession; root:RemoteRoot; tz:string; limits:Limits; declared:ReadonlySet<Field>; stats:Stats }
+interface Cycle { mapId:string; provider:TaskProvider; session:ProviderSession; root:RemoteRoot; tz:string; limits:Limits; declared:ReadonlySet<Field>; /** Switched off on this map (D21). */ off:ReadonlySet<Field>; stats:Stats }
 const SYSTEM='system';
 const message=(error:unknown)=>error instanceof Error?error.message:String(error);
 const iso=(ms:number)=>new Date(ms).toISOString();
@@ -139,6 +139,9 @@ export class TaskSyncEngine implements SyncService {
     if(!name||name.length>250)throw new Error(`Expected a ${label} ${rootNoun} name`);
     const same=(b:{provider:string;title:string})=>b.provider===id&&b.title.toLowerCase()===name.toLowerCase();
     const bound=hub.doc.settings.taskSync;if(bound&&!same(bound))throw new Error(boundElsewhere(bound));
+    // `without ‹fields›` (D21): bound with those already off.
+    if(args.off!==undefined&&!(Array.isArray(args.off)&&args.off.every(f=>(SYNC_FIELDS as readonly unknown[]).includes(f))))throw new Error(FIELD_HELP);
+    const off=Array.isArray(args.off)?SYNC_FIELDS.filter(f=>(args.off as unknown[]).includes(f)):undefined;
     const session=this.sessionFor(user.id,p);
     const check=()=>{
       const now=this.hub(mapId).doc.settings.taskSync,owner=this.tables.row(mapId)?.owner;
@@ -154,7 +157,7 @@ export class TaskSyncEngine implements SyncService {
       check();
       this.tables.ensure(mapId,id);this.tables.set(mapId,{owner:user.id});
       // Recorded by the system, so a user's /undo cannot strip the binding from under linked units: /tasks unbind does that.
-      const op=this.hub(mapId).internal(SYSTEM,'system',{verb:'tasks',args:{action:'bound',provider:id,label,root:root.id,title:root.title,by:user.id,containers}},source==='mcp'?'mcp':'web');
+      const op=this.hub(mapId).internal(SYSTEM,'system',{verb:'tasks',args:{action:'bound',provider:id,label,root:root.id,title:root.title,by:user.id,containers,...(off?{off}:{})}},source==='mcp'?'mcp':'web');
       return `${op.log} — ${await this.cycle(mapId,true)}`;
     });
   }
@@ -168,7 +171,7 @@ export class TaskSyncEngine implements SyncService {
     const token=!by||this.credentials.token(by,d.id)?'':` (no token: connect it in the menu → ${d.label})`;
     const archived=s?.archived?.length?` · not synced, ${d.containerNoun} archived in ${d.label}: ${s.archived.join(', ')}`:'';
     const unmatched=s?.unmatched?.length?` · not synced: ${s.unmatched.map(u=>`${d.containerNoun} ${u.name} (${u.open} task${u.open===1?'':'s'})`).join(', ')}`:'';
-    return `${LABEL}: bound to ${bound.title} (${d.urls.root.replace('{root}',encodeURIComponent(bound.root))}) by ${owner}${token} · ${hub.doc.sectors.filter(x=>x.remote).length} sectors · ${linked} units linked · `+
+    return `${LABEL}: bound to ${bound.title} (${d.urls.root.replace('{root}',encodeURIComponent(bound.root))}) by ${owner}${token} · ${hub.doc.sectors.filter(x=>x.remote).length} sectors · ${linked} units linked · ${bound.off?.length?`not synced: ${bound.off.join(', ')} · `:''}`+
       `${deliveryStatus(this.delivery(hub.mapId),this.hookCount(hub.mapId),p.capabilities.webhookHint)} · last sync ${time(s?.lastSync)}${archived}${unmatched}${s?.lastError?` · last error: ${s.lastError}`:''}`;
   }
 
@@ -254,8 +257,11 @@ export class TaskSyncEngine implements SyncService {
   }
 
   // ---------- one sync cycle ----------
-  /** The fields this map syncs: what the provider declares. (Per-map switches will take theirs off here.) */
-  private effectiveFields(p:TaskProvider,_doc:Doc):ReadonlySet<Field> {return new Set(FIELDS.filter(k=>p.capabilities.fields.has(FIELD_KEY[k])));}
+  /** The fields this map syncs: what the provider declares, less the ones the map switched off (D21). */
+  private effectiveFields(p:TaskProvider,doc:Doc):ReadonlySet<Field> {const off=this.switchedOff(doc);return new Set(FIELDS.filter(k=>p.capabilities.fields.has(FIELD_KEY[k])&&!off.has(k)));}
+  private switchedOff(doc:Doc):ReadonlySet<Field> {return new Set((doc.settings.taskSync?.off??[]).map(f=>SWITCHED[f]));}
+  /** The agreed values as stored, with the fields that were off when they were agreed. */
+  private record(c:Cycle,f:Fields):Base {return {...f,...(c.off.size?{off:FIELDS.filter(k=>c.off.has(k))}:{})};}
   private system(mapId:string,p:TaskProvider,args:Record<string,unknown>):Op {
     const cmd:Command={verb:'tasks',args};
     return this.hub(mapId).internal(SYSTEM,'system',cmd,p.descriptor.id);
@@ -274,7 +280,7 @@ export class TaskSyncEngine implements SyncService {
       const session=this.sessionFor(owner,p);
       await this.reachability();
       const first=this.hub(mapId).doc,tz=first.settings.tz??DEFAULT_TZ,root:RemoteRoot={id:binding.root,title:binding.title};
-      const c:Cycle={mapId,provider:p,session,root,tz,limits:{maxTitle:p.capabilities.maxTitle,maxNote:Math.min(p.capabilities.maxNote,NOTE_LIMIT)},declared:this.effectiveFields(p,first),stats};
+      const c:Cycle={mapId,provider:p,session,root,tz,limits:{maxTitle:p.capabilities.maxTitle,maxNote:Math.min(p.capabilities.maxNote,NOTE_LIMIT)},declared:this.effectiveFields(p,first),off:this.switchedOff(first),stats};
       // Sectors without a container (added since, or the container was deleted) get one.
       const known=Object.fromEntries(first.sectors.filter(s=>s.remote!==undefined).map(s=>[s.id,s.remote!]));
       const containers=await session.ensureContainers(root,first.sectors.map(s=>({sectorId:s.id,name:s.name})),known);
@@ -366,7 +372,7 @@ export class TaskSyncEngine implements SyncService {
             ...(has('status')&&f.status?{status:f.status}:{}),...(has('progress')?{progress:(f.progress??0)/100}:{}),...(has('affiliation')?{affiliation:u.affiliation}:{})},tz);
           // The unit went away while the service answered (an undo of its capture): take the new task back.
           if(!this.hub(mapId).doc.units.some(x=>x.id===u.id)){await session.deleteTask?.(root,made.id).catch(()=>undefined);return;}
-          links[u.id]=made.id;this.tables.setBase(mapId,u.id,made.id,f);c.stats.created++;fetched.set(made.id,{...made,parent:null,parents:[],relations:[]});
+          links[u.id]=made.id;this.tables.setBase(mapId,u.id,made.id,this.record(c,f));c.stats.created++;fetched.set(made.id,{...made,parent:null,parents:[],relations:[]});
         });
       }
     }finally{
@@ -392,15 +398,21 @@ export class TaskSyncEngine implements SyncService {
           ...(has('due')&&t.due!==null?{dueAt:t.dueAt??dayInstant(t.due,tz)}:{}),...(has('note')&&f.note?{note:f.note.slice(0,NOTE_LIMIT)}:{}),
           ...(has('status')&&f.status&&f.status!=='todo'?{status:f.status}:{}),...(has('affiliation')&&f.affiliation&&f.affiliation!=='pending'?{affiliation:f.affiliation}:{})});
         const now=this.hub(mapId).doc,u=now.units.find(x=>x.remote===t.id)!;
-        this.tables.setBase(mapId,u.id,t.id,unitFields(u,now,limits));c.stats.added++;
+        this.tables.setBase(mapId,u.id,t.id,this.record(c,unitFields(u,now,limits)));c.stats.added++;
       });
     }
   }
 
   /** Three-way merge of one linked unit and its task. Returns 1 when the task was updated. */
   private async merge(c:Cycle,u:Unit,t:RemoteTask):Promise<number> {
-    const {mapId,session,root,tz,limits,declared}=c,doc=this.hub(mapId).doc;
-    const U=unitFields(u,doc,limits),T=taskFields(t,u,doc,limits),B=this.tables.base(mapId,u.id);
+    const {mapId,session,root,tz,limits,declared,off}=c,doc=this.hub(mapId).doc;
+    const U=unitFields(u,doc,limits),T=taskFields(t,u,doc,limits),saved=this.tables.base(mapId,u.id);
+    // A field switched back on since the values were agreed is re-based (D21): the task's value counts as agreed, so
+    // opsmap's value wins once and nothing old comes back from the service.
+    const back=(saved?.off??[]).filter(k=>declared.has(k)),B:Fields|undefined=saved&&back.length?{...saved,...Object.fromEntries(back.map(k=>[k,T[k]]))}:saved;
+    // Identity switched off since (or a task just linked while it is off): the identity tags or labels opsmap manages
+    // come off the task, once; the base records it.
+    const clear=off.has('affiliation')&&c.provider.capabilities.fields.has('affiliation')&&!saved?.off?.includes('affiliation')&&t.affiliations.length>0;
     const {merged,pull,push:wanted}=mergeFields(U,T,B,Date.parse(u.updatedAt)>=Date.parse(t.updatedAt),t.progress,declared);
     let push=wanted;
     if(Object.keys(pull).length) {
@@ -426,11 +438,12 @@ export class TaskSyncEngine implements SyncService {
     // Identity: written when the task's identity is not exactly the merged one. Several are the user's ambiguity to
     // settle in the service: they are left alone.
     if(declared.has('affiliation')&&merged.affiliation&&t.affiliations.length<=1&&t.affiliations[0]!==merged.affiliation)write.affiliation=merged.affiliation;
+    if(clear)write.affiliation=null;
     let pushed=0;
     if(Object.keys(write).length){await session.updateTask(root,t,write,tz);pushed=1;}
     // The agreed values are what was merged, not the unit read again: an edit made during the push must still count
     // as a change on the next cycle.
-    this.tables.setBase(mapId,u.id,t.id,merged);
+    this.tables.setBase(mapId,u.id,t.id,this.record(c,merged));
     return pushed;
   }
   /** The declared fields of the task as opsmap wants it. */

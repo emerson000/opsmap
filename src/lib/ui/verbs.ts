@@ -117,9 +117,11 @@ export const VERB_SLOTS: readonly VerbSlot[] = [
   // Map-wide verbs that the Situation view (and a sector's task sync section) offers
   { verb: 'intent', kinds: ['map'], slots: ['"‹one line›"'], control: 'situation-intent', label: 'Intent…', menu: 'form' },
   { verb: 'sitrep', kinds: ['map'], slots: ['[copy]'], control: 'situation-sitrep', label: 'SITREP', menu: 'run' },
-  { verb: 'tasks', form: 'bind', kinds: ['map', 'sector'], slots: ['[‹service›]', '"‹project›"'], control: 'tasks-bind', label: 'Bind…', menu: 'form' },
+  { verb: 'tasks', form: 'bind', kinds: ['map', 'sector'], slots: ['[‹service›]', '"‹project›"', '[without ‹field›[,‹field›…]]'], control: 'tasks-bind', label: 'Bind…', menu: 'form' },
   { verb: 'tasks', form: 'unbind', kinds: ['map', 'sector'], slots: [], control: 'tasks-unbind', label: 'Unbind…' },
   { verb: 'tasks', form: 'sync', kinds: ['map', 'unit', 'sector'], slots: [], control: 'tasks-sync', label: 'Sync', menu: 'run' },
+  // The switches themselves come with the task sync section's field toggles (Task 5); the row declares the form.
+  { verb: 'tasks', form: 'field', kinds: ['map', 'sector'], slots: ['‹identity|state|due|note|progress›', 'on|off'], control: 'tasks-field', label: 'Sync fields' },
   { verb: 'tasks', form: 'status', kinds: ['map', 'unit', 'sector'], slots: [], control: 'tasks-status', label: 'Status', menu: 'run' },
 ];
 
@@ -282,7 +284,11 @@ export function format(cmd: Command, doc: Doc): string {
       }
       break;
     }
-    case 'tasks': add(String(a.action), a.action === 'bind' && String(a.provider), a.action === 'bind' && text(a.name)); break;
+    case 'tasks': {
+      const bind = a.action === 'bind', field = a.action === 'field';
+      add(String(a.action), bind && String(a.provider), bind && text(a.name), bind && Array.isArray(a.off) && a.off.length > 0 && `without ${a.off.join(',')}`, field && String(a.field), field && (a.on === true ? 'on' : 'off'));
+      break;
+    }
     case 'intent': add(text(a.text)); break;
     case 'view': add(String(a.view)); break;
     case 'sitrep': add(a.copy === true && 'copy'); break;

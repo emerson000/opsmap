@@ -5,7 +5,8 @@ import { apply, type ApplyResult } from '../../src/core/commands/apply';
 import { parse, SYNTAX, type ProviderInfo } from '../../src/core/commands/grammar';
 import { suggest } from '../../src/core/commands/suggest';
 import { seedDoc } from '../../src/core/model/seed';
-import type { Command, Doc } from '../../src/core/model/types';
+import { SYNC_FIELDS, type Command, type Doc } from '../../src/core/model/types';
+import { exportJson, importJson } from '../../src/core/model/json';
 
 const now = new Date('2026-11-09T17:00:00Z');
 const vikunja: ProviderInfo = { id: 'vikunja', label: 'Vikunja', aliases: ['vk'], rootNoun: 'project' };
@@ -115,7 +116,7 @@ describe('/tasks in apply', () => {
 describe('/tasks autocomplete', () => {
   it('offers the actions and the provider ids', () => {
     const doc = seedDoc(now);
-    expect(suggest('/tasks ', 7, doc, { providers: both }).items.map(s => s.insert)).toEqual(['bind', 'unbind', 'sync', 'status']);
+    expect(suggest('/tasks ', 7, doc, { providers: both }).items.map(s => s.insert)).toEqual(['bind', 'unbind', 'sync', 'status', 'field']);
     expect(suggest('/tasks bind ', 12, doc, { providers: both }).items.map(s => s.insert)).toEqual(['vikunja', 'asana']);
     expect(suggest('/', 1, doc, {}).items.map(s => s.insert)).not.toContain('tasks');
     expect(suggest('/', 1, doc, { providers: [asana] }).items.map(s => s.insert)).toContain('tasks');
@@ -123,8 +124,76 @@ describe('/tasks autocomplete', () => {
   });
   it('leaves the service out of the ghost text after an alias', () => {
     const doc = seedDoc(now);
-    expect(suggest('/vk ', 4, doc, { providers: both }).ghost).toBe('bind "‹project or URL›" | unbind | sync | status');
-    expect(suggest('/asana ', 7, doc, { providers: both }).ghost).toBe('bind "‹project or URL›" | unbind | sync | status');
+    expect(suggest('/vk ', 4, doc, { providers: both }).ghost).toBe(SYNTAX.tasks.replace('[‹service›] ', ''));
+    expect(suggest('/asana ', 7, doc, { providers: both }).ghost).toBe(SYNTAX.tasks.replace('[‹service›] ', ''));
     expect(suggest('/tasks ', 7, doc, { providers: both }).ghost).toBe(SYNTAX.tasks);
+  });
+});
+
+describe('/tasks field switches (D21)', () => {
+  const vk = () => bound('vikunja', 'Vikunja');
+  const run = (text: string, doc: Doc) => { const p = parse(text, doc, { now, providers: both }); if (!p.ok) throw new Error(p.error); return ok(apply(doc, p.cmd, now)); };
+  it('parses /tasks field ‹name› on|off and logs it in capitals', () => {
+    expect(parse('/tasks field identity off', vk(), { now, providers: both })).toMatchObject({ ok: true, cmd: { verb: 'tasks', args: { action: 'field', field: 'identity', on: false } }, preview: 'VIKUNJA IDENTITY SYNC OFF' });
+    const off = run('/tasks field identity off', vk());
+    expect(off.log).toBe('VIKUNJA IDENTITY SYNC OFF');
+    expect(off.doc.settings.taskSync?.off).toEqual(['identity']);
+    expect(off.doc.log.at(-1)).toMatchObject({ text: 'VIKUNJA IDENTITY SYNC OFF', cmd: '/tasks field identity off' });
+    // Kept in SYNC_FIELDS order, whatever the order they were switched off.
+    const two = run('/vk field state off', run('/tasks field progress off', off.doc).doc);
+    expect(two.doc.settings.taskSync?.off).toEqual(['identity', 'state', 'progress']);
+    const on = run('/tasks field identity on', two.doc);
+    expect(on.log).toBe('VIKUNJA IDENTITY SYNC ON');
+    expect(on.doc.settings.taskSync?.off).toEqual(['state', 'progress']);
+    // All on again: nothing is stored.
+    expect(run('/tasks field progress on', run('/tasks field state on', on.doc).doc).doc.settings.taskSync).not.toHaveProperty('off');
+    expect(run('/tasks field DUE OFF', vk()).doc.settings.taskSync?.off).toEqual(['due']);
+  });
+  it('refuses a field it does not know, a missing on/off, and an unbound map', () => {
+    expect(parse('/tasks field title off', vk(), { now, providers: both })).toMatchObject({ ok: false, error: 'Expected identity, state, due, note or progress', at: 13 });
+    expect(parse('/tasks field', vk(), { now, providers: both })).toMatchObject({ ok: false, error: 'Expected identity, state, due, note or progress' });
+    expect(parse('/tasks field note', vk(), { now, providers: both })).toMatchObject({ ok: false, error: 'Expected on or off' });
+    expect(parse('/tasks field note maybe', vk(), { now, providers: both })).toMatchObject({ ok: false, error: 'Expected on or off', at: 18 });
+    expect(parse('/tasks field identity off', seedDoc(now), { now, providers: both })).toMatchObject({ ok: false, error: 'This map is not bound to a task service: /tasks bind "‹project›"' });
+    expect(parse('/asana field identity off', vk(), { now, providers: both })).toMatchObject({ ok: false, error: 'Bound to Vikunja project Ops: /tasks unbind first' });
+    expect(tasks(vk(), { action: 'field', field: 'title', on: false })).toEqual({ error: 'Expected identity, state, due, note or progress' });
+    expect(tasks(vk(), { action: 'field', field: 'note', on: 'yes' })).toEqual({ error: 'Expected on or off' });
+  });
+  it('binds with fields already off: /tasks bind … without ‹field›[,‹field›…]', () => {
+    for (const text of ['/tasks bind asana "Ops" without identity,state', '/tasks bind asana "Ops" without identity, state', '/asana bind "Ops" without state,identity,state'])
+      expect(parse(text, seedDoc(now), { now, providers: both }), text).toMatchObject({ ok: true, cmd: { args: { action: 'bind', provider: 'asana', name: 'Ops', off: ['identity', 'state'] } }, preview: 'ASANA BIND OPS' });
+    expect(parse('/tasks bind asana "Ops" without title', seedDoc(now), { now, providers: both })).toMatchObject({ ok: false, error: 'Expected identity, state, due, note or progress' });
+    expect(parse('/tasks bind asana "Ops" without', seedDoc(now), { now, providers: both })).toMatchObject({ ok: false, error: 'Expected identity, state, due, note or progress' });
+    expect(parse('/tasks bind asana "Ops" without identity,', seedDoc(now), { now, providers: both })).toMatchObject({ ok: false, error: 'Expected identity, state, due, note or progress' });
+    // Bound elsewhere: the same refusal as a plain bind.
+    for (const text of ['/tasks bind vikunja "Other" without identity', '/asana bind "Ops" without identity'])
+      expect(parse(text, vk(), { now, providers: both }), text).toMatchObject({ ok: false, error: 'Bound to Vikunja project Ops: /tasks unbind first' });
+    expect(parse('/vk bind "Ops" without note', vk(), { now, providers: both })).toMatchObject({ ok: true, cmd: { args: { off: ['note'] } } });
+  });
+  it('records the switches given at bind; a rebind without them keeps the ones it has', () => {
+    const doc = ok(tasks(seedDoc(now), { action: 'bound', provider: 'asana', label: 'Asana', root: '1207', title: 'Ops', off: ['state', 'identity'] })).doc;
+    expect(doc.settings.taskSync?.off).toEqual(['identity', 'state']);
+    expect(ok(tasks(doc, { action: 'bound', provider: 'asana', label: 'Asana', root: '1207', title: 'Ops' })).doc.settings.taskSync?.off).toEqual(['identity', 'state']);
+    expect(ok(tasks(doc, { action: 'bound', provider: 'asana', label: 'Asana', root: '1207', title: 'Ops', off: ['due'] })).doc.settings.taskSync?.off).toEqual(['due']);
+    expect(ok(tasks(doc, { action: 'bound', provider: 'asana', label: 'Asana', root: '1207', title: 'Ops', off: [] })).doc.settings.taskSync).not.toHaveProperty('off');
+    expect(tasks(seedDoc(now), { action: 'bound', provider: 'asana', label: 'Asana', root: '1207', title: 'Ops', off: ['title'] })).toEqual({ error: 'Expected identity, state, due, note or progress' });
+  });
+  it('keeps the switches in an exported document and refuses unknown ones on import', () => {
+    const doc = run('/tasks field identity off', vk()).doc;
+    expect(importJson(exportJson(doc)).settings.taskSync?.off).toEqual(['identity']);
+    const bad = structuredClone(doc); bad.settings.taskSync!.off = ['title' as never];
+    expect(() => importJson(exportJson(bad))).toThrow('Invalid document');
+  });
+  it('exports SYNC_FIELDS in order', () => {
+    expect(SYNC_FIELDS).toEqual(['identity', 'state', 'due', 'note', 'progress']);
+  });
+  it('offers field, the field names, on and off, and without after a bind', () => {
+    const doc = vk();
+    expect(suggest('/tasks ', 7, doc, { providers: both }).items.map(s => s.insert)).toContain('field');
+    expect(suggest('/tasks field ', 13, doc, { providers: both }).items.map(s => s.insert)).toEqual(['identity', 'state', 'due', 'note', 'progress']);
+    expect(suggest('/vk field identity ', 19, doc, { providers: both }).items.map(s => s.insert)).toEqual(['on', 'off']);
+    expect(suggest('/tasks bind asana "Ops" ', 24, seedDoc(now), { providers: both }).items.map(s => s.insert)).toEqual(['without']);
+    expect(suggest('/tasks bind asana "Ops" without ', 32, seedDoc(now), { providers: both }).items.map(s => s.insert)).toEqual(['identity', 'state', 'due', 'note', 'progress']);
+    expect(suggest('/vk bind "Ops" without identity, ', 33, seedDoc(now), { providers: both }).items.map(s => s.insert)).toEqual(['state', 'due', 'note', 'progress']);
   });
 });

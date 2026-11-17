@@ -24,7 +24,7 @@ const ACTS_ON: Record<string, ObjKind[]> = {
   'sector add': ['map'], 'sector rename': ['sector'], 'sector remove': ['sector'], 'sector width': ['sector'], 'sector size': ['map'],
   'pl add': ['map'], 'pl date': ['pl'], 'pl rename': ['pl'], 'pl remove': ['pl'],
   ...area('obj'), ...area('ea'), ...area('nai'),
-  'tasks bind': ['map', 'sector'], 'tasks unbind': ['map', 'sector'], 'tasks sync': ['map', 'unit', 'sector'], 'tasks status': ['map', 'unit', 'sector'],
+  'tasks bind': ['map', 'sector'], 'tasks unbind': ['map', 'sector'], 'tasks sync': ['map', 'unit', 'sector'], 'tasks status': ['map', 'unit', 'sector'], 'tasks field': ['map', 'sector'],
 };
 const actionsOf = (verb: string) => [...new Set(SYNTAX[verb].split(' | ').map(alt => alt.split(' ')[0]))];
 const rows = VERBS.filter(v => !SHELL.includes(v)).flatMap(v => (ACTIONS.includes(v) ? actionsOf(v).map(a => `${v} ${a}`) : [v]));

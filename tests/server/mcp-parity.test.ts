@@ -160,14 +160,14 @@ describe('opsmap_command matches the command bar',()=>{
     expect(await viaBar('/tasks sync')).toEqual({ok:false,error:'This map is not bound to a task service: /tasks bind "‹project›"',at:7});
     expect(requested).toEqual([]);
     // A bind reaches the service with the same arguments from both: the bar says it is asking, then shows the answer.
-    for(const text of ['/tasks bind fake "Ops"','/vk bind "Ops"']) {
+    for(const text of ['/tasks bind fake "Ops"','/vk bind "Ops" without identity, state']) {
       answers=[];
       const b=await viaBar(text);expect(b,text).toMatchObject({ok:true,log:expect.stringMatching(/ — asking (Fake|Vikunja)…$/)});
       for(let i=0;i<50&&!answers.length;i++)await new Promise(r=>setTimeout(r,2));
       const m=await call('opsmap_command',{text,map:'field'},true,sync);
       expect(answers,text).toEqual([{ok:true,log:m.log}]);
     }
-    expect(requested).toEqual([{action:'bind',provider:'fake',name:'Ops'},{action:'bind',provider:'fake',name:'Ops'},{action:'bind',provider:'vikunja',name:'Ops'},{action:'bind',provider:'vikunja',name:'Ops'}]);
+    expect(requested).toEqual([{action:'bind',provider:'fake',name:'Ops'},{action:'bind',provider:'fake',name:'Ops'},{action:'bind',provider:'vikunja',name:'Ops',off:['identity','state']},{action:'bind',provider:'vikunja',name:'Ops',off:['identity','state']}]);
     expect(await call('opsmap_help',{verb:'/vk'},false,sync)).toEqual({verb:'tasks',syntax:SYNTAX.tasks,help:`/tasks ${SYNTAX.tasks}`});
   });
   it('unbinds a bound map the same way from both',async()=>{
@@ -188,6 +188,30 @@ describe('opsmap_command matches the command bar',()=>{
     }
     expect(bar.doc.log.at(-1)?.text).toBe('VIKUNJA UNBOUND FROM OPS');
     expect(bar.doc.settings.taskSync).toBeUndefined();
+  });
+  it('switches a field off and on the same way from both',async()=>{
+    const sync:SyncService={request:async()=>'not asked',webhook:()=>({status:404,trigger:false}),nudge:()=>{},start:()=>{},stop:async()=>{}};
+    served.registry=registry;served.sync=sync;features.taskSync=registry.descriptors();
+    engine.stop();engine.start();await settle();
+    // Unbound first: the same hint from both.
+    for(const text of ['/tasks field identity off']) {
+      const b=await viaBar(text),m=await call('opsmap_command',{text,map:'field'},true,sync);
+      expect(b,text).toMatchObject({ok:false,error:'This map is not bound to a task service: /tasks bind "‹project›"'});
+      expect(m,text).toMatchObject({ok:false,error:b.ok?'':b.error,...(!b.ok&&b.at!==undefined?{at:b.at}:{})});
+    }
+    const bound={verb:'tasks',args:{action:'bound',provider:'vikunja',label:'Vikunja',root:'39',title:'Ops',by:user.id,containers:{work:'40',household:'41'}}};
+    for(const hub of [bar,field])hub.internal('system','system',bound,'vikunja');
+    await settle();
+    expect(plain(field.doc)).toEqual(plain(bar.doc));
+    for(const text of ['/tasks field identity off','/vk field state off','/tasks field title off','/tasks field note maybe','/fk field identity on','/tasks field identity on']) {
+      const b=await viaBar(text),m=await call('opsmap_command',{text,map:'field'},true,sync);
+      if(b.ok)expect(m,text).toMatchObject({ok:true,log:b.log});
+      else expect(m,text).toMatchObject({ok:false,error:b.error,...(b.at!==undefined?{at:b.at}:{})});
+      expect(plain(field.doc),text).toEqual(plain(bar.doc));
+    }
+    expect(bar.doc.log.map(l=>l.text).filter(t=>/SYNC O/.test(t))).toEqual(['VIKUNJA IDENTITY SYNC OFF','VIKUNJA STATE SYNC OFF','VIKUNJA IDENTITY SYNC ON']);
+    expect(bar.doc.settings.taskSync?.off).toEqual(['state']);
+    expect(await viaBar('/tasks field title off')).toMatchObject({ok:false,error:'Expected identity, state, due, note or progress'});
   });
   it('answers the shell verbs with their content',async()=>{
     await viaMcp('/new friend "Response team" as RSP');

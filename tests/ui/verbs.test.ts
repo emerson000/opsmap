@@ -76,7 +76,8 @@ function samples(doc: Doc): Record<string, Command[]> {
     ...area('obj'), ...area('ea'), ...area('nai'),
     'intent': [c('intent', { text: 'Finish "the" taxes' })],
     'sitrep': [c('sitrep', { copy: false }), c('sitrep', { copy: true })],
-    'tasks bind': [c('tasks', { action: 'bind', provider: 'vikunja', name: 'Life' })], 'tasks unbind': [c('tasks', { action: 'unbind' })], 'tasks sync': [c('tasks', { action: 'sync' })], 'tasks status': [c('tasks', { action: 'status' })],
+    'tasks bind': [c('tasks', { action: 'bind', provider: 'vikunja', name: 'Life' }), c('tasks', { action: 'bind', provider: 'vikunja', name: 'Life', off: ['identity', 'state'] })], 'tasks unbind': [c('tasks', { action: 'unbind' })], 'tasks sync': [c('tasks', { action: 'sync' })], 'tasks status': [c('tasks', { action: 'status' })],
+    'tasks field': [c('tasks', { action: 'field', field: 'identity', on: false }), c('tasks', { action: 'field', field: 'progress', on: true })],
   };
 }
 const key = (e: VerbSlot) => (e.form ? `${e.verb} ${e.form}` : e.verb);

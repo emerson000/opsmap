@@ -1,6 +1,6 @@
 // The neutral fields opsmap and a task service share, and their three-way merge against the values both sides last
 // agreed on (ts_links.base): a field changed on one side is copied across; changed on both, the newer side wins.
-import type { Affiliation, Doc, Unit } from '../../src/core/model/types';
+import type { Affiliation, Doc, SyncField, Unit } from '../../src/core/model/types';
 import { localDay, zonedTime } from '../../src/core/model/time';
 import type { FieldKey, RemoteStatus, RemoteTask } from './contract';
 export interface Fields { title:string; due:string|null; note:string; progress:number|null; status:RemoteStatus|null; sector:string|null; affiliation:Affiliation|null }
@@ -8,6 +8,8 @@ export type Field=keyof Fields;
 export const FIELDS=['title','due','note','progress','status','sector','affiliation'] as const satisfies readonly Field[];
 /** Each merged field and the capability that declares it. */
 export const FIELD_KEY:Record<Field,FieldKey>={title:'title',due:'due',note:'note',progress:'progress',status:'status',sector:'container',affiliation:'affiliation'};
+/** Each per-map switch (D21) and the field it stops. */
+export const SWITCHED:Record<SyncField,Field>={identity:'affiliation',state:'status',due:'due',note:'note',progress:'progress'};
 /** opsmap's longest note in one op. */
 export const NOTE_LIMIT=16000;
 export const threat=(u:{affiliation:Affiliation})=>u.affiliation==='hostile'||u.affiliation==='suspect';

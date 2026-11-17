@@ -377,6 +377,26 @@ describe('Vikunja sync: second review', () => {
 });
 
 describe('Vikunja identity labels', () => {
+  it('with identity switched off, linked tasks lose only their identity labels; other labels stay', async () => {
+    await bind();
+    const leak = vk.tasksById.get(vkId(unit('LEAK'))!)!, tools = vk.tasksById.get(vkId(unit('TOOLS'))!)!;
+    leak.labels = [...(leak.labels ?? []), vk.label('errand')]; leak.updated = vk.tick();
+    // Several identity labels go too.
+    tools.labels = [vk.label('hostile'), vk.label('unknown'), vk.label('home')]; tools.updated = vk.tick();
+    await sync.run(hub().mapId);
+    expect(run('/tasks field identity off').log).toBe('VIKUNJA IDENTITY SYNC OFF');
+    await sync.run(hub().mapId);
+    expect(vk.labelsOf(leak.id)).toEqual(['errand']);
+    expect(vk.labelsOf(tools.id)).toEqual(['home']);
+    expect(doc().units.filter(u => vkId(u) !== undefined).every(u => vk.labelsOf(vkId(u)!).every(l => l === 'errand' || l === 'home'))).toBe(true);
+    expect(unit('LEAK').affiliation).toBe('hostile');
+    // While off, /id adds no label.
+    run('/id LEAK friend');
+    vk.calls.length = 0;
+    await sync.run(hub().mapId);
+    expect(vk.calls.filter(c => /label/i.test(c))).toEqual([]);
+    expect(vk.labelsOf(leak.id)).toEqual(['errand']);
+  });
   it('each task gets one identity label, created on first use', async () => {
     await bind();
     expect(vk.labelsOf(vkId(unit('LEAK'))!)).toEqual(['hostile']);

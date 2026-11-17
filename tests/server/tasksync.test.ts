@@ -310,3 +310,122 @@ describe('task sync engine: delivery modes', () => {
     expect(await t.status()).toMatch(/by u1 \(no token: connect it in the menu → Fake\)/);
   });
 });
+
+describe('task sync engine: field switches (D21)', () => {
+  const nulls = (t: Awaited<ReturnType<typeof setup>>) => t.calls('updateTask').filter(c => (c.args[2] as { affiliation?: unknown }).affiliation === null);
+  const affiliationWrites = (t: Awaited<ReturnType<typeof setup>>) => t.calls('updateTask').filter(c => (c.args[2] as { affiliation?: unknown }).affiliation !== undefined);
+  const taskOf = (t: Awaited<ReturnType<typeof setup>>, d: string) => t.fake.tasks.get(t.unit(d).remote!)!;
+
+  it('/tasks field is a user op: it logs, and /undo turns the field back on', async () => {
+    const t = await setup();
+    await t.bind();
+    const op = t.run('/tasks field identity off');
+    expect(op.log).toBe('FAKE IDENTITY SYNC OFF');
+    expect(t.doc().settings.taskSync?.off).toEqual(['identity']);
+    t.hub.undo(user.id, crypto.randomUUID());
+    expect(t.doc().settings.taskSync).not.toHaveProperty('off');
+    expect(t.doc().settings.taskSync).toMatchObject({ provider: 'fake', title: 'Ops' });
+  });
+
+  it('switching identity off removes the identity from every linked task, once', async () => {
+    const t = await setup();
+    await t.bind();
+    const linked = t.doc().units.filter(u => u.remote !== undefined);
+    expect(linked.every(u => t.fake.tasks.get(u.remote!)!.affiliations.length === 1)).toBe(true);
+    t.fake.calls.length = 0;
+    t.run('/tasks field identity off');
+    await t.engine.run(t.mapId);
+    expect(nulls(t).map(c => c.args[1] as string).sort()).toEqual(linked.map(u => u.remote!).sort());
+    expect(linked.every(u => t.fake.tasks.get(u.remote!)!.affiliations.length === 0)).toBe(true);
+    // The units keep their identity.
+    expect(t.unit('LEAK').affiliation).toBe('hostile');
+    t.fake.calls.length = 0;
+    expect(await t.engine.run(t.mapId)).toMatch(/^0 pushed, 0 pulled/);
+    expect(t.calls('updateTask')).toEqual([]);
+  });
+
+  it('with identity off, /id writes nothing remotely and a remote identity does not change the unit', async () => {
+    const t = await setup();
+    await t.bind();
+    t.run('/tasks field identity off');
+    await t.engine.run(t.mapId);
+    t.fake.calls.length = 0;
+    t.run('/id IRSRSP neutral');
+    expect(await t.engine.run(t.mapId)).toMatch(/^0 pushed, 0 pulled/);
+    expect(affiliationWrites(t)).toEqual([]);
+    t.fake.remoteUpdate(t.unit('LEAK').remote!, { affiliations: ['friend'] });
+    expect(await t.engine.run(t.mapId)).toMatch(/^0 pushed, 0 pulled/);
+    expect(t.unit('LEAK').affiliation).toBe('hostile');
+    expect(taskOf(t, 'LEAK').affiliations).toEqual(['friend']);
+  });
+
+  it('switching identity back on pushes opsmap\'s identity, and the old remote value never comes back', async () => {
+    const t = await setup();
+    await t.bind();
+    t.run('/tasks field identity off');
+    await t.engine.run(t.mapId);
+    // Meanwhile someone labels LEAK's task friendly in the service, and opsmap changes IRSRSP.
+    t.fake.remoteUpdate(t.unit('LEAK').remote!, { affiliations: ['friend'] });
+    t.run('/id IRSRSP neutral');
+    await t.engine.run(t.mapId);
+    t.run('/tasks field identity on');
+    t.fake.calls.length = 0;
+    await t.engine.run(t.mapId);
+    expect(t.unit('LEAK').affiliation).toBe('hostile');
+    expect(taskOf(t, 'LEAK').affiliations).toEqual(['hostile']);
+    expect(taskOf(t, 'IRSRSP').affiliations).toEqual(['neutral']);
+    expect(t.doc().units.filter(u => u.remote !== undefined).every(u => t.fake.tasks.get(u.remote!)!.affiliations[0] === u.affiliation)).toBe(true);
+    t.fake.calls.length = 0;
+    expect(await t.engine.run(t.mapId)).toMatch(/^0 pushed, 0 pulled/);
+    expect(t.unit('LEAK').affiliation).toBe('hostile');
+  });
+
+  it('a field switched back on before a cycle ran is not cleaned up', async () => {
+    const t = await setup();
+    await t.bind();
+    t.run('/tasks field identity off');
+    t.run('/tasks field identity on');
+    t.fake.calls.length = 0;
+    expect(await t.engine.run(t.mapId)).toMatch(/^0 pushed, 0 pulled/);
+    expect(nulls(t)).toEqual([]);
+  });
+
+  it('state switched back on is re-based too: opsmap\'s state wins once', async () => {
+    const t = await setup();
+    await t.bind();
+    t.run('/tasks field state off');
+    await t.engine.run(t.mapId);
+    t.fake.remoteUpdate(t.unit('IRSRSP').remote!, { status: 'done' });
+    expect(await t.engine.run(t.mapId)).toMatch(/^0 pushed, 0 pulled/);
+    expect(t.unit('IRSRSP').lifecycle).toBe('active');
+    t.run('/tasks field state on');
+    await t.engine.run(t.mapId);
+    expect(t.unit('IRSRSP').lifecycle).toBe('active');
+    expect(taskOf(t, 'IRSRSP').status).toBe('active');
+  });
+
+  it('with identity off, new tasks carry no identity and new remote tasks arrive as pending', async () => {
+    const t = await setup();
+    await t.engine.request(t.mapId, { action: 'bind', provider: 'fake', name: 'Ops', off: ['identity'] }, user, 'web');
+    expect(t.doc().settings.taskSync?.off).toEqual(['identity']);
+    expect(t.calls('createTask').length).toBeGreaterThan(0);
+    expect(t.calls('createTask').every(c => !('affiliation' in (c.args[1] as object)))).toBe(true);
+    expect(nulls(t)).toEqual([]);
+    const household = t.doc().sectors.find(s => s.id === 'household')!.remote!;
+    t.fake.remoteCreate(t.root(), { title: 'Parking ticket', container: household }, 'hostile');
+    await t.engine.run(t.mapId);
+    expect(t.doc().units.find(u => u.title === 'Parking ticket')).toMatchObject({ affiliation: 'pending' });
+    t.fake.calls.length = 0;
+    // Its labels are ignored, not removed.
+    expect(await t.engine.run(t.mapId)).toMatch(/^0 pushed, 0 pulled/);
+    expect(t.calls('updateTask')).toEqual([]);
+  });
+
+  it('/tasks status lists the fields that are off, in order', async () => {
+    const t = await setup();
+    await t.bind();
+    expect(await t.status()).not.toMatch(/not synced/);
+    t.run('/tasks field state off');t.run('/tasks field identity off');
+    expect(await t.status()).toMatch(/ · \d+ units linked · not synced: identity, state · /);
+  });
+});

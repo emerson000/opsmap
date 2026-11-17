@@ -1,5 +1,5 @@
-import type { Command, Doc, Unit } from '../model/types';
-import { apply, boundElsewhere, functions, identities, NOT_BOUND, sizes, TASK_REQUESTS } from './apply';
+import { SYNC_FIELDS, type Command, type Doc, type SyncField, type Unit } from '../model/types';
+import { apply, boundElsewhere, FIELD_HELP, functions, identities, NOT_BOUND, sizes, TASK_REQUESTS } from './apply';
 import { aliases, VERBS } from './syntax';
 export { TASK_REQUESTS };
 export { aliases, helpText, SYNTAX, VERBS } from './syntax';
@@ -145,14 +145,18 @@ export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult 
    case 'tasks': {
     const providers=context.providers??[];
     if(!providers.length)throw new CommandError('No task service is configured on this server',first.start+1);
-    const t=take('bind, unbind, sync or status'),action=t.value.toLowerCase();a.action=action;
+    const t=take('bind, unbind, sync, status or field'),action=t.value.toLowerCase();a.action=action;
+    const field=():SyncField=>{const f=take(FIELD_HELP.slice('Expected '.length)),name=f.value.toLowerCase();if(f.quoted||!(SYNC_FIELDS as readonly string[]).includes(name))throw new CommandError(FIELD_HELP,f.start);return name as SyncField;};
     if(action==='bind'){
      const named=!implied&&peek()&&!peek().quoted&&tokens[i+1]?providerNamed(peek().value,providers):undefined;if(named)take('task service');
      const provider=implied??named??(providers.length===1?providers[0]:undefined);
      if(!provider)throw new CommandError(`Name the task service: /tasks bind ‹${providers.map(p=>p.id).join('|')}› "‹project›"`,peek()?.start??input.length);
      a.provider=provider.id;a.name=take(`${provider.label} ${provider.rootNoun} name`).value;
+     // `without identity,state` (spaces after the commas are fine): bound with those fields already off (D21).
+     if(eat('without')){const off=[field()];while(eat(','))off.push(field());a.off=SYNC_FIELDS.filter(f=>off.includes(f));}
     }
-    else if(!['unbind','sync','status'].includes(action))throw new CommandError('Expected bind, unbind, sync or status',t.start);
+    else if(action==='field'){a.field=field();const v=take('on or off'),on=v.value.toLowerCase();if(v.quoted||on!=='on'&&on!=='off')throw new CommandError('Expected on or off',v.start);a.on=on==='on';}
+    else if(!['unbind','sync','status'].includes(action))throw new CommandError('Expected bind, unbind, sync, status or field',t.start);
     break;
    }
    case 'intent':a.text=quoted('intent');break;
@@ -168,7 +172,7 @@ export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult 
   let canonical=verb;
   if(verb==='moving'&&doc.units.some(u=>u.id===a.target&&(u.affiliation==='hostile'||u.affiliation==='suspect')))canonical='attack';
   const cmd:Command={verb:canonical,args:a,raw:input};
-  if(verb==='tasks'&&a.action==='unbind'&&implied&&doc.settings.taskSync&&doc.settings.taskSync.provider!==implied.id)throw new CommandError(boundElsewhere(doc.settings.taskSync),at);
+  if(verb==='tasks'&&(a.action==='unbind'||a.action==='field')&&implied&&doc.settings.taskSync&&doc.settings.taskSync.provider!==implied.id)throw new CommandError(boundElsewhere(doc.settings.taskSync),at);
   if(verb==='tasks'&&(TASK_REQUESTS as readonly string[]).includes(String(a.action))){
    const bound=doc.settings.taskSync;
    // An alias names its service: on a map bound to another one it is a mistake, not a synonym of /tasks.

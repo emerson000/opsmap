@@ -46,8 +46,8 @@ export class Hub {
     if(source!=='system'&&opId.startsWith('turn:'))throw new Error('Reserved operation id');
     const old=this.existing(opId,userId);if(old)return old;
     if(!cmd||typeof cmd.verb!=='string'||!cmd.args||typeof cmd.args!=='object'||Array.isArray(cmd.args)||!(MUTATION_VERBS.has(cmd.verb)||source==='system'&&userId==='system'&&cmd.verb==='turn'))throw new Error('Invalid or privileged command');
-    // Of /tasks, users submit only unbind; the sync service records everything else through internal().
-    if(cmd.verb==='tasks'&&cmd.args.action!=='unbind')throw new Error('Invalid or privileged command');
+    // Of /tasks, users submit only unbind and field (D21); the sync service records everything else through internal().
+    if(cmd.verb==='tasks'&&cmd.args.action!=='unbind'&&cmd.args.action!=='field')throw new Error('Invalid or privileged command');
     const safe={verb:cmd.verb,args:cmd.args,...(typeof cmd.raw==='string'&&cmd.raw.startsWith('/')?{raw:cmd.raw.slice(0,512)}:{})};
     if(JSON.stringify(safe.args).length>16384)throw new Error('Command too large');
     for(const value of Object.values(safe.args))if(typeof value==='string'&&value.length>2048)throw new Error('Text exceeds 2048 characters');

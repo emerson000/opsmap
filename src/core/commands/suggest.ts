@@ -1,4 +1,4 @@
-import type { Doc, Unit } from '../model/types';
+import { SYNC_FIELDS, type Doc, type Unit } from '../model/types';
 import { ECHELONS } from '../model/echelon';
 import { FUNCTIONS } from '../model/functions';
 import { RING_ORDER, ringForRadius, ringIndex, ringName } from '../model/geometry';
@@ -57,7 +57,10 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
   const typed=fragment.replace(/^\//,'').toLowerCase();
   if(typed)candidates.push(...[...Object.entries(aliases),...providers.flatMap(p=>p.aliases.map(alias=>[alias,'tasks'] as [string,string]))].filter(([alias,v])=>/^[a-z]/.test(alias)&&alias.startsWith(typed)&&offered(v)).map(([alias,v])=>({insert:alias,label:`/${alias}`,detail:`/${v} ${SYNTAX[v]??''}`.trim(),kind:'verb' as const})));
  }
- else if(verb==='tasks'&&previous.length===1)candidates=providers.length?['bind','unbind','sync','status'].map(s=>keyword(s)):[];
+ else if(verb==='tasks'&&previous.length===1)candidates=providers.length?['bind','unbind','sync','status','field'].map(s=>keyword(s)):[];
+ else if(verb==='tasks'&&previous[1]?.value.toLowerCase()==='field')candidates=previous.length===2?SYNC_FIELDS.map(s=>keyword(s)):previous.length===3?['on','off'].map(s=>keyword(s)):[];
+ else if(verb==='tasks'&&previous[1]?.value.toLowerCase()==='bind'&&previous.length>2&&previous.at(-1)?.quoted)candidates=[keyword('without')];
+ else if(verb==='tasks'&&previous[1]?.value.toLowerCase()==='bind'&&(before==='without'||before===','&&previous.some(t=>t.value.toLowerCase()==='without'))){const listed=new Set(previous.map(t=>t.value.toLowerCase()));candidates=SYNC_FIELDS.filter(f=>!listed.has(f)).map(s=>keyword(s));}
  else if(verb==='tasks'&&previous.length===2&&!implied&&providers.length>1&&previous[1]?.value.toLowerCase()==='bind')candidates=providers.map(p=>({insert:p.id,label:p.id,detail:p.label,kind:'keyword' as const}));
  else if(verb==='tasks')candidates=[];
  else if(before==='due'||(verb==='due'&&previous.length===2)||(verb==='pl'&&previous.length===3&&previous[1]?.value.toLowerCase()==='add'))candidates=dates();

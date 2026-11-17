@@ -17,7 +17,7 @@ export function taskRequestArgs(args:unknown,registry:ProviderRegistry):Record<s
   const a=args as Record<string,unknown>;
   if(!(TASK_REQUESTS as readonly string[]).includes(String(a.action)))throw new Error('Invalid /tasks request');
   if(a.provider!==undefined&&(typeof a.provider!=='string'||!registry.get(a.provider)))throw new Error(`Unknown task service: ${String(a.provider).slice(0,64)}`);
-  return {action:a.action,...(typeof a.provider==='string'?{provider:a.provider}:{}),...(typeof a.name==='string'?{name:a.name.slice(0,250)}:{})};
+  return {action:a.action,...(typeof a.provider==='string'?{provider:a.provider}:{}),...(typeof a.name==='string'?{name:a.name.slice(0,250)}:{}),...(Array.isArray(a.off)?{off:a.off.slice(0,8)}:{})};
 }
 
 export function taskSyncRoutes(app:Hono,{config,auth,registry,credentials,sync,legacyRoutes=[]}:TaskSyncDeps):void {

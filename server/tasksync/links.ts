@@ -4,19 +4,22 @@
 import { randomBytes } from 'node:crypto';
 import type { Store } from '../db';
 import type { DeliveryRecord } from './delivery';
-import type { Fields } from './merge';
+import type { Field, Fields } from './merge';
 export const TASK_SYNC_TABLES=`CREATE TABLE IF NOT EXISTS ts_links(map_id TEXT NOT NULL,unit_id TEXT NOT NULL,remote_id TEXT NOT NULL,base TEXT NOT NULL,PRIMARY KEY(map_id,unit_id));
   CREATE TABLE IF NOT EXISTS ts_maps(map_id TEXT PRIMARY KEY,provider TEXT NOT NULL,secret TEXT NOT NULL,hooks TEXT,owner TEXT,hooks_checked TEXT,last_delivery TEXT,state TEXT,relations TEXT,delivery TEXT);`;
 /** The relations both sides last agreed on: each unit's parent task, and the relations between open units (edge keys).
  *  `refused`: relations made remotely that opsmap would not take (a link across sectors), not tried again. */
+/** The values both sides last agreed on for one link, and the fields switched off when they were recorded (D21): a
+ *  field off then and on now is re-based; identity off now but not then still has its remote identity to remove. */
+export interface Base extends Fields { off?:Field[] }
 export interface RelationBase { parents:Record<string,string|null>; edges:string[]; refused:string[] }
 export interface MapRow { map_id:string; provider:string; secret:string; hooks:string|null; owner:string|null; hooks_checked:string|null; last_delivery:string|null; state:string|null; relations:string|null; delivery:string|null }
 const json=<T>(text:string|null|undefined,fallback:T):T=>{if(!text)return fallback;try{return JSON.parse(text) as T;}catch{return fallback;}};
 export class SyncTables {
   constructor(private readonly store:Store) {store.db.exec(TASK_SYNC_TABLES);}
   private get db() {return this.store.db;}
-  base(mapId:string,unitId:string):Fields|undefined {return json<Fields|undefined>((this.db.prepare('SELECT base FROM ts_links WHERE map_id=? AND unit_id=?').get(mapId,unitId) as {base:string}|undefined)?.base,undefined);}
-  setBase(mapId:string,unitId:string,remoteId:string,base:Fields|null):void {
+  base(mapId:string,unitId:string):Base|undefined {return json<Base|undefined>((this.db.prepare('SELECT base FROM ts_links WHERE map_id=? AND unit_id=?').get(mapId,unitId) as {base:string}|undefined)?.base,undefined);}
+  setBase(mapId:string,unitId:string,remoteId:string,base:Base|null):void {
     if(base===null){this.db.prepare('DELETE FROM ts_links WHERE map_id=? AND unit_id=?').run(mapId,unitId);return;}
     this.db.prepare('INSERT INTO ts_links(map_id,unit_id,remote_id,base) VALUES(?,?,?,?) ON CONFLICT(map_id,unit_id) DO UPDATE SET remote_id=excluded.remote_id,base=excluded.base').run(mapId,unitId,remoteId,JSON.stringify(base));
   }

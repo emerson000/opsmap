@@ -1,3 +1,6 @@
+/** The fields a bound map can stop syncing (`/tasks field ‹name› off`, D21), in the order they are listed. */
+export const SYNC_FIELDS = ['identity', 'state', 'due', 'note', 'progress'] as const;
+export type SyncField = typeof SYNC_FIELDS[number];
 export type Affiliation = 'pending'|'unknown'|'assumed'|'friend'|'neutral'|'suspect'|'hostile';
 export type Lifecycle = 'todo'|'active'|'blocked'|'done'|'dropped';
 export type Presence = 'present'|'planned';
@@ -72,7 +75,8 @@ export interface Doc {
   settings: { view: 'commander'|'staff'|'detail'; theme: 'light'|'dark'; autoAdvance: boolean; tz?: string; /** `/ao size` scale (AO_SIZES); absent = medium. */ aoSize?: number;
     /** The task service project this map (the A/O) is bound to (`/tasks bind`); each sector is one of its containers.
      *  `provider` is the service id, `label` its name in log lines, `root` its project id. */
-    taskSync?: { provider: string; label: string; root: string; title: string; /** The user whose token syncs it. */ by?: string } };
+    taskSync?: { provider: string; label: string; root: string; title: string; /** The user whose token syncs it. */ by?: string;
+      /** Fields not synced on this map, in SYNC_FIELDS order; absent when all sync. */ off?: SyncField[] } };
 }
 export type Command = { verb: string; args: Record<string, unknown>; raw?: string };
 export type View = Doc['settings']['view'];
