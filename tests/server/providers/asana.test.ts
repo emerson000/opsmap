@@ -420,6 +420,22 @@ describe('Asana webhooks', () => {
     expect(sync.delivery(hub().mapId).mode).toBe('failed');
     expect(gid).not.toBe(only().gid);
   });
+  it('no createWebhook error carries the nonce, raw or URL-encoded, whatever its status (fix 2)', async () => {
+    for (const code of [400, 403, 500, 404]) {
+      let nonce = '';
+      as.createWebhook = async (_r, t) => {
+        nonce = new URL(t).searchParams.get('h')!;
+        throw new AsHttpError(code, `Asana POST /webhooks: target ${t} (${encodeURIComponent(t)}) h%3D${nonce} said no`);
+      };
+      await bind();
+      const reason = sync.delivery(hub().mapId).reason;
+      expect(nonce).toMatch(/^[\w-]{22}$/);
+      expect(reason).not.toContain(nonce);
+      expect(reason).toContain('‹target›');
+      expect(await status()).not.toContain(nonce);
+      run('/tasks unbind'); await sync.run(hub().mapId);
+    }
+  });
   it('a signed delivery to the bare hook URL or another nonce gets 401 (C1)', async () => {
     await bind(); clock.queue = [];
     const d = as.delivery(only().gid, [EVENT]);

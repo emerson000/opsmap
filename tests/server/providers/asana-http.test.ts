@@ -161,4 +161,14 @@ describe('Asana webhook route', () => {
     expect((await post('other')).status).toBe(401);
     const res = await post('main'); expect(res.status).toBe(429); expect(res.headers.get('retry-after')).toBe('1');
   });
+  it('a validly signed delivery is never limited, even while forged spam has emptied the map’s bucket (fix 2)', async () => {
+    runtime.store.db.prepare(`INSERT INTO ts_maps(map_id,provider,secret,hooks,state) VALUES('main','asana','engine-secret','{"gid":"9001","nonce":"n0nce"}','{"secret":"hook-secret","nonce":"n0nce"}')`).run();
+    const body = '{"events":[{"action":"changed"}]}', sig = createHmac('sha256', 'hook-secret').update(body).digest('hex');
+    const post = (headers: Record<string, string>) => fetch(`${url}/api/tasksync/asana/hook/main?h=n0nce`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body });
+    const spam: number[] = [];
+    for (let i = 0; i < 80; i++) spam.push((await post({ 'x-hook-signature': '0'.repeat(64) })).status);
+    expect(spam).toContain(429);
+    expect((await post({ 'x-hook-signature': '0'.repeat(64) })).status).toBe(429);
+    for (let i = 0; i < 100; i++) expect((await post({ 'x-hook-signature': sig })).status).toBe(200);
+  });
 });

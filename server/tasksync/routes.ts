@@ -40,24 +40,33 @@ export function taskSyncRoutes(app:Hono,{config,auth,registry,credentials,sync,l
   };
   app.put('/api/tasksync/:provider/account',c=>accountWrite(c,(user,provider,body)=>credentials!.save(user.id,provider,body.token)));
   app.delete('/api/tasksync/:provider/account',c=>accountWrite(c,async(user,provider)=>{credentials!.remove(user.id,provider);return {connected:false};}));
-  // Webhooks: authenticated by the provider's signature with the per-map secret, not by a session. Anyone can post, so
-  // each map gets a bucket (a burst of 60, refilled at 5 a second), and so does each client address (200, 20 a second).
-  const buckets=new Map<string,{ bucket:Bucket; at:number }>();let swept=Date.now();
-  const allowed=(key:string,rate:number,burst:number)=>{
+  // Webhooks: authenticated by the provider's signature with the per-map secret, not by a session. Only refused
+  // requests are charged: each map has a bucket (a burst of 60, refilled at 5 a second) and so does each client address
+  // (200, 20 a second); once one is empty, refusals answer 429. An accepted delivery or handshake is never limited, so
+  // forged traffic cannot hold back a service's real deliveries, even behind a proxy where every client shares one address.
+  const buckets=new Map<string,{ bucket:Bucket; at:number }>(),MAX_BUCKETS=10_000;let swept=0;
+  /** Charges one refusal to `key`: false when its bucket is empty (or the table is full). Idle buckets go, at most once a second. */
+  const charge=(key:string,rate:number,burst:number)=>{
     const now=Date.now();
-    if(now-swept>60_000||buckets.size>10_000){swept=now;for(const [k,v] of buckets)if(now-v.at>60_000)buckets.delete(k);}
-    let b=buckets.get(key);if(!b){b={bucket:new Bucket(rate,burst),at:now};buckets.set(key,b);}
+    if(now-swept>=1000){swept=now;for(const [k,v] of buckets)if(now-v.at>60_000)buckets.delete(k);}
+    let b=buckets.get(key);
+    if(!b){if(buckets.size>=MAX_BUCKETS)return false;b={bucket:new Bucket(rate,burst),at:now};buckets.set(key,b);}
     b.at=now;return b.bucket.take();
+  };
+  const refuse=(c:Context,provider:string,status:400|401|404,error:string)=>{
+    const map=(c.req.param('map')??'').slice(0,128),ip=(c.env as { incoming?:{ socket?:{ remoteAddress?:string } } }|undefined)?.incoming?.socket?.remoteAddress;
+    const byIp=!ip||charge(`ip ${ip}`,20,200),byMap=charge(`map ${provider} ${map}`,5,60);
+    if(!byIp||!byMap){c.header('Retry-After','1');return c.json({error:'Too many requests'},429);}
+    return c.json({error},status);
   };
   const hook=async(c:Context,provider:string)=>{
     if(!sync||!registry.get(provider))return c.json({error:'Not found'},404);
-    const map=(c.req.param('map')??'').slice(0,128),ip=(c.env as { incoming?:{ socket?:{ remoteAddress?:string } } }|undefined)?.incoming?.socket?.remoteAddress;
-    if(ip&&!allowed(`ip ${ip}`,20,200)||!allowed(`map ${provider} ${map}`,5,60)){c.header('Retry-After','1');return c.json({error:'Too many requests'},429);}
     try {
       const text=await boundedText(c.req.raw,512*1024),result=sync.webhook(provider,c.req.param('map')??'',c.req.raw.headers,text,c.req.url);
+      if(result.status>=300)return refuse(c,provider,result.status===401?401:404,result.status===401?'Invalid signature':'Not found');
       for(const [name,value] of Object.entries(result.headers??{}))c.header(name,value);
-      return result.status<300?c.json({ok:true},result.status as 200):c.json({error:result.status===401?'Invalid signature':'Not found'},result.status as 401);
-    }catch{return c.json({error:'Invalid request'},400);}
+      return c.json({ok:true},result.status as 200);
+    }catch{return refuse(c,provider,400,'Invalid request');}
   };
   app.post('/api/tasksync/:provider/hook/:map',c=>hook(c,c.req.param('provider')));
   for(const route of legacyRoutes)app.post(route.hook,c=>hook(c,route.provider));

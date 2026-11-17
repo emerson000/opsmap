@@ -58,6 +58,14 @@ export const asanaHookCount = (state: unknown) => hookOf(state) ? 1 : 0;
 /** The target's nonce: the only `h` in the query, or undefined. */
 const nonceIn = (url: string | undefined) => { try { const all = new URL(url ?? '').searchParams.getAll('h'); return all.length === 1 && all[0] ? all[0] : undefined; } catch { return undefined; } };
 const sameText = (a: string, b: string) => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
+/** `error` with each of `hidden` (the nonce'd target first, then the nonce), raw or URL-encoded once or twice, replaced. */
+function redact(error: unknown, hidden: string[]): unknown {
+  if (!(error instanceof Error)) return error;
+  let text = error.message;
+  for (const [i, h] of hidden.entries()) for (const form of [encodeURIComponent(encodeURIComponent(h)), encodeURIComponent(h), h]) text = text.split(form).join(i === 0 ? '‹target›' : '‹nonce›');
+  if (text === error.message) return error;
+  return error instanceof AsHttpError ? new AsHttpError(error.status, text, error.retryAfterS) : new Error(text);
+}
 const withNonce = (target: string, nonce: string) => `${target}${target.includes('?') ? '&' : '?'}h=${nonce}`;
 /** A handshake (`X-Hook-Secret`), answered only on the target of the creation in flight for this map, and only once;
  *  or a delivery, on the target the webhook was made with, signed with the handshake's secret (`X-Hook-Signature`: the
@@ -280,10 +288,12 @@ export class AsanaSession implements ProviderSession {
       // Made, but the handshake never reached this server: deliveries could not be checked.
       if (waiting.offered === undefined) { await this.forget(made.gid); throw new Error(`${this.label} made the webhook without a handshake this server answered`); }
       return { gid: made.gid, nonce: waiting.nonce };
-    } catch (error) {
+    } catch (raw) {
+      // No error leaves here with the nonce in it, whatever the status: the target (raw or URL-encoded) reads ‹target›.
+      const error = redact(raw, [withNonce(target, waiting.nonce), waiting.nonce]);
       // What Asana answers when the target did not echo the handshake (it waits a while first). Its message, never a secret or the nonce.
       if (error instanceof AsHttpError && (error.status === 400 || error.status === 403)) {
-        const said = error.message.replace(/^Asana [A-Z]+ \/webhooks: /, '').replace(/[?&]h=[\w-]*/g, '').replace(/[\x00-\x1f]/g, ' ').slice(0, 200);
+        const said = error.message.replace(/^Asana [A-Z]+ \/webhooks: /, '').replace(/[\x00-\x1f]/g, ' ').slice(0, 200);
         throw new Error(`${this.label} could not complete the webhook handshake with PUBLIC_URL (HTTP ${error.status}: ${said})`);
       }
       throw error;
