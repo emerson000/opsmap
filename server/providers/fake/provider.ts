@@ -6,7 +6,8 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { Affiliation } from '../../../src/core/model/types';
 import { RemoteAuthError, type Capabilities, type FieldKey, type ProviderDescriptor, type ProviderFactory, type ProviderSession, type RelationKind, type RemoteContainer, type RemoteRoot, type RemoteTask, type Snapshot, type TaskProvider, type TaskWrite, type WebhookResult } from '../../tasksync/contract';
 
-export interface FakeOptions { id?:string; label?:string; aliases?:string[]; fields?:FieldKey[]; relations?:RelationKind[]; webhooks?:Capabilities['webhooks'] }
+export interface FakeOptions { id?:string; label?:string; aliases?:string[]; fields?:FieldKey[]; relations?:RelationKind[]; webhooks?:Capabilities['webhooks'];
+  /** Runs inside ensureWebhooks before it returns, as a service whose handshake arrives while the registration call is open. */ duringEnsureWebhooks?:()=>void }
 const ALL_FIELDS:FieldKey[]=['title','due','note','progress','status','container','affiliation','parent'];
 type Stored=RemoteTask&{ root:string; deleted?:boolean };
 
@@ -18,6 +19,7 @@ export class FakeProvider implements TaskProvider {
   readonly containers=new Map<string,RemoteContainer&{ root:string }>();
   readonly tasks=new Map<string,Stored>();
   private readonly failures=new Map<string,Error[]>();
+  duringEnsureWebhooks?:()=>void;
   private clock=Date.parse('2026-11-01T12:00:00Z');
   private next=1;
   constructor(options:FakeOptions={}) {
@@ -26,6 +28,7 @@ export class FakeProvider implements TaskProvider {
       urls:{root:`http://${id}.invalid/{root}`,container:`http://${id}.invalid/{root}/{container}`,task:`http://${id}.invalid/{root}/task/{id}`}};
     this.capabilities={fields:new Set(options.fields??ALL_FIELDS),relations:new Set(options.relations??['link','dependency','handoff']),maxTitle:250,maxNote:10000,
       webhooks:options.webhooks??{https:false,publicAddress:false},pollMs:60_000,idlePollMs:300_000};
+    this.duringEnsureWebhooks=options.duringEnsureWebhooks;
   }
   /** The next call of `method` (verify or a session method) throws `error`. */
   failNext(method:string,error:Error):void {const list=this.failures.get(method)??[];list.push(error);this.failures.set(method,list);}
@@ -83,7 +86,7 @@ export class FakeProvider implements TaskProvider {
       ...(this.capabilities.relations.size?{relate:(root:RemoteRoot,from:string,to:string,kind:RelationKind,add:boolean)=>call('relate',[root.id,from,to,kind,add],()=>{
         const t=this.tasks.get(from);if(!t)return;const rest=(t.relations??[]).filter(r=>!(r.kind===kind&&r.to===to));t.relations=add?[...rest,{kind,to}]:rest;
       })}:{}),
-      ensureWebhooks:(root,containers,target,secret,_state,force)=>call('ensureWebhooks',[root.id,containers,target,force],()=>({hooks:containers.length,target,secret:secret.length})),
+      ensureWebhooks:(root,containers,target,secret,_state,force)=>call('ensureWebhooks',[root.id,containers,target,force],()=>{this.duringEnsureWebhooks?.();return {hooks:containers.length,target,secret:secret.length};}),
       removeWebhooks:(root,state)=>call('removeWebhooks',[root.id,state],()=>undefined),
     };
   }

@@ -34,9 +34,10 @@ export function migrateTaskSync(store:Store):void {
     store.db.exec('BEGIN IMMEDIATE');
     try {
       const links=hasTable(store,'vk_links'),maps=hasTable(store,'vk_maps');
-      if(links)store.db.exec('INSERT OR IGNORE INTO ts_links(map_id,unit_id,remote_id,base) SELECT map_id,unit_id,CAST(task_id AS TEXT),base FROM vk_links');
+      // ON CONFLICT, not OR IGNORE: a row that does not fit (a missing value) must fail the whole move, not vanish.
+      if(links)store.db.exec('INSERT INTO ts_links(map_id,unit_id,remote_id,base) SELECT map_id,unit_id,CAST(task_id AS TEXT),base FROM vk_links WHERE true ON CONFLICT(map_id,unit_id) DO NOTHING');
       if(maps) {
-        const put=store.db.prepare("INSERT OR IGNORE INTO ts_maps(map_id,provider,secret,hooks,owner,hooks_checked,last_delivery,relations) VALUES(?,'vikunja',?,?,?,?,?,?)");
+        const put=store.db.prepare("INSERT INTO ts_maps(map_id,provider,secret,hooks,owner,hooks_checked,last_delivery,relations) VALUES(?,'vikunja',?,?,?,?,?,?) ON CONFLICT(map_id) DO NOTHING");
         for(const r of store.db.prepare('SELECT * FROM vk_maps').all() as {map_id:string;secret:string;hooks:string|null;owner:string|null;hooks_checked:string|null;last_delivery:string|null;relations?:string|null}[]) {
           let relations=r.relations??null;
           if(relations){const saved=JSON.parse(relations) as {parents?:Record<string,number|string|null>};if(saved.parents)saved.parents=Object.fromEntries(Object.entries(saved.parents).map(([k,v])=>[k,v===null?null:String(v)]));relations=JSON.stringify(saved);}

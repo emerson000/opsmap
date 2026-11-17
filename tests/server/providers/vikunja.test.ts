@@ -5,6 +5,7 @@ import { Maps } from '../../../server/maps';
 import { SecretBox } from '../../../server/secrets';
 import { AFFILIATION_LABELS, htmlToText, textToHtml } from '../../../server/providers/vikunja/adapter';
 import { VikunjaProvider } from '../../../server/providers/vikunja';
+import { HOOK_PATHS } from '../../../server/providers';
 import { TaskSyncEngine } from '../../../server/tasksync/engine';
 import { Credentials } from '../../../server/tasksync/credentials';
 import { ProviderRegistry } from '../../../server/tasksync/registry';
@@ -31,7 +32,7 @@ const run = (text: string) => {
 const bind = () => sync.request(hub().mapId, { action: 'bind', name: 'Ops' }, user, 'web');
 const taskOf = (d: string) => vk.tasksById.get(vkId(unit(d))!)!;
 /** An engine on this store: `hookBase` is PUBLIC_URL; the address resolves as a public one. Long debounce: cycles run when a test asks. */
-const engine = (hookBase: string | undefined, creds = credentials) => new TaskSyncEngine(maps, registry, creds, hookBase, 3_600_000, undefined, { resolve: async () => ['93.184.216.34'] });
+const engine = (hookBase: string | undefined, creds = credentials) => new TaskSyncEngine(maps, registry, creds, hookBase, 3_600_000, undefined, { resolve: async () => ['93.184.216.34'], hookPaths: HOOK_PATHS });
 /** A delivery to the Vikunja hook: accepted (200) or not. */
 const webhook = (mapId: string, body: string, signature: string | undefined) => sync.webhook('vikunja', mapId, new Headers(signature === undefined ? {} : { 'x-vikunja-signature': signature }), body).status === 200;
 

@@ -43,5 +43,6 @@ export interface TaskProvider {
   verify(token:string):Promise<{ username:string }>;                        // RemoteAuthError when refused
   connect(token:string):ProviderSession;
   receiveWebhook?(headers:Headers, body:string, secret:string, state:unknown):WebhookResult;
+  hookCount?(hooks:unknown):number;                                          // webhooks in ensureWebhooks' state, for status; else one per container
 }
 export type ProviderFactory=(env:NodeJS.ProcessEnv)=>TaskProvider|undefined;

@@ -93,6 +93,22 @@ describe('D8 migration', () => {
     expect(store.db.prepare('SELECT user_id,provider,username FROM ts_tokens').all()).toEqual([{ user_id: 'u1', provider: 'vikunja', username: 'alice' }]);
   });
 
+  it('is one transaction: a row that does not fit leaves every old table and the meta key as they were', () => {
+    const store = oldStore();
+    // A map row without a secret (ts_maps requires one).
+    store.db.exec(`ALTER TABLE vk_maps RENAME TO vk_maps_old;
+      CREATE TABLE vk_maps(map_id TEXT PRIMARY KEY,secret TEXT,hooks TEXT NOT NULL DEFAULT '[]',owner TEXT,hooks_checked TEXT,last_delivery TEXT,relations TEXT);
+      INSERT INTO vk_maps SELECT * FROM vk_maps_old; DROP TABLE vk_maps_old;
+      INSERT INTO vk_maps(map_id,secret) VALUES('other',NULL);`);
+    const before = JSON.stringify([store.db.prepare('SELECT * FROM vk_links ORDER BY unit_id').all(), store.db.prepare('SELECT * FROM vk_maps ORDER BY map_id').all()]);
+    expect(() => migrateTaskSync(store)).toThrow(/NOT NULL/);
+    expect(JSON.stringify([store.db.prepare('SELECT * FROM vk_links ORDER BY unit_id').all(), store.db.prepare('SELECT * FROM vk_maps ORDER BY map_id').all()])).toBe(before);
+    expect(store.db.prepare('SELECT COUNT(*) AS n FROM ts_links').get()).toEqual({ n: 0 });
+    expect(store.db.prepare('SELECT COUNT(*) AS n FROM ts_maps').get()).toEqual({ n: 0 });
+    expect(store.db.prepare('SELECT COUNT(*) AS n FROM snapshots').get()).toEqual({ n: 1 });
+    expect(store.meta('tasksync_v1')).toBeUndefined();
+  });
+
   it('does nothing on a server that never synced', () => {
     const store = new Store(':memory:');
     expect(taskSyncSummary(store)).toEqual(['nothing to migrate']);

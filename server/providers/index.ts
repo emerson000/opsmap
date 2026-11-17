@@ -8,3 +8,5 @@ export const MODULES: ProviderModule[] = [vikunja, { id: 'fake', factory: fakePr
 export const PROVIDERS: ProviderFactory[] = MODULES.map(m => m.factory);
 /** Old webhook paths that still reach a provider (D7). */
 export const LEGACY_ROUTES = MODULES.flatMap(m => m.legacyRoutes ?? []);
+/** Provider id → the path its webhooks are registered at, for the task sync engine. */
+export const HOOK_PATHS: Readonly<Record<string, string>> = Object.fromEntries(MODULES.flatMap(m => m.legacyRoutes?.slice(0, 1).map(r => [r.provider, r.hook]) ?? []));

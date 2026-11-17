@@ -30,6 +30,8 @@ export class VikunjaProvider implements TaskProvider {
   }
   connect(token: string): ProviderSession { return vikunjaSession(this.api(token), this.descriptor.label); }
   receiveWebhook(headers: Headers, body: string, secret: string): WebhookResult { return receiveVikunjaWebhook(headers, body, secret); }
+  /** One webhook per watched project: the list ensureWebhooks keeps. */
+  hookCount(hooks: unknown): number { return Array.isArray(hooks) ? hooks.length : 0; }
 }
 export const vikunjaProvider = (url: string, makeApi?: ApiFactory) => new VikunjaProvider(url, makeApi);
 /** VIKUNJA_URL: the Vikunja origin (any path is dropped). */

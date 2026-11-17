@@ -134,9 +134,16 @@ export class VikunjaSession implements ProviderSession {
       relations: [...related('related', 'link'), ...related('blocked', 'dependency'), ...related('precedes', 'handoff')],
     };
   }
-  async snapshot(_root: RemoteRoot, containers: Record<string, string>, tz: string): Promise<Snapshot> {
-    const projects = await this.all(), tasks: RemoteTask[] = [], unmatched: Snapshot['unmatched'] = [];
-    for (const id of new Set(Object.values(containers))) {
+  async snapshot(root: RemoteRoot, containers: Record<string, string>, tz: string): Promise<Snapshot> {
+    const projects = await this.all(), tasks: RemoteTask[] = [], unmatched: Snapshot['unmatched'] = [], mine = new Set(Object.values(containers));
+    // D12: a live child project that is no sector's is not synced; status lists it when it has open tasks. Only its
+    // list view is read: no bucket is added to a project opsmap does not manage.
+    for (const project of projects.filter(p => p.parent_project_id === Number(root.id) && !p.is_archived && !mine.has(String(p.id)))) {
+      const list = (project.views ?? []).find(v => v.view_kind === 'list'); if (!list) continue;
+      const open = (await this.api.tasks(project.id, list.id)).filter(t => !t.done).length;
+      if (open) unmatched.push({ container: { id: String(project.id), name: project.title }, open });
+    }
+    for (const id of mine) {
       const project = projects.find(p => p.id === Number(id)); if (!project) continue;
       // An archived project is read-only in Vikunja: its sector waits until it is unarchived.
       if (project.is_archived) { const container: RemoteContainer = { id, name: project.title, archived: true }; unmatched.push({ container, open: 0 }); continue; }

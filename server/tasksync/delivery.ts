@@ -53,12 +53,13 @@ export function checkDue(rec:DeliveryRecord,checkedAt:string|null|undefined,cont
   const same=[...rec.containers??[]].sort().join()===[...containers].sort().join();
   return force||!checkedAt||now-Date.parse(checkedAt)>=CHECK_MS||!same;
 }
-export interface DeliveryInput { blocked?:string; caps:Capabilities; label:string; rec:DeliveryRecord; lastDelivery?:string|null; now:number; pollMs:number; idlePollMs:number; count:number }
+export interface DeliveryInput { blocked?:string; caps:Capabilities; label:string; rec:DeliveryRecord; /** The last webhook check. */ checkedAt?:string|null; lastDelivery?:string|null; now:number; pollMs:number; idlePollMs:number; count:number }
 export function deliveryMode(i:DeliveryInput):Delivery {
   const last=i.lastDelivery??undefined,lastDelivery=last?{lastDelivery:last}:{};
   if(i.blocked)return {mode:'off',reason:i.blocked,nextPollMs:i.pollMs};
   if(i.rec.failure)return {mode:'failed',reason:i.rec.failure.reason,nextPollMs:i.pollMs,retryAt:i.rec.failure.retryAt,...lastDelivery};
-  if(handshakeMissing(i.caps,i.rec,i.now))return {mode:'failed',reason:handshakeReason(i.caps,i.label),nextPollMs:i.pollMs,...lastDelivery};
+  // Not recorded yet: the next cycle records it, and the check after that (10 minutes on) registers again.
+  if(handshakeMissing(i.caps,i.rec,i.now))return {mode:'failed',reason:handshakeReason(i.caps,i.label),nextPollMs:i.pollMs,retryAt:new Date(Math.max(i.now,Date.parse(i.checkedAt??i.rec.registeredAt!))+CHECK_MS).toISOString(),...lastDelivery};
   if(last&&i.now-Date.parse(last)<LIVE_MS)return {mode:'live',reason:`${i.label} delivers changes`,nextPollMs:i.idlePollMs,...lastDelivery};
   return {mode:'pending',reason:i.count?`${i.count} webhooks registered, none delivered in the last 15 minutes`:'no webhooks yet',nextPollMs:i.pollMs,...lastDelivery};
 }

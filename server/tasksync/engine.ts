@@ -8,7 +8,6 @@ import { DEFAULT_TZ } from '../../src/core/model/time';
 import type { Maps } from '../maps';
 import type { Hub, Op } from '../hub';
 import type { User } from '../db';
-import { LEGACY_ROUTES } from '../providers';
 import { RateLimited, RemoteAuthError, type Delivery, type FieldKey, type ProviderSession, type RelationKind, type RemoteRoot, type RemoteTask, type TaskProvider, type TaskWrite, type WebhookResult } from './contract';
 import type { Credentials } from './credentials';
 import type { ProviderRegistry } from './registry';
@@ -17,7 +16,7 @@ import { SyncTables } from './links';
 import { migrateTaskSync } from './migrate';
 import { classifyPublicUrl, lookupAll, type Reachability } from './reachability';
 import { FIELD_KEY, FIELDS, NOTE_LIMIT, dayInstant, mergeFields, sectorOf, syncable, taskFields, unitFields, type Field, type Fields, type Limits } from './merge';
-import { checkDue, deliveryMode, deliveryStatus, handshakeMissing, handshakeReason, NUDGE_DELAY_MS, NUDGE_EVERY_MS, pollIntervals, REACH_MS, retryDelay, webhooksBlocked, type WebhookSetting } from './delivery';
+import { checkDue, deliveryMode, type DeliveryRecord, deliveryStatus, handshakeMissing, handshakeReason, NUDGE_DELAY_MS, NUDGE_EVERY_MS, pollIntervals, REACH_MS, retryDelay, webhooksBlocked, type WebhookSetting } from './delivery';
 
 export interface Timers { set(fn:()=>void,ms:number):unknown; clear(handle:unknown):void }
 export interface EngineOptions {
@@ -25,6 +24,7 @@ export interface EngineOptions {
   /** Every address of a host name (PUBLIC_URL's). */ resolve?:(host:string)=>Promise<string[]>;
   /** TASKSYNC_WEBHOOKS. */ webhooks?:WebhookSetting;
   /** Where scheduled cycles wait. */ timers?:Timers;
+  /** Provider id → the webhook path (with :map) its existing webhooks post to, when not the generic one (D7). */ hookPaths?:Readonly<Record<string,string>>;
 }
 interface Info { lastSync?:string; lastAttempt?:number; lastError?:string; pushed:number; pulled:number; created:number; added:number; archived?:string[]; unmatched?:{ name:string; open:number }[] }
 interface Stats { pushed:number; pulled:number; created:number; added:number }
@@ -51,12 +51,13 @@ export class TaskSyncEngine implements SyncService {
   private readonly resolveHost:(host:string)=>Promise<string[]>;
   private readonly setting:WebhookSetting;
   private readonly timers:Timers;
+  private readonly hookPaths:Readonly<Record<string,string>>;
   private readonly onEvent:(event:{ kind:string; mapId?:string; op?:Op; deleted?:string })=>void;
 
   /** `hookBase`: PUBLIC_URL, where services post webhooks; without it the engine polls only. `pollOverrideMs`: TASKSYNC_POLL_SECONDS. */
   constructor(readonly maps:Maps,readonly registry:ProviderRegistry,readonly credentials:Credentials,readonly hookBase?:string,readonly debounceMs=1000,readonly pollOverrideMs?:number,options:EngineOptions={}) {
     this.tables=new SyncTables(maps.store);migrateTaskSync(maps.store);
-    this.now=options.now??Date.now;this.resolveHost=options.resolve??lookupAll;this.setting=options.webhooks??'auto';
+    this.now=options.now??Date.now;this.resolveHost=options.resolve??lookupAll;this.setting=options.webhooks??'auto';this.hookPaths=options.hookPaths??{};
     this.timers=options.timers??{set:(fn,ms)=>{const t=setTimeout(fn,ms);t.unref?.();return t;},clear:handle=>clearTimeout(handle as ReturnType<typeof setTimeout>)};
     // Every change on a bound map, except the sync's own, pushes after a short pause. A deleted map takes its webhooks with it.
     this.onEvent=event=>{
@@ -185,16 +186,16 @@ export class TaskSyncEngine implements SyncService {
     const bound=this.maps.get(mapId)?.doc.settings.taskSync,p=bound&&this.registry.get(bound.provider);
     if(!p)return {mode:'off',reason:'not bound',nextPollMs:0};
     const {pollMs,idlePollMs}=pollIntervals(p.capabilities,this.pollOverrideMs);
-    return deliveryMode({blocked:this.blocked(p),caps:p.capabilities,label:p.descriptor.label,rec:this.tables.delivery(mapId),lastDelivery:this.tables.row(mapId)?.last_delivery,now:this.now(),pollMs,idlePollMs,count:this.hookCount(mapId)});
+    return deliveryMode({blocked:this.blocked(p),caps:p.capabilities,label:p.descriptor.label,rec:this.tables.delivery(mapId),checkedAt:this.tables.row(mapId)?.hooks_checked,lastDelivery:this.tables.row(mapId)?.last_delivery,now:this.now(),pollMs,idlePollMs,count:this.hookCount(mapId)});
   }
-  /** Registered webhooks: the provider's list when its state is one, else one per watched container. */
+  /** Registered webhooks, as the provider counts its state, else one per watched container. */
   private hookCount(mapId:string):number {
-    const hooks=this.tables.hooks(mapId);
-    return hooks===null?0:Array.isArray(hooks)?hooks.length:this.tables.delivery(mapId).containers?.length??0;
+    const hooks=this.tables.hooks(mapId),p=this.registry.get(this.tables.row(mapId)?.provider??'');
+    return hooks===null?0:p?.hookCount?.(hooks)??this.tables.delivery(mapId).containers?.length??0;
   }
   /** Where the provider posts: the generic path, or the older one its webhooks were made with (D7). */
   private target(p:TaskProvider,mapId:string):string {
-    const path=LEGACY_ROUTES.find(r=>r.provider===p.descriptor.id)?.hook??`/api/tasksync/${p.descriptor.id}/hook/:map`;
+    const path=this.hookPaths[p.descriptor.id]??`/api/tasksync/${p.descriptor.id}/hook/:map`;
     return `${this.hookBase}${path.replace(':map',encodeURIComponent(mapId))}`;
   }
   /** Registers or checks the map's webhooks when they are due (every 10 minutes, at once on /tasks sync or a sector
@@ -209,19 +210,25 @@ export class TaskSyncEngine implements SyncService {
       this.tables.setDelivery(mapId,{root});return;
     }
     if(!rec.failure&&handshakeMissing(p.capabilities,rec,now))this.fail(rec,handshakeReason(p.capabilities,p.descriptor.label),now);
-    if(checkDue(rec,row.hooks_checked,containers,now,force)) {
-      try {
-        const state=await session.ensureWebhooks(root,containers,this.target(p,mapId),row.secret,hooks,force);
-        if(rec.failure||!rec.registeredAt||JSON.stringify(state??null)!==JSON.stringify(hooks))rec.registeredAt=iso(now);
-        delete rec.failure;rec.containers=[...containers];
-        if(!p.capabilities.webhooks.handshakeTimeoutMs)rec.failures=0;
-        this.tables.set(mapId,{hooks:JSON.stringify(state??null),hooks_checked:iso(now)});
-      }catch(error){
-        if(error instanceof RateLimited||error instanceof RemoteAuthError)throw error;
-        this.fail(rec,message(error),now);this.tables.set(mapId,{hooks_checked:iso(now)});
-      }
+    if(!checkDue(rec,row.hooks_checked,containers,now,force)){this.tables.setDelivery(mapId,rec);return;}
+    // registeredAt, containers, failure and failures are this check's; they are written onto the record as it is
+    // after the call, because a handshake can arrive while the provider is still registering (handshakeAt, failures).
+    let owned:(r:DeliveryRecord)=>void;
+    try {
+      // After a failure the webhooks are made again, not just checked.
+      const state=await session.ensureWebhooks(root,containers,this.target(p,mapId),row.secret,hooks,force||Boolean(rec.failure));
+      const renew=Boolean(rec.failure)||!rec.registeredAt||JSON.stringify(state??null)!==JSON.stringify(hooks);
+      owned=r=>{if(renew)r.registeredAt=iso(now);r.containers=[...containers];delete r.failure;if(!p.capabilities.webhooks||!p.capabilities.webhooks.handshakeTimeoutMs)r.failures=0;};
+      this.tables.set(mapId,{hooks:JSON.stringify(state??null),hooks_checked:iso(now)});
+    }catch(error){
+      if(error instanceof RateLimited||error instanceof RemoteAuthError)throw error;
+      owned=r=>this.fail(r,message(error),now);
+      this.tables.set(mapId,{hooks_checked:iso(now)});
     }
-    this.tables.setDelivery(mapId,rec);
+    const fresh=this.tables.delivery(mapId),answered=fresh.handshakeAt!==undefined&&Date.parse(fresh.handshakeAt)>=now;
+    fresh.root=root;fresh.failures=answered?0:rec.failures;
+    owned(fresh);
+    this.tables.setDelivery(mapId,fresh);
   }
   private fail(rec:ReturnType<SyncTables['delivery']>,reason:string,now:number):void {
     rec.failures=(rec.failures??0)+1;rec.failure={reason,count:rec.failures,retryAt:iso(now+retryDelay(rec.failures))};

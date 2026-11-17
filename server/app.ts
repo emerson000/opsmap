@@ -18,7 +18,7 @@ import { SecretBox } from './secrets';
 import { ProviderRegistry } from './tasksync/registry';
 import { Credentials } from './tasksync/credentials';
 import { taskRequestArgs, taskSyncRoutes } from './tasksync/routes';
-import { LEGACY_ROUTES } from './providers';
+import { HOOK_PATHS, LEGACY_ROUTES } from './providers';
 import { TaskSyncEngine } from './tasksync/engine';
 import { pollOverride, webhookSetting } from './tasksync/delivery';
 export interface AppOptions { /** The task services; from the environment when not given. */ registry?:ProviderRegistry }
@@ -29,7 +29,7 @@ export function createApp(config:Config,options:AppOptions={}) {
   const registry=options.registry??ProviderRegistry.fromEnv(process.env);
   const credentials=registry.list().length?new Credentials(store,SecretBox.fromFile(config.secretKeyFile??join(config.dataDir,'secrets','master.key')),registry):undefined;
   // Polling always runs; webhooks to PUBLIC_URL speed it up where the service can reach it (TASKSYNC_WEBHOOKS, TASKSYNC_POLL_SECONDS).
-  const sync=credentials?new TaskSyncEngine(maps,registry,credentials,config.publicUrl,1000,pollOverride(process.env),{webhooks:webhookSetting(process.env.TASKSYNC_WEBHOOKS)}):undefined;
+  const sync=credentials?new TaskSyncEngine(maps,registry,credentials,config.publicUrl,1000,pollOverride(process.env),{webhooks:webhookSetting(process.env.TASKSYNC_WEBHOOKS),hookPaths:HOOK_PATHS}):undefined;
   app.use('*',async(c,next)=>{c.header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'");c.header('X-Content-Type-Options','nosniff');c.header('Referrer-Policy','same-origin');c.header('X-Frame-Options','DENY');await next();});
   app.onError((err,c)=>{console.error('Request failed',c.req.path,errorCode(err));return c.json({error:'Request failed'},500);});
   app.get('/healthz',c=>c.json({ok:true,maps:maps.hubs.size}));

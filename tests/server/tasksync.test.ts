@@ -244,6 +244,34 @@ describe('task sync engine: delivery modes', () => {
     expect(t.engine.delivery(t.mapId).mode).toBe('live');
   });
 
+  it('a handshake that arrives while ensureWebhooks is still open is kept: the mode never goes to failed', async () => {
+    const t = await setup({ fake: { webhooks: { https: true, publicAddress: true, handshakeTimeoutMs: 30_000 } } });
+    t.fake.duringEnsureWebhooks = () => { expect(t.deliver()).toMatchObject({ status: 200 }); };
+    await t.bind();
+    expect(t.calls('ensureWebhooks')).toHaveLength(1);
+    for (let i = 0; i < 4; i++) {
+      t.clock.advance(31_000);
+      expect(t.engine.delivery(t.mapId).mode).not.toBe('failed');
+      await t.engine.run(t.mapId);
+      expect(t.engine.delivery(t.mapId).mode).not.toBe('failed');
+    }
+    t.clock.advance(10 * 60_000);
+    await t.engine.run(t.mapId);
+    expect(t.engine.delivery(t.mapId).mode).not.toBe('failed');
+  });
+
+  it('after a missing handshake, status says when it retries, and the retry registers again (force)', async () => {
+    const t = await setup({ fake: { webhooks: { https: true, publicAddress: true, handshakeTimeoutMs: 30_000 } } });
+    await t.bind();
+    t.clock.advance(31_000);
+    expect(await t.status()).toMatch(/webhooks failed: no handshake from Fake within 30 s, retrying at \d\d:\d\d:\d\dZ · polling every minute/);
+    await t.engine.run(t.mapId);
+    expect(await t.status()).toMatch(/retrying at \d\d:\d\d:\d\dZ/);
+    t.clock.advance(10 * 60_000);
+    await t.engine.run(t.mapId);
+    expect(t.calls('ensureWebhooks').map(c => c.args[3])).toEqual([true, true]);
+  });
+
   it('when webhooks are not live, a nudge pulls within 2 s, at most once per 20 s per map; when live it does nothing', async () => {
     const t = await setup({ hookBase: undefined });
     await t.bind(); t.clock.queue = [];
