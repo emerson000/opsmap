@@ -498,8 +498,9 @@ export class TaskSyncEngine implements SyncService {
         const key=theirs===null?undefined:parentKey(u.id,theirs);
         try{this.system(mapId,p,{action:'pull',unit:u.id,changes:{parentId:theirs===null?null:units.get(theirs)!.id}});parents[u.id]=theirs;stats.pulled++;}
         catch(error){
-          // Left as it is in the service; the agreed parent stays, so the next cycle tries the service's again.
-          if(agreed!==undefined)parents[u.id]=agreed;
+          // Left as it is in the service; the agreed parent stays (opsmap's, when none was agreed yet), so the next cycle
+          // tries the service's again instead of pushing opsmap's over it.
+          parents[u.id]=agreed!==undefined?agreed:ours;
           if(key===undefined)await guard(u.designation,async()=>{throw error;});
           else{stillRefusedParents.add(key);if(!refusedParents.has(key))await guard(u.designation,async()=>{throw error;});}
         }

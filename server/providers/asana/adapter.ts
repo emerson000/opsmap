@@ -110,9 +110,10 @@ export class AsanaSession implements ProviderSession {
     // The project's list leaves out plain subtasks: read them under each parent, a level at a time, at most DEPTH levels
     // below a top-level task. Only tasks in the list are read (open, or done in the last 7 days: the contract does not
     // say which tasks have linked children); a linked child under an older parent is read by the engine with getTask.
-    // A multi-homed subtask is also in the list, but it is read under its parent, so the depth counts from the top.
+    // A multi-homed subtask is also in the list, but it is read under its parent, so the depth counts from the top; one
+    // whose parent is not in the list (done long ago, or in another project) is read from the list.
     const expanded = new Set<string>();
-    let level = top.filter(t => t.parent === null && t.num_subtasks > 0);
+    let level = top.filter(t => t.num_subtasks > 0 && (t.parent === null || !seen.has(t.parent.gid)));
     for (let depth = 0; depth < DEPTH && level.length; depth++) {
       const next: AsTask[] = [];
       for (const p of level) {

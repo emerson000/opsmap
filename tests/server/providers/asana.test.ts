@@ -385,6 +385,39 @@ describe('Asana subtasks', () => {
     expect(await sync.run(hub().mapId)).toMatch(/^0 pushed, 0 pulled/);
     expect(writes()).toEqual([]);
   });
+  it('a refused parent with nothing agreed yet keeps the service’s attachment: a later opsmap edit pushes no parent', async () => {
+    await bind();
+    run('/attach FILES to MOVE');
+    run('/attach LANDLORD to FILES');
+    run('/attach TOOLS to LANDLORD');
+    await sync.run(hub().mapId);
+    const files = unit('FILES').remote!, tools = unit('TOOLS').remote!;
+    await as.setParent(files, tools);
+    as.tick(600_000);
+    // Nothing agreed on parents yet, as in the first relations cycle after a rebind.
+    sync.tables.setRelations(hub().mapId, { parents: {}, edges: [], refused: [] });
+    expect(await sync.run(hub().mapId)).toMatch(/1 failed: FILES: Attachment would create a cycle/);
+    run('/rename FILES "Sort the downloads"');
+    as.tasksById.get(files)!.modified = Date.now() - 3_600_000;   // the opsmap edit is the newer change
+    as.calls.length = 0;
+    expect(await sync.run(hub().mapId)).not.toMatch(/failed/);
+    expect(parentWrites()).toEqual([]);
+    expect(as.tasksById.get(files)).toMatchObject({ parent: tools, name: 'Sort the downloads' });
+    expect(unit('FILES').parentId).toBe('move');
+  });
+  it('a multi-homed subtask whose parent is not in the list (done long ago) still has its new children read', async () => {
+    await bind();
+    const tools = unit('TOOLS').remote!, move = unit('MOVE').remote!;
+    await as.setParent(tools, move);   // multi-homed: keeps its section
+    await sync.run(hub().mapId);
+    await as.updateTask(move, { completed: true }); as.tasksById.get(move)!.completedAt = Date.now() - 8 * 86_400_000;
+    await sync.run(hub().mapId);
+    const kid = await as.createTask({ name: 'Try the trial', parent: tools });
+    as.calls.length = 0;
+    await sync.run(hub().mapId);
+    expect(as.calls).toContain(`subtasks ${tools}`);
+    expect(byTask(kid.gid)).toMatchObject({ parentId: 'tools', sectorId: unit('TOOLS').sectorId });
+  });
   it('binding again after /tasks unbind links the subtasks by title under their parent, with no duplicates', async () => {
     await bind();
     const before = as.tasksById.size, packing = unit('PACKING').remote;
