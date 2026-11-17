@@ -12,7 +12,7 @@ export const TASK_SYNC_TABLES=`CREATE TABLE IF NOT EXISTS ts_links(map_id TEXT N
 /** The values both sides last agreed on for one link, and the fields switched off when they were recorded (D21): a
  *  field off then and on now is re-based; identity off now but not then still has its remote identity to remove, but
  *  only when opsmap wrote it (`idPushed`). A base from before D21 has no `idPushed`. */
-export interface Base extends Fields { off?:Field[]; idPushed?:boolean }
+export interface Base extends Fields { off?:Field[]; idPushed?:boolean; /** When a finished task the snapshot left out was last read (ISO). */ checkedAt?:string }
 export interface RelationBase { parents:Record<string,string|null>; edges:string[]; refused:string[] }
 export interface MapRow { map_id:string; provider:string; secret:string; hooks:string|null; owner:string|null; hooks_checked:string|null; last_delivery:string|null; state:string|null; relations:string|null; delivery:string|null }
 const json=<T>(text:string|null|undefined,fallback:T):T=>{if(!text)return fallback;try{return JSON.parse(text) as T;}catch{return fallback;}};

@@ -93,6 +93,30 @@ describe('task sync engine: capabilities', () => {
     expect(await t.status()).not.toMatch(/last error/);
   });
 
+  it('rate limited among the linked units: the next cycle starts at the unit where it stopped', async () => {
+    // A service without containers keeps a task where it is: outside the map's containers, it is read with getTask every cycle.
+    const t = await setup({ fake: { fields: ['title', 'due', 'note', 'progress', 'status', 'affiliation', 'parent'] } });
+    await t.bind();
+    const ids = ['LEAK', 'TOOLS', 'Q4RPT'].map(d => t.unit(d).remote!);
+    for (const id of ids) t.fake.remoteUpdate(id, { container: 'elsewhere' });
+    let limit = true, n = 0;
+    const read: string[] = [], connect = t.fake.connect.bind(t.fake);
+    t.fake.connect = (token: string): ProviderSession => {
+      const s = connect(token);
+      return { ...s, getTask: async (root, id, tz) => { read.push(id); if (limit && ++n === 2) throw new RateLimited(30); return s.getTask(root, id, tz); } };
+    };
+    await expect(t.engine.run(t.mapId)).rejects.toThrow('rate limited, retrying in 30s');
+    const stopped = read[1];
+    read.length = 0; limit = false;
+    await t.engine.run(t.mapId);
+    expect(read[0]).toBe(stopped);
+    expect([...read].sort()).toEqual([...ids].sort());
+    // Done without a stop: the next cycle goes in map order again.
+    read.length = 0;
+    await t.engine.run(t.mapId);
+    expect(read).toEqual(t.doc().units.filter(u => ids.includes(u.remote!)).map(u => u.remote));
+  });
+
   it('lists containers that match no sector, and moves a linked task back out of one', async () => {
     const t = await setup();
     await t.bind();
@@ -437,7 +461,7 @@ describe('task sync engine: field switches (D21)', () => {
     await t.bind();
     t.run('/tasks field state off');
     await t.engine.run(t.mapId);
-    t.fake.remoteUpdate(t.unit('IRSRSP').remote!, { status: 'done' });
+    t.fake.remoteUpdate(t.unit('IRSRSP').remote!, { status: 'blocked' });
     expect(await t.engine.run(t.mapId)).toMatch(/^0 pushed, 0 pulled/);
     expect(t.unit('IRSRSP').lifecycle).toBe('active');
     t.run('/tasks field state on');
@@ -503,6 +527,44 @@ describe('task sync engine: field switches (D21)', () => {
     await t.engine.run(t.mapId);
     expect(taskOf(t, 'LEAK').affiliations).toEqual([]);
     expect(taskOf(t, 'IRSRSP').affiliations).toEqual(['neutral']);
+  });
+
+  it('with state off, completion still syncs both ways; doing and blocked are neither read nor written', async () => {
+    const t = await setup();
+    await t.bind();
+    t.run('/tasks field state off');
+    await t.engine.run(t.mapId);
+    const statusWrites = () => t.calls('updateTask').filter(c => 'status' in (c.args[2] as object)).map(c => [c.args[1], (c.args[2] as { status: unknown }).status]);
+    // Done in the service: /done.
+    t.fake.remoteUpdate(t.unit('IRSRSP').remote!, { status: 'done' });
+    t.fake.calls.length = 0;
+    expect(await t.engine.run(t.mapId)).toMatch(/^0 pushed, 1 pulled/);
+    expect(t.unit('IRSRSP').lifecycle).toBe('done');
+    expect(statusWrites()).toEqual([]);
+    // /drop completes the task.
+    t.run('/drop TOOLS');
+    t.fake.calls.length = 0;
+    expect(await t.engine.run(t.mapId)).toMatch(/^1 pushed, 0 pulled/);
+    expect(taskOf(t, 'TOOLS').status).toBe('done');
+    expect(statusWrites()).toEqual([[t.unit('TOOLS').remote, 'done']]);
+    // Doing and blocked: not read from the service, not written to it.
+    t.fake.remoteUpdate(t.unit('Q4RPT').remote!, { status: 'blocked' });
+    t.run('/block RECORDS');
+    t.fake.calls.length = 0;
+    await t.engine.run(t.mapId);
+    expect(t.unit('Q4RPT').lifecycle).toBe('active');
+    expect(taskOf(t, 'RECORDS').status).toBe('active');
+    expect(statusWrites()).toEqual([]);
+    // Reopened on either side: open again on the other, with no state chosen for the task.
+    t.fake.remoteUpdate(t.unit('IRSRSP').remote!, { status: 'active' });
+    t.run('/reopen TOOLS');
+    t.fake.calls.length = 0;
+    await t.engine.run(t.mapId);
+    expect(t.unit('IRSRSP').lifecycle).not.toMatch(/done|dropped/);
+    expect(statusWrites()).toEqual([[t.unit('TOOLS').remote, 'open']]);
+    expect(taskOf(t, 'TOOLS').status).toBe('todo');
+    t.fake.calls.length = 0;
+    expect(await t.engine.run(t.mapId)).toMatch(/^0 pushed, 0 pulled/);
   });
 
   it('/tasks status lists the fields that are off, in order', async () => {

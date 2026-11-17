@@ -18,15 +18,15 @@ Optional two-way sync with [Asana](https://asana.com). Set `ASANA_SYNC=1` (or `t
 | Title | Name | Up to 1,024 characters. |
 | Due date | Due date (`due_on`) | Compared by calendar day in the map's zone. A due time (`due_at`) is read as its day, and the exact time comes through to the unit. Writing a day sets `due_on`, which clears the time. |
 | Note | Description (`notes`) | Plain text, up to 16,000 characters. A longer description stays as it is in Asana while its start matches the note. |
-| Done | Completed | Completing a task runs `/done` (a hostile is destroyed); marking it incomplete runs `/reopen`. A unit dropped in opsmap completes its task. A task deleted in Asana drops its unit. |
-| State | Tags `doing` and `blocked` | Neither tag: to do. `doing`: active. `blocked`: blocked. Setting one removes the other. Both: opsmap keeps the unit's state, and its next change settles the tags. |
+| Done | Completed | Completing a task runs `/done` (a hostile is destroyed); marking it incomplete runs `/reopen`. A unit dropped in opsmap completes its task. A task deleted in Asana drops its unit, and so does a task the token can no longer open (Asana answers 403, for example after the task moved into a private project). This still syncs with `state` off. |
+| State | Tags `doing` and `blocked` | Neither tag: to do. `doing`: active. `blocked`: blocked. Setting one removes the other. Both: opsmap keeps the unit's state, and its next change settles the tags. With `state` off, opsmap neither reads nor writes these tags. |
 | Sector | Section | Moving a task to another sector's section moves its unit. Moved to a section that is no sector's, it goes back. |
 | Identity | Tags `hostile`, `suspect`, `friendly`, `assumed`, `neutral`, `unknown`, `pending` | One per task. `enemy`, `friend` and `assumed friend` are read too. Setting one in Asana runs `/id`; `/id` swaps the tag. Other tags are left alone. |
 | Task force | Subtasks | See [Subtasks](#subtasks). |
 
 - Tags are found by name, ignoring case, in the project's workspace, and made on first use in Asana's colors closest to the frames: `hostile` light red, `suspect` light orange, `friendly` light blue, `assumed` light teal, `neutral` light green, `unknown` light yellow, `pending` light warm gray, `doing` dark blue and `blocked` dark red. Asana accepts only its own color names.
 - **Asana tags belong to the whole workspace.** Everyone in the workspace can see a tag such as `hostile` in tag search and on any task they can open. If the workspace is shared with colleagues and opsmap's classification should stay private, bind with `without identity` or turn it off with `/tasks field identity off` ([Field switches](task-sync.md#field-switches)). Turning it off removes the identity tags opsmap put on linked tasks; it does not delete the tags from the workspace. Delete those in Asana if you want them gone.
-- A done task keeps its `doing` or `blocked` tag. When it is marked incomplete in Asana, its unit returns active (or blocked) rather than to do.
+- A done task keeps its `doing` or `blocked` tag. When it is marked incomplete in Asana, its unit returns active (or blocked) rather than to do. With `state` off it returns to do.
 - Not synced: BDA (strength) and link orders, because Asana's percent fields and dependencies need a paid plan; assignees, followers, start dates, comments, attachments and custom fields; sections in other projects; tasks in sections that are no sector's; subtasks of tasks that are not linked; and subtasks more than 5 levels below a top-level task.
 
 ## Subtasks
@@ -46,10 +46,12 @@ Asana's project task list leaves out plain subtasks, so every sync reads them pa
 - the project's tasks that are open or were completed in the last 7 days (100 per request);
 - the project's sections;
 - the subtasks of each of those tasks that has subtasks, one request per parent, level by level, at most 5 levels down. Parents completed in the last 7 days are read too, so a subtask under a recently finished task force still syncs;
-- one request for each linked unit whose task was not in those lists, such as a done unit whose task was completed more than 7 days ago;
-- the workspace's tags, once per sync, when a tag is written.
+- one request for each linked unit whose task was not in those lists, such as a task moved out of the project. A done unit whose task was completed more than 7 days ago is the exception: such a unit is read again only about once a day, at most 10 of them in one sync and at most 50 in a `/tasks sync`, the one read longest ago first. A top-level task reopened in Asana is back in the project's list, so its unit reopens at the next sync; a reopened subtask whose parent was completed long ago is found at its daily read;
+- the workspace's tags, only when a tag is written that the server does not know yet (the first one after a server start, or one new to the workspace), or when Asana no longer knows a tag the server kept (one deleted in Asana).
 
-Writes cost one request for the fields, one per tag added or removed, and a re-read after a parent or section change. Asana is polled every 2 minutes, or every 10 minutes while webhooks deliver. That stays well under the free plan's 150 requests a minute for a project with a few dozen task forces. A rate limit (HTTP 429) stops the sync, keeps the links made so far, shows `last error: rate limited, retrying in 30s` in `/tasks status`, and tries again after the time Asana gives (60 seconds if it gives none). The next sync finishes without duplicates.
+Writes cost one request for the fields, one per tag added or removed, and a re-read after a parent or section change. Asana is polled every 2 minutes, or every 10 minutes while webhooks deliver. That stays well under the free plan's 150 requests a minute for a project with a few dozen task forces, however many finished units the map keeps. A rate limit (HTTP 429) stops the sync, keeps the links made so far, shows `last error: rate limited, retrying in 30s` in `/tasks status`, and tries again after the time Asana gives (60 seconds if it gives none). The next sync starts at the unit where the last one stopped, so each try gets further, and it finishes without duplicates.
+
+A refused token (HTTP 401) fails every sync of the map until its owner connects a working one. A refusal of one task (HTTP 403, for example a task the token may not change) fails only that unit: `/tasks sync` and `/tasks status` report it, and the other units sync.
 
 ## Webhooks
 

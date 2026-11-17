@@ -19,7 +19,8 @@ export interface RemoteTask { id:string; title:string; note:string; due:string|n
   dueAt?:string|null /* the due instant (ISO), when the service keeps a time of day */;
   parents?:string[] /* every parent task, when the service allows several; `parent` is then the first */ }
 export interface Snapshot { tasks:RemoteTask[]; unmatched:{ container:RemoteContainer; open:number }[] }
-export type TaskWrite=Partial<Pick<RemoteTask,'title'|'note'|'due'|'dueAt'|'status'|'progress'|'container'|'parent'>>&{ affiliation?:Affiliation|null /* null: remove the identity tags or labels opsmap manages */ };
+export type TaskWrite=Partial<Pick<RemoteTask,'title'|'note'|'due'|'dueAt'|'progress'|'container'|'parent'>>&{ affiliation?:Affiliation|null /* null: remove the identity tags or labels opsmap manages */;
+  status?:RemoteStatus|'open'|null /* 'open': not done, with no state chosen (the map's state switch is off): the task's own state is left alone */ };
 export interface WebhookResult { status:number; headers?:Record<string,string>; store?:unknown; trigger:boolean; /** A signed delivery that starts no cycle (a heartbeat) but shows the webhooks work: counts as live. `trigger` implies it. */ live?:boolean }
 export class RateLimited extends Error { constructor(readonly retryAfterS:number){ super(`rate limited, retrying in ${retryAfterS}s`); } }
 export class RemoteAuthError extends Error {}

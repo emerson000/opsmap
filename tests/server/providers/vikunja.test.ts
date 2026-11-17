@@ -317,6 +317,43 @@ describe('Vikunja sync: failures and safety', () => {
   });
 });
 
+describe('Vikunja sync: state switched off', () => {
+  it('done still syncs and moves the task to Done; Doing and Blocked, and buckets of the user\u2019s own, are left alone', async () => {
+    await bind();
+    run('/tasks field state off');
+    await sync.run(hub().mapId);
+    const tools = vkId(unit('TOOLS'))!, irs = vkId(unit('IRS'))!;
+    // opsmap's state changes are not pushed: no bucket moves.
+    run('/block TOOLS by "No reply"');
+    vk.calls.length = 0;
+    await sync.run(hub().mapId);
+    expect(vk.bucketTitle(tools)).toBe('To-Do');
+    expect(vk.calls.filter(c => c.startsWith('move'))).toEqual([]);
+    // A card dragged to Doing is not pulled.
+    vk.drag(irs, 'Doing');
+    expect(await sync.run(hub().mapId)).toMatch(/^0 pushed, 0 pulled/);
+    expect(unit('IRS').lifecycle).toBe('todo');
+    // Done in opsmap: the task is done, in the Done bucket.
+    run('/done TOOLS');
+    await sync.run(hub().mapId);
+    expect(vk.tasksById.get(tools)!.done).toBe(true);
+    expect(vk.bucketTitle(tools)).toBe('Done');
+    // Done in Vikunja: /done.
+    vk.drag(irs, 'Done');
+    await sync.run(hub().mapId);
+    expect(unit('IRS').lifecycle).toBe('done');
+    // Reopened in opsmap: open again in Vikunja, in its default bucket, with no bucket move of opsmap's.
+    run('/reopen TOOLS');
+    vk.calls.length = 0;
+    await sync.run(hub().mapId);
+    expect(vk.tasksById.get(tools)!.done).toBe(false);
+    expect(vk.bucketTitle(tools)).toBe('To-Do');
+    expect(vk.calls.filter(c => c.startsWith('move'))).toEqual([]);
+    vk.calls.length = 0;
+    expect(await sync.run(hub().mapId)).toMatch(/^0 pushed, 0 pulled/);
+  });
+});
+
 describe('Vikunja sync: second review', () => {
   it('a description longer than opsmap keeps is never cut in Vikunja, now or later', async () => {
     await bind();

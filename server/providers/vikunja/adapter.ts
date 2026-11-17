@@ -151,10 +151,11 @@ export class VikunjaSession implements ProviderSession {
     if (board?.kanban && !t.done && t.bucket_id === undefined) t.bucket_id = (await this.api.bucketsOfTasks(board.project, board.kanban)).get(t.id);
     this.raw.set(t.id, t); return this.toRemote(t, tz);
   }
-  /** Moves the card to the bucket for `status` (not done: marking done moves it). Returns the bucket it is in. */
-  private async place(task: VkTask, status: RemoteStatus | null | undefined, current?: number): Promise<number | undefined> {
+  /** Moves the card to the bucket for `status` (not done: marking done moves it; not open, with the state switch off:
+   *  Vikunja puts a reopened task in its default bucket, and every other bucket is the user's). Returns the bucket it is in. */
+  private async place(task: VkTask, status: TaskWrite['status'], current?: number): Promise<number | undefined> {
     const board = await this.boardOf(task.project_id);
-    if (!board?.kanban || !status || status === 'done') return current;
+    if (!board?.kanban || !status || status === 'done' || status === 'open') return current;
     const bucket = board.bucketOf[status];
     if (bucket && bucket !== current) await this.api.moveToBucket(board.project, board.kanban, bucket, task.id);
     return bucket ?? current;

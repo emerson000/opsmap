@@ -49,8 +49,16 @@ export function taskFields(t:RemoteTask,u:Unit|undefined,doc:Doc,limits:Limits):
 }
 export interface Merge { merged:Fields; pull:Partial<Fields>; push:boolean }
 /** Merges one linked unit (U) with its task (T) against the agreed values (B). Only `declared` fields merge; the others
- *  keep the unit's value. `remoteProgress`: the task's progress (0–1), read as BDA when the winning identity is a threat. */
-export function mergeFields(U:Fields,T:Fields,B:Fields|undefined,unitNewer:boolean,remoteProgress:number|null,declared:ReadonlySet<Field>):Merge {
+ *  keep the unit's value. `remoteProgress`: the task's progress (0–1), read as BDA when the winning identity is a threat.
+ *  `completion`: status is not declared only because the map switched state off, so completion still merges. */
+export function mergeFields(U:Fields,T:Fields,B:Fields|undefined,unitNewer:boolean,remoteProgress:number|null,declared:ReadonlySet<Field>,completion=false):Merge {
+  // State switched off (D21) on a service that has it: only open against done merges; to do, active and blocked are all open.
+  if(completion&&!declared.has('status')) {
+    const fold=(f:Fields):Fields=>({...f,status:f.status==='done'?'done':'todo'});
+    const r=mergeFields(fold(U),fold(T),B&&fold(B),unitNewer,remoteProgress,new Set([...declared,'status']));
+    if(r.pull.status===undefined)r.merged.status=U.status;
+    return r;
+  }
   T={...T};
   // A task in a state opsmap does not track has no opinion on it, except that it is open (reopened into a column of the user's own).
   if(T.status===null){const fallback=B?.status??U.status;T.status=fallback==='done'?'todo':fallback;}

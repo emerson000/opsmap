@@ -10,7 +10,7 @@ Optional two-way sync with [Vikunja](https://vikunja.io). Set `VIKUNJA_URL` (the
 ## What syncs
 
 - Title; due date (compared by calendar day in the map's zone); note ↔ description (plain text; HTML from Vikunja is stripped); BDA ↔ progress for hostiles and suspects (60% done = 40% strength; a friendly's strength is capacity, so it is not synced); sector ↔ child project (moving a task to another sector project moves the unit).
-- State ↔ kanban bucket: To-Do = todo, Doing = active, Blocked = blocked (bind adds the bucket), Done = done. Tasks in buckets of your own keep their unit's state.
+- State ↔ kanban bucket: To-Do = todo, Doing = active, Blocked = blocked (bind adds the bucket), Done = done. Tasks in buckets of your own keep their unit's state. With `state` off, only done syncs: a done task moves to Done, a reopened one goes where Vikunja puts it, and opsmap moves no card between the other buckets.
 - A task moved to a project outside the A/O, or left in a removed or archived sector's project, goes back to its unit's sector. Child projects of the bound project that are no sector's are listed by `/tasks status` (`not synced: project Home (2 tasks)`).
 - Identity ↔ labels: each task carries one identity label, `hostile`, `suspect`, `friendly`, `assumed`, `neutral`, `unknown` or `pending` (`enemy` and `friend` are read too). Labels are matched by title ignoring case and created, colored like the frames, on first use; other labels are left alone. Setting one in Vikunja runs `/id`; `/id` swaps the label. A task with no identity label gets its unit's; one with several keeps opsmap's identity and loses the extras. A task made in Vikunja with an identity label arrives with that identity instead of pending.
 

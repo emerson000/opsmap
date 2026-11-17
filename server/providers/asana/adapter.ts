@@ -2,7 +2,8 @@
 // state is completed plus the tags `doing` and `blocked`; its identity an identity tag (both made in the project's
 // workspace on first use, reused by name); its parent Asana's parent task. Due dates are days (`due_on`): a `due_at`
 // is read as its day in the map's zone, and a write sets the day and clears the time. One session serves one sync
-// cycle, so it keeps what it read (the project's workspace and sections, the workspace's tags, the tasks) for that cycle.
+// cycle, so it keeps what it read (the project's workspace and sections, the tasks) for that cycle; the workspace's tags
+// are kept by the provider (TagCache).
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Affiliation } from '../../../src/core/model/types';
 import { localDay } from '../../../src/core/model/time';
@@ -43,6 +44,11 @@ const sectionIn = (t: AsTask, project: string) => t.memberships.find(m => m.proj
  *  sends its handshake while `POST /webhooks` is still open, to the target it was given, which carries a random nonce
  *  (`?h=`) made for that creation. Only a handshake on that URL is answered, once; `offered` is the secret it gave. */
 export type Handshakes = Map<string, { nonce: string; offered?: string }>;
+/** The tags of each workspace by lowercase name, kept by the provider across sessions (each sync cycle has its own), so
+ *  a cycle that writes a tag does not list the workspace's tags again. Listed again on a miss, and when a kept gid is gone. */
+export type TagCache = Map<string, Map<string, AsTag>>;
+/** A tag to put on a task: the first of `names` found in the workspace (any case), else made as `names[0]` in `color`. */
+interface TagWant { names: string[]; color: string }
 interface HookState { gid: string; nonce: string }
 /** The webhook ensureWebhooks keeps (ts_maps.hooks): one per bound project, with the nonce of its target. */
 const hookOf = (state: unknown): HookState | undefined => {
@@ -98,10 +104,11 @@ export function receiveAsanaWebhook(headers: Headers, body: string, mapSecret: s
 export class AsanaSession implements ProviderSession {
   private readonly workspaces = new Map<string, string>();   // project gid → workspace gid
   private readonly sections = new Map<string, AsSection[]>();
-  private tagIndex?: Map<string, AsTag>;
+  /** Workspaces whose tags were listed in this session: a miss then makes the tag instead of listing again. */
+  private readonly listed = new Set<string>();
   /** Tasks as Asana last sent them this cycle. */
   private readonly raw = new Map<string, AsTask>();
-  constructor(private readonly api: AsApi, readonly label = 'Asana', private readonly handshakes: Handshakes = new Map()) {}
+  constructor(private readonly api: AsApi, readonly label = 'Asana', private readonly handshakes: Handshakes = new Map(), private readonly tagCache: TagCache = new Map()) {}
 
   private remember(p: AsProject, workspace?: string): RemoteRoot { const ws = p.workspace?.gid ?? workspace; if (ws) this.workspaces.set(p.gid, ws); return { id: p.gid, title: p.name }; }
   /** The project, or undefined when this token cannot see it. */
@@ -190,38 +197,60 @@ export class AsanaSession implements ProviderSession {
     return { tasks: [...seen.values()].map(t => this.toRemote(t, root, tz)), unmatched };
   }
   async getTask(root: RemoteRoot, id: string, tz: string): Promise<RemoteTask | null> {
-    const t = await this.api.task(id); if (!t) return null;
+    // 403: a task this token can no longer see (moved into a private project, say), which the contract reads as gone.
+    let t: AsTask | null;
+    try { t = await this.api.task(id); } catch (error) { if (error instanceof AsHttpError && error.status === 403) return null; throw error; }
+    if (!t) return null;
     this.raw.set(id, t); return this.toRemote(t, root, tz);
   }
 
-  /** The workspace's tag named `name` (any case), made on first use. */
-  private async tag(root: RemoteRoot, names: string[], color: string): Promise<AsRef> {
-    const ws = await this.workspace(root);
-    if (!this.tagIndex) { this.tagIndex = new Map(); for (const t of await this.api.tags(ws)) if (!this.tagIndex.has(lower(t.name))) this.tagIndex.set(lower(t.name), t); }
-    for (const n of names) { const found = this.tagIndex.get(lower(n)); if (found) return found; }
-    const made = await this.api.createTag(ws, names[0], color);
-    this.tagIndex.set(lower(made.name), made); return made;
+  /** The workspace's tag for `want`, from the cache; on a miss the tags are listed (once per session), and it is made
+   *  only when it is still missing. */
+  private async tag(ws: string, want: TagWant): Promise<AsRef> {
+    const find = () => { const index = this.tagCache.get(ws); for (const n of want.names) { const found = index?.get(lower(n)); if (found) return found; } return undefined; };
+    let found = find(); if (found) return found;
+    if (!this.listed.has(ws)) {
+      const index = new Map<string, AsTag>(); for (const t of await this.api.tags(ws)) if (!index.has(lower(t.name))) index.set(lower(t.name), t);
+      this.tagCache.set(ws, index); this.listed.add(ws);
+      found = find(); if (found) return found;
+    }
+    const made = await this.api.createTag(ws, want.names[0], want.color);
+    let index = this.tagCache.get(ws); if (!index) { index = new Map(); this.tagCache.set(ws, index); }
+    index.set(lower(made.name), made); return made;
   }
-  /** Adds and removes tags on the task; the result is the task with its new tags. */
-  private async retag(t: AsTask, add: AsRef[], remove: AsRef[]): Promise<AsTask> {
+  /** Adds and removes tags on the task; the result is the task with its new tags. A cached tag Asana no longer knows
+   *  (404, deleted in Asana) makes the workspace's tags be listed again, and the tag is added once more. */
+  private async retag(root: RemoteRoot, t: AsTask, add: TagWant[], remove: AsRef[]): Promise<AsTask> {
     for (const r of remove) await this.api.removeTag(t.gid, r.gid);
-    for (const a of add) await this.api.addTag(t.gid, a.gid);
+    const added: AsRef[] = [];
+    if (add.length) {
+      const ws = await this.workspace(root);
+      for (const want of add) {
+        let ref = await this.tag(ws, want);
+        try { await this.api.addTag(t.gid, ref.gid); }
+        catch (error) {
+          if (!(error instanceof AsHttpError && error.status === 404) || this.listed.has(ws)) throw error;
+          this.tagCache.delete(ws); ref = await this.tag(ws, want); await this.api.addTag(t.gid, ref.gid);
+        }
+        added.push(ref);
+      }
+    }
     const gone = new Set(remove.map(r => r.gid));
-    return { ...t, tags: [...t.tags.filter(x => !gone.has(x.gid)), ...add.filter(a => !t.tags.some(x => x.gid === a.gid)).map(a => ({ gid: a.gid, name: a.name }))] };
+    return { ...t, tags: [...t.tags.filter(x => !gone.has(x.gid)), ...added.filter(a => !t.tags.some(x => x.gid === a.gid)).map(a => ({ gid: a.gid, name: a.name }))] };
   }
-  /** The state tags for `status`: `doing` or `blocked`, the other one removed; none for todo. Done leaves them. */
-  private async setState(root: RemoteRoot, t: AsTask, status: RemoteStatus | null | undefined): Promise<AsTask> {
-    if (!status || status === 'done') return t;
+  /** The state tags for `status`: `doing` or `blocked`, the other one removed; none for todo. Done and open (state off) leave them. */
+  private async setState(root: RemoteRoot, t: AsTask, status: TaskWrite['status']): Promise<AsTask> {
+    if (!status || status === 'done' || status === 'open') return t;
     const want = status === 'active' ? STATE_TAGS.active : status === 'blocked' ? STATE_TAGS.blocked : undefined;
     const current = t.tags.filter(x => stateOfTag(x.name) !== undefined), keep = current.filter(x => lower(x.name) === want);
-    const add = want && !keep.length ? [await this.tag(root, [want], STATE_COLORS[want])] : [];
-    return this.retag(t, add, current.filter(x => lower(x.name) !== want));
+    const add = want && !keep.length ? [{ names: [want], color: STATE_COLORS[want] }] : [];
+    return this.retag(root, t, add, current.filter(x => lower(x.name) !== want));
   }
   /** Exactly one identity tag, for `a`; null removes the identity tags. The user's other tags are left alone. */
   private async setIdentity(root: RemoteRoot, t: AsTask, a: Affiliation | null): Promise<AsTask> {
     const current = t.tags.filter(x => affiliationOfName(x.name ?? '') !== undefined), keep = a === null ? [] : current.filter(x => affiliationOfName(x.name ?? '') === a);
-    const add = a !== null && !keep.length ? [await this.tag(root, IDENTITY_NAMES[a], IDENTITY_COLORS[a])] : [];
-    return this.retag(t, add, current.filter(x => !keep.includes(x)));
+    const add = a !== null && !keep.length ? [{ names: IDENTITY_NAMES[a], color: IDENTITY_COLORS[a] }] : [];
+    return this.retag(root, t, add, current.filter(x => !keep.includes(x)));
   }
   /** Makes the task a subtask of `parent`, or top-level again in the project, in `section` (D13). A top-level task that
    *  opsmap makes a subtask leaves the project; a subtask the user also keeps in the project (multi-homed) stays there. */
@@ -311,10 +340,12 @@ export class AsanaSession implements ProviderSession {
   }
 }
 
-/** Asana's refusals as the contract's: 429 is a rate limit (Retry-After, else 60 s); 401 and 403 a refused token. */
-export const translate = (error: unknown): unknown => error instanceof AsHttpError ? error.status === 429 ? new RateLimited(error.retryAfterS ?? 60) : error.status === 401 || error.status === 403 ? new RemoteAuthError(error.message) : error : error;
-export function asanaSession(api: AsApi, label?: string, handshakes?: Handshakes): ProviderSession {
-  const session = new AsanaSession(api, label, handshakes);
+/** Asana's refusals as the contract's: 429 is a rate limit (Retry-After, else 60 s); 401 a refused token. Inside a
+ *  session a 403 is about one object (Asana's answer for one the user cannot access), so it stays an error of that item
+ *  and the cycle goes on; `verify` (the token's own check) also reads 403 as a refused token. */
+export const translate = (error: unknown, verify = false): unknown => error instanceof AsHttpError ? error.status === 429 ? new RateLimited(error.retryAfterS ?? 60) : error.status === 401 || verify && error.status === 403 ? new RemoteAuthError(error.message) : error : error;
+export function asanaSession(api: AsApi, label?: string, handshakes?: Handshakes, tags?: TagCache): ProviderSession {
+  const session = new AsanaSession(api, label, handshakes, tags);
   return new Proxy(session, { get(target, key, receiver) {
     const value = Reflect.get(target, key, receiver);
     return typeof value === 'function' ? async (...args: unknown[]) => { try { return await value.apply(target, args); } catch (error) { throw translate(error); } } : value;

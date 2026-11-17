@@ -101,14 +101,36 @@ describe('Asana provider', () => {
     expect([...as.tagsById.values()].find(t => t.name === 'unknown')?.color).toBe('light-yellow');
     expect(as.tagsById.size).toBe(9);
   });
-  it('maps refusals: 429 is RateLimited (Retry-After, else 60 s), 401 and 403 a refused token, 404 from getTask null', async () => {
+  it('maps refusals: 429 is RateLimited (Retry-After, else 60 s), 401 a refused token, 403 and 404 from getTask null, 403 elsewhere an error of that task', async () => {
     const s = new AsanaProvider(() => as).connect(TOKEN), root = await s.resolveRoot('Ops');
     as.rateLimit('sections', 30);
     await expect(s.ensureContainers(root, [{ sectorId: 'w', name: 'Work' }], {})).rejects.toEqual(new RateLimited(30));
     as.failNext('sections', new AsHttpError(429, 'Asana GET /projects/x/sections: Rate limit exceeded'));
     await expect(s.ensureContainers(root, [{ sectorId: 'w', name: 'Work' }], {})).rejects.toEqual(new RateLimited(60));
-    for (const code of [401, 403]) { as.failNext('task', new AsHttpError(code, 'Asana GET /tasks/1: no')); await expect(s.getTask(root, '1', 'UTC')).rejects.toBeInstanceOf(RemoteAuthError); }
+    as.failNext('task', new AsHttpError(401, 'Asana GET /tasks/1: no')); await expect(s.getTask(root, '1', 'UTC')).rejects.toBeInstanceOf(RemoteAuthError);
+    // Asana answers 403 for a task the token may no longer see (moved into a private project): no longer visible.
+    as.failNext('task', new AsHttpError(403, 'Asana GET /tasks/1: Forbidden')); expect(await s.getTask(root, '1', 'UTC')).toBeNull();
     expect(await s.getTask(root, '999999', 'UTC')).toBeNull();
+    const c = await s.ensureContainers(root, [{ sectorId: 'w', name: 'Work' }], {}), t = await s.createTask(root, { title: 'Mine', container: c.w }, 'UTC');
+    as.failNext('updateTask', new AsHttpError(403, `Asana PUT /tasks/${t.id}: Forbidden`));
+    const refused = await s.updateTask(root, t, { title: 'Renamed' }, 'UTC').catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(Error);
+    expect(refused).not.toBeInstanceOf(RemoteAuthError);
+    expect(refused).not.toBeInstanceOf(RateLimited);
+    // verify: 403 is still a refused token.
+    as.failNext('me', new AsHttpError(403, 'Asana GET /users/me: Forbidden'));
+    await expect(new AsanaProvider(() => as).verify(TOKEN)).rejects.toBeInstanceOf(RemoteAuthError);
+  });
+  it('a 403 on one task fails only that unit: the others still sync', async () => {
+    await bind();
+    run('/rename LEAK "Roof leak (attic)"'); run('/rename TOOLS "Sort the toolbox"');
+    const leak = unit('LEAK').remote!;
+    as.failNext('updateTask', new AsHttpError(403, `Asana PUT /tasks/${leak}: Forbidden`));
+    const result = await sync.run(hub().mapId);
+    expect(result).toMatch(/^1 pushed, .* · 1 failed: /);
+    expect(as.tasksById.get(unit('TOOLS').remote!)!.name).toBe('Sort the toolbox');
+    expect(await sync.run(hub().mapId)).toMatch(/^1 pushed, 0 pulled/);
+    expect(as.tasksById.get(leak)!.name).toBe('Roof leak (attic)');
   });
   it('snapshot reads subtasks recursively, once each, and leaves out tasks done more than 7 days ago', async () => {
     const s = new AsanaProvider(() => as).connect(TOKEN), root = await s.resolveRoot('Ops');
@@ -136,6 +158,68 @@ describe('Asana provider', () => {
     const t = (await s.getTask(root, late.gid, 'Europe/London'))!;
     await s.updateTask(root, t, { due: '2026-12-20' }, 'Europe/London');
     expect(as.tasksById.get(late.gid)).toMatchObject({ due_on: '2026-12-20', due_at: null });
+  });
+});
+
+describe('Asana sync: state switched off', () => {
+  it('completion still syncs both ways; the doing and blocked tags are neither written nor read', async () => {
+    await bind();
+    run('/tasks field state off');
+    await sync.run(hub().mapId);
+    const stateTags = () => as.calls.filter(c => /^(addTag|removeTag|tags|createTag) /.test(c));
+    run('/block TOOLS by "No reply"');
+    as.calls.length = 0;
+    await sync.run(hub().mapId);
+    expect(stateTags()).toEqual([]);
+    expect(tagsOf(unit('TOOLS').remote!)).not.toContain('blocked');
+    const doing = await as.createTag(WS, 'doing'); await as.addTag(unit('LEAK').remote!, doing.gid);
+    expect(await sync.run(hub().mapId)).toMatch(/^0 pushed, 0 pulled/);
+    expect(unit('LEAK').lifecycle).toBe('todo');
+    await as.updateTask(unit('Q4RPT').remote!, { completed: true });
+    run('/drop TOOLS');
+    as.calls.length = 0;
+    await sync.run(hub().mapId);
+    expect(unit('Q4RPT').lifecycle).toBe('done');
+    expect(as.tasksById.get(unit('TOOLS').remote!)!.completed).toBe(true);
+    run('/reopen TOOLS');
+    await sync.run(hub().mapId);
+    expect(as.tasksById.get(unit('TOOLS').remote!)!.completed).toBe(false);
+    expect(stateTags()).toEqual([]);
+    expect(tagsOf(unit('LEAK').remote!)).toContain('doing');
+  });
+});
+
+describe('Asana sync: old finished work', () => {
+  it('200 links to tasks finished long ago cost at most 10 task reads a cycle; a forced sync checks more, oldest first, within the rate limit', async () => {
+    const n = 200, seeded = seedDoc(new Date()), tools = seeded.units.find(u => u.designation === 'TOOLS')!;
+    for (let i = 0; i < n; i++) seeded.units.push({ ...structuredClone(tools), id: `old${i}`, designation: `OLD${i}`, title: `Old job ${i}` });
+    hub().import(user.id, seeded);
+    await bind();
+    for (let i = 0; i < n; i++) run(`/done OLD${i}`);
+    await sync.run(hub().mapId);
+    const old = doc().units.filter(u => u.designation.startsWith('OLD'));
+    expect(old.every(u => as.tasksById.get(u.remote!)!.completed)).toBe(true);
+    for (const u of old) as.tasksById.get(u.remote!)!.completedAt = Date.now() - 8 * 86_400_000;
+    const reads = () => as.calls.filter(c => c.startsWith('task ')).map(c => c.slice(5));
+    const checked = new Set<string>();
+    for (let cycle = 0; cycle < 3; cycle++) {
+      as.calls.length = 0;
+      expect(await sync.run(hub().mapId)).toMatch(/^0 pushed, 0 pulled/);
+      expect(reads().length).toBeLessThanOrEqual(10);
+      for (const id of reads()) { expect(checked.has(id)).toBe(false); checked.add(id); }
+    }
+    expect(checked.size).toBe(30);
+    // A forced sync checks more of them, the ones checked longest ago (or never) first, and stays well under 150 requests.
+    as.calls.length = 0;
+    expect(await sync.request(hub().mapId, { action: 'sync' }, user, 'web')).toMatch(/^ASANA SYNC — 0 pushed, 0 pulled/);
+    expect(reads().length).toBeGreaterThan(10);
+    expect(reads().every(id => !checked.has(id))).toBe(true);
+    expect(as.calls.length).toBeLessThan(150);
+    // One deleted in Asana is still noticed by a later check.
+    const gone = old.find(u => !checked.has(u.remote!) && !reads().includes(u.remote!))!;
+    as.tasksById.delete(gone.remote!);
+    for (let i = 0; i < 10 && unit(gone.designation).remote !== undefined; i++) await sync.request(hub().mapId, { action: 'sync' }, user, 'web');
+    expect(unit(gone.designation).remote).toBeUndefined();
   });
 });
 
@@ -236,6 +320,24 @@ describe('Asana sync: fields', () => {
     expect(byTask(t.gid)).toMatchObject({ title: 'Book dentist', affiliation: 'pending', sectorId: 'family', note: 'Ask about Saturday', dueAt: dayInstant('2026-11-20', tz()) });
     expect(doc().units.some(x => x.title === 'Old thing')).toBe(false);
     expect(doc().log.at(-1)?.text).toMatch(/^ASANA NEW /);
+  });
+  it('the workspace\'s tags are listed once, not on every cycle that writes a tag; a tag deleted in Asana is found again', async () => {
+    await bind();
+    const lists = () => as.calls.filter(c => c.startsWith('tags ')).length;
+    as.calls.length = 0;
+    run('/block TOOLS by "No reply"'); await sync.run(hub().mapId);
+    run('/id TOOLS neutral'); await sync.run(hub().mapId);
+    run('/unblock TOOLS'); run('/block RUN by "Rain"'); await sync.run(hub().mapId);
+    expect(tagsOf(unit('TOOLS').remote!)).toContain('neutral');
+    expect(tagsOf(unit('RUN').remote!)).toContain('blocked');
+    expect(lists()).toBe(0);
+    // Deleted in Asana: the cached gid is refused (404), so the tags are listed again and the tag is made anew.
+    const blocked = [...as.tagsById.values()].find(t => t.name === 'blocked')!;
+    as.tagsById.delete(blocked.gid);
+    run('/block TOOLS by "Again"'); await sync.run(hub().mapId);
+    expect(lists()).toBe(1);
+    expect(tagsOf(unit('TOOLS').remote!)).toContain('blocked');
+    expect(await sync.run(hub().mapId)).toMatch(/^0 pushed, 0 pulled/);
   });
   it('the tags doing and blocked map to state; a state written removes the other; tags are reused by name', async () => {
     const doing = await as.createTag(WS, 'Doing');

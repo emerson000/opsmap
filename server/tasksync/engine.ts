@@ -30,8 +30,12 @@ interface Info { lastSync?:string; lastAttempt?:number; lastError?:string; pushe
 interface Stats { pushed:number; pulled:number; created:number; added:number }
 type Guard=(what:string,fn:()=>Promise<void>)=>Promise<void>;
 /** What one cycle works with. */
-interface Cycle { mapId:string; provider:TaskProvider; session:ProviderSession; root:RemoteRoot; tz:string; limits:Limits; declared:ReadonlySet<Field>; /** Switched off on this map (D21). */ off:ReadonlySet<Field>; stats:Stats }
+interface Cycle { force:boolean; mapId:string; provider:TaskProvider; session:ProviderSession; root:RemoteRoot; tz:string; limits:Limits; declared:ReadonlySet<Field>; /** Switched off on this map (D21). */ off:ReadonlySet<Field>;
+  /** State is off but the service has it: completion (open or done) still syncs. */ completion:boolean; stats:Stats }
 const SYSTEM='system';
+/** Links whose unit and task are both finished and that the snapshot left out (a service may list only recent done tasks):
+ *  each is read again about once a day, at most STALE_CHECKS a cycle (FORCED_CHECKS on /tasks sync), the one checked longest ago first. */
+const STALE_MS=86_400_000,STALE_CHECKS=10,FORCED_CHECKS=50;
 const message=(error:unknown)=>error instanceof Error?error.message:String(error);
 const iso=(ms:number)=>new Date(ms).toISOString();
 /** One relation between two units; a plain link has no direction, so its ends are sorted. */
@@ -43,6 +47,8 @@ export class TaskSyncEngine implements SyncService {
   private readonly planned=new Map<string,{ handle:unknown; at:number }>();
   private readonly info=new Map<string,Info>();
   private readonly nudged=new Map<string,number>();
+  /** Per map, the linked unit at which a rate limit stopped the last cycle: the next one starts there, so each retry gets further. */
+  private readonly resume=new Map<string,string>();
   /** Maps whose ensureWebhooks is open, with what a handshake asked to store: written only once the call succeeds. */
   private readonly registering=new Map<string,{ store?:unknown }>();
   private poller?:ReturnType<typeof setInterval>;
@@ -306,7 +312,7 @@ export class TaskSyncEngine implements SyncService {
       const session=this.sessionFor(owner,p);
       await this.reachability();
       const first=this.hub(mapId).doc,tz=first.settings.tz??DEFAULT_TZ,root:RemoteRoot={id:binding.root,title:binding.title};
-      const c:Cycle={mapId,provider:p,session,root,tz,limits:{maxTitle:p.capabilities.maxTitle,maxNote:Math.min(p.capabilities.maxNote,NOTE_LIMIT)},declared:this.effectiveFields(p,first),off:this.switchedOff(first),stats};
+      const off=this.switchedOff(first),c:Cycle={force,mapId,provider:p,session,root,tz,limits:{maxTitle:p.capabilities.maxTitle,maxNote:Math.min(p.capabilities.maxNote,NOTE_LIMIT)},declared:this.effectiveFields(p,first),off,completion:off.has('status')&&p.capabilities.fields.has('status'),stats};
       // Sectors without a container (added since, or the container was deleted) get one.
       const known=Object.fromEntries(first.sectors.filter(s=>s.remote!==undefined).map(s=>[s.id,s.remote!]));
       const containers=await session.ensureContainers(root,first.sectors.map(s=>({sectorId:s.id,name:s.name})),known);
@@ -347,31 +353,45 @@ export class TaskSyncEngine implements SyncService {
       throw error;
     }
   }
-  /** Linked units: merge field by field; a task gone remotely drops its unit. */
+  /** Linked units: merge field by field; a task gone remotely drops its unit. A finished unit whose task was finished
+   *  too when they last agreed, and that the snapshot left out, is read only when its turn comes (STALE_MS): a task
+   *  reopened in the service is back in the snapshot anyway. */
   private async linked(c:Cycle,tasks:Map<string,RemoteTask>,fetched:Map<string,RemoteTask>,frozen:Set<string>,guard:Guard):Promise<void> {
-    const {mapId,session,root,tz}=c;
-    for(const snapshot of this.hub(mapId).doc.units.filter(u=>u.remote!==undefined)) {
+    const {mapId,session,root,tz}=c,now=this.now(),all=this.hub(mapId).doc.units.filter(u=>u.remote!==undefined);
+    const settled=all.filter(u=>!tasks.has(u.remote!)&&(u.lifecycle==='done'||u.lifecycle==='dropped')).map(u=>({u,at:this.tables.base(mapId,u.id)}))
+      .filter((x):x is {u:Unit;at:NonNullable<typeof x.at>}=>x.at?.status==='done').map(({u,at})=>({id:u.id,at:at.checkedAt?Date.parse(at.checkedAt):0}));
+    const due=new Set(settled.filter(x=>c.force||now-x.at>=STALE_MS).sort((a,b)=>a.at-b.at).slice(0,c.force?FORCED_CHECKS:STALE_CHECKS).map(x=>x.id));
+    const skip=new Set(settled.map(x=>x.id).filter(id=>!due.has(id)));
+    // After a rate limit, start at the unit it stopped at.
+    const from=Math.max(0,all.findIndex(u=>u.id===this.resume.get(mapId)));
+    for(const snapshot of [...all.slice(from),...all.slice(0,from)]) {
+      if(skip.has(snapshot.id))continue;
       const doc=this.hub(mapId).doc,u=doc.units.find(x=>x.id===snapshot.id);
       if(!u||u.remote===undefined)continue;
       const id=u.remote,sector=doc.sectors.find(s=>s.id===u.sectorId)?.remote;
       if(sector!==undefined&&frozen.has(sector))continue;
-      await guard(u.designation,async()=>{
-        let t=tasks.get(id);tasks.delete(id);
-        if(!t) {
-          const remote=await session.getTask(root,id,tz);
-          if(!remote) {
-            // Deleted remotely: the unit is dropped and lets go of it.
-            this.system(mapId,c.provider,{action:'gone',unit:u.id});c.stats.pulled++;
-            this.tables.setBase(mapId,u.id,id,null);return;
+      try {
+        await guard(u.designation,async()=>{
+          let t=tasks.get(id);tasks.delete(id);
+          if(!t) {
+            const remote=await session.getTask(root,id,tz);
+            if(!remote) {
+              // Deleted remotely: the unit is dropped and lets go of it.
+              this.system(mapId,c.provider,{action:'gone',unit:u.id});c.stats.pulled++;
+              this.tables.setBase(mapId,u.id,id,null);return;
+            }
+            // Still there, outside this A/O's containers (a removed sector, or moved away): a task is never treated as
+            // deleted while it exists; it goes back to its unit's sector. In an archived container it waits.
+            if(remote.container!==null&&frozen.has(remote.container))return;
+            t=remote;fetched.set(id,remote);
           }
-          // Still there, outside this A/O's containers (a removed sector, or moved away): a task is never treated as
-          // deleted while it exists; it goes back to its unit's sector. In an archived container it waits.
-          if(remote.container!==null&&frozen.has(remote.container))return;
-          t=remote;fetched.set(id,remote);
-        }
-        c.stats.pushed+=await this.merge(c,u,t);
-      });
+          c.stats.pushed+=await this.merge(c,u,t);
+        });
+      }catch(error){if(error instanceof RateLimited)this.resume.set(mapId,u.id);throw error;}
+      // Checked, whatever it found (a failure too): the others get their turn before it comes again.
+      if(due.has(u.id)){const b=this.tables.base(mapId,u.id);if(b)this.tables.setBase(mapId,u.id,id,{...b,checkedAt:iso(now)});}
     }
+    this.resume.delete(mapId);
   }
   /** Units without a task get one (not ones already finished: their history stays on the map). An open, unlinked
    *  task with the same title in the same container is the same item (a rebind, or one typed on both sides): it is
@@ -445,7 +465,7 @@ export class TaskSyncEngine implements SyncService {
     // D21 counts as written when the task carries exactly the unit's identity (opsmap assigned every label then).
     const pushedBefore=saved===undefined?false:saved.idPushed??(t.affiliations.length===1&&t.affiliations[0]===u.affiliation);
     const clear=pushedBefore&&off.has('affiliation')&&c.provider.capabilities.fields.has('affiliation')&&!saved?.off?.includes('affiliation')&&t.affiliations.length>0;
-    const {merged,pull,push:wanted}=mergeFields(U,T,B,Date.parse(u.updatedAt)>=Date.parse(t.updatedAt),t.progress,declared);
+    const {merged,pull,push:wanted}=mergeFields(U,T,B,Date.parse(u.updatedAt)>=Date.parse(t.updatedAt),t.progress,declared,c.completion);
     let push=wanted;
     if(Object.keys(pull).length) {
       const changes:RemoteChanges={};
@@ -479,11 +499,12 @@ export class TaskSyncEngine implements SyncService {
     this.tables.setBase(mapId,u.id,t.id,this.record(c,merged,clear?false:pushedBefore||typeof write.affiliation==='string'&&pushed===1));
     return pushed;
   }
-  /** The declared fields of the task as opsmap wants it. */
+  /** The declared fields of the task as opsmap wants it; with state off, only whether it is done, when that differs. */
   private fieldsWrite(c:Cycle,f:Fields,doc:Doc,unitId:string,t:RemoteTask):TaskWrite {
     const has=(k:Field)=>c.declared.has(k),u=doc.units.find(x=>x.id===unitId),container=doc.sectors.find(s=>s.id===f.sector)?.remote;
+    const done=f.status==='done',completion=c.completion&&done!==(t.status==='done')?{status:done?'done' as const:'open' as const}:{};
     return {title:f.title,...(has('note')?{note:f.note}:{}),...(has('due')?{due:f.due,dueAt:f.due===null?null:u?.dueAt??t.dueAt??null}:{}),
-      ...(has('status')&&f.status?{status:f.status}:{}),...(has('progress')&&f.progress!==null?{progress:f.progress/100}:{}),...(has('sector')&&container?{container}:{})};
+      ...(has('status')&&f.status?{status:f.status}:{}),...(has('progress')&&f.progress!==null?{progress:f.progress/100}:{}),...(has('sector')&&container?{container}:{}),...completion};
   }
 
   /** Relations between linked units whose tasks were read this cycle, merged against the agreed set: one added or

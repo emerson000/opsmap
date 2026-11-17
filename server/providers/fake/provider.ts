@@ -102,7 +102,7 @@ export class FakeProvider implements TaskProvider {
     if(w.title!==undefined&&has('title'))t.title=w.title.slice(0,this.capabilities.maxTitle);
     if(w.note!==undefined&&has('note'))t.note=w.note.slice(0,this.capabilities.maxNote);
     if(w.due!==undefined&&has('due'))t.due=w.due;
-    if(w.status!==undefined&&has('status'))t.status=w.status;
+    if(w.status!==undefined&&has('status'))t.status=w.status==='open'?t.status==='done'?'todo':t.status:w.status;
     if(w.progress!==undefined&&has('progress'))t.progress=w.progress;
     if(w.parent!==undefined&&has('parent')){t.parent=w.parent;if(w.parent!==null)t.container=null;}
     if(w.container!==undefined&&has('container')&&t.parent===null)t.container=w.container;
