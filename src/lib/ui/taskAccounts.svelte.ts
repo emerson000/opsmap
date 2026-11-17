@@ -14,3 +14,13 @@ export function loadTaskAccount(provider: string): void {
     .then((a: { connected?: boolean }) => { taskAccounts[provider] = Boolean(a.connected); })
     .catch(() => { taskAccounts[provider] = false; });
 }
+/** Why a server task verb (/tasks sync, status) cannot run now, or null: the account is unknown or not connected, or
+ *  the map is not bound. The sidebar's task sync sections share it, so the map, sector and unit views agree. */
+export function taskAccountWhy(provider: string | undefined, label: string): string | null {
+  const connected = provider === undefined ? undefined : taskAccounts[provider];
+  if (connected === null || connected === undefined) return `Checking your ${label} account…`;
+  return connected ? null : `Connect your ${label} account: user menu → ${label}…`;
+}
+export function taskSyncWhy(provider: string | undefined, label: string, bound: boolean): string | null {
+  return taskAccountWhy(provider, label) ?? (bound ? null : `This map is not bound to ${label}: Bind… first`);
+}

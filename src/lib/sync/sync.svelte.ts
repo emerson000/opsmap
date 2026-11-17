@@ -335,9 +335,14 @@ export function logout(): void {
 
 if (typeof window !== 'undefined') window.addEventListener('pagehide', saveCache);
 // Back on a tab whose map is bound to a task service: the server pulls soon (D20).
-if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') engine?.nudgeTasks(); });
+// The delivery summary is asked for again too, so it is not stale after the tab was away.
+if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { engine?.nudgeTasks(); checkTaskDelivery(); } });
 
-/** Ask for the open map's /tasks status without showing it, for the task sync section's delivery summary. */
+let deliveryAskedAt = 0;
+/** Ask for the open map's /tasks status without showing it, for the task sync section's delivery summary. Only on a
+ *  bound map, and at most once every 2 s (a view and its section opening together ask once). */
 export function checkTaskDelivery(): void {
-  void engine?.tasks({ action: 'status' }).then(r => { if (r.ok && r.delivery) live.taskDelivery = r.delivery; });
+  if (!engine?.doc.settings.taskSync || Date.now() - deliveryAskedAt < 2000) return;
+  deliveryAskedAt = Date.now();
+  void engine.tasks({ action: 'status' }).then(r => { if (r.ok && r.delivery) live.taskDelivery = r.delivery; });
 }

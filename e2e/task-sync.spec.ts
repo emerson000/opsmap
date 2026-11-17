@@ -61,27 +61,35 @@ async function flow(page: Page, project: string) {
   const inspector = page.getByTestId('inspector');
   await expect(inspector).toHaveAttribute('data-kind', 'map');
 
-  // Unbound: a generic title, and Bind… shows its command.
+  // Unbound: no Sync rows, and Bind… shows its command and that it is open.
   let section = await openSection(page);
   await expect(section.getByRole('heading')).toContainText('Task sync');
+  await expect(section.getByTestId('tasks-sync')).toHaveCount(0);
   const bind = section.getByTestId('tasks-bind');
   await expect(bind).toHaveAttribute('title', '/tasks bind fake "‹project›"');
   await bind.click();
+  await expect(bind).toHaveClass(/\bon\b/);
   const form = section.getByTestId('tasks-bind-form');
   await form.getByLabel('Fake project').fill(project);
   await expect(bind).toHaveAttribute('title', `/tasks bind fake "${project}"`);
-  // Only the fields the service syncs; each one can be left out of the bind.
+  // Fields to sync: only the ones the service syncs, all checked; an unchecked one is left out (without).
   await expect(form.getByRole('checkbox')).toHaveCount(5);
-  await form.getByRole('checkbox', { name: 'State' }).check();
+  for (const box of await form.getByRole('checkbox').all()) await expect(box).toBeChecked();
+  await form.getByRole('checkbox', { name: 'State' }).uncheck();
   const submit = form.getByRole('button', { name: 'Bind' });
   await expect(submit).toHaveAttribute('title', `/tasks bind fake "${project}" without state`);
   await submit.click();
-  await expect(result(page)).toContainText(`FAKE BOUND TO ${PROJECT}`);
+  // The bound op shows first; wait for the request's own answer (after its first cycle), so it cannot land later
+  // and replace the next command's result.
+  await expect(result(page)).toContainText(`FAKE BOUND TO ${PROJECT} — `);
+  await expect(result(page)).toContainText('tasks created');
 
-  // Bound: the service's label, the delivery mode, and the switches (state already off).
-  await expect(section.getByRole('heading')).toContainText('Fake');
+  // Bound: the project link and the service's label, the delivery mode in plain words, and the switches (state off).
+  await expect(section.getByRole('heading')).toContainText('Task sync');
+  await expect(section.getByTestId('tasks-root')).toHaveText(`${project} ↗`);
+  await expect(section).toContainText('in Fake');
   const delivery = section.getByTestId('tasks-delivery');
-  await expect(delivery).toHaveText('Checking every 1 min: webhooks off on a private address');
+  await expect(delivery).toHaveText('Checking every 1 min. Instant updates need an address Fake can reach.');
   await expect(delivery).toHaveAttribute('title', /PUBLIC_URL/);
   const fields = section.locator('[data-control="tasks-field"]');
   await expect(fields).toHaveCount(1);
@@ -89,10 +97,12 @@ async function flow(page: Page, project: string) {
   await expect(identity).toHaveAttribute('aria-checked', 'true');
   await expect(state).toHaveAttribute('aria-checked', 'false');
   await expect(identity).toHaveAttribute('title', '/tasks field identity off');
+  await showSheet(page);
   await identity.click();
   await expect(result(page)).toContainText('FAKE IDENTITY SYNC OFF');
   await expect(identity).toHaveAttribute('aria-checked', 'false');
   await expect(identity).toHaveAttribute('title', '/tasks field identity on');
+  await expect(section).toContainText('Not synced: Identity, State.');
 
   // Sync and Status write their log lines.
   await section.getByTestId('tasks-sync').click();
@@ -107,7 +117,7 @@ async function flow(page: Page, project: string) {
   await expect(inspector).toHaveAttribute('data-kind', 'sector');
   section = await openSection(page);
   const sectionLink = section.getByTestId('tasks-container');
-  await expect(sectionLink).toHaveText('Section ↗');
+  await expect(sectionLink).toHaveText('Household ↗');
   await expect(sectionLink).toHaveAttribute('href', /^http:\/\/fake\.invalid\/[^/]+\/[^/]+$/);
   await expect(section.getByTestId('tasks-field-identity')).toHaveAttribute('aria-checked', 'false');
 
@@ -119,8 +129,10 @@ async function flow(page: Page, project: string) {
   await expect(headLink).toHaveText('Fake task ↗');
   await expect(headLink).toHaveAttribute('href', task);
   const unitSection = await openSection(page);
-  await expect(unitSection.getByRole('heading')).toContainText('Fake');
-  await expect(unitSection.getByTestId('tasks-task')).toHaveText('Task ↗');
+  await expect(unitSection.getByRole('heading')).toContainText('Task sync');
+  await expect(unitSection.getByTestId('tasks-task')).toHaveText('Open LEAK in Fake ↗');
+  await expect(unitSection.getByTestId('tasks-sync')).toHaveText('Sync now');
+  await expect(unitSection.getByTestId('tasks-sync')).not.toHaveAttribute('aria-disabled', 'true');
   await expect(unitSection.getByTestId('tasks-task')).toHaveAttribute('href', task);
 
   // Unbind… asks first; Keep leaves the map bound.
@@ -129,15 +141,17 @@ async function flow(page: Page, project: string) {
   await showSheet(page);
   section = await openSection(page);
   await section.getByTestId('tasks-unbind').click();
+  await expect(section.getByTestId('tasks-unbind')).toHaveClass(/\bon\b/);
   const confirm = section.getByRole('alertdialog', { name: 'Unbind the map' });
   await expect(confirm).toContainText(`Unbind the whole map from ${project}?`);
   await confirm.getByRole('button', { name: 'Keep' }).click();
   await expect(confirm).toHaveCount(0);
-  await expect(section.getByRole('heading')).toContainText('Fake');
+  await expect(section.getByTestId('tasks-root')).toBeVisible();
   await section.getByTestId('tasks-unbind').click();
   await section.getByRole('alertdialog', { name: 'Unbind the map' }).getByRole('button', { name: 'Unbind' }).click();
   await expect(result(page)).toContainText(`FAKE UNBOUND FROM ${PROJECT}`);
-  await expect(section.getByRole('heading')).toContainText('Task sync');
+  await expect(section.getByTestId('tasks-bind')).toBeVisible();
+  await expect(section.getByTestId('tasks-root')).toHaveCount(0);
   // WebKit warns about the viewport key interactive-widget (Chrome's keyboard mode); Safari ignores it.
   expect(errors(page).filter(e => !/interactive-widget/.test(e))).toEqual([]);
 }

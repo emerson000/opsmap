@@ -67,7 +67,7 @@ describe('/api/tasksync/:provider/account', () => {
     ws.send(JSON.stringify({ t: 'tasks', opId: randomUUID(), args: { action: 'status' } }));
     const status = await next('tasks');
     expect(status).toMatchObject({ ok: true, log: expect.stringMatching(/^FAKE: bound to Ops/) });
-    expect(status.delivery).toEqual({ mode: 'off', summary: 'Checking every 1 min: webhooks off on a private address', reason: 'webhooks need PUBLIC_URL to be an address Fake can reach' });
+    expect(status.delivery).toEqual({ mode: 'off', summary: 'Checking every 1 min. Instant updates need an address Fake can reach.', reason: 'webhooks need PUBLIC_URL to be an address Fake can reach' });
     // Sync answers carry none.
     ws.send(JSON.stringify({ t: 'tasks', opId: randomUUID(), args: { action: 'sync' } }));
     expect((await next('tasks')).delivery).toBeUndefined();

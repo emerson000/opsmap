@@ -23,22 +23,22 @@ export function pollIntervals(caps:Capabilities,override?:number):{ pollMs:numbe
   const pollMs=override!==undefined?Math.max(MIN_POLL_MS,override):caps.pollMs;
   return {pollMs,idlePollMs:Math.max(caps.idlePollMs,pollMs)};
 }
-/** Why this map gets no webhooks, or undefined when it may have them, with a short note for the sidebar's summary.
- *  `reach` is undefined until PUBLIC_URL is checked. */
+/** Why this map gets no webhooks, or undefined when it may have them, with a plain sentence for the sidebar's summary
+ *  (the reason stays technical: it is the status text and the summary's tooltip). `reach` is undefined until
+ *  PUBLIC_URL is checked. */
 export function webhooksBlockedWhy(setting:WebhookSetting,publicUrl:string|undefined,reach:Reachability|undefined,caps:Capabilities,label:string):{ reason:string; note:string }|undefined {
-  if(setting==='off')return {reason:'webhooks are off (TASKSYNC_WEBHOOKS=off)',note:'webhooks off'};
-  if(!caps.webhooks)return {reason:`${label} has no webhooks`,note:`${label} has no webhooks`};
-  const unreachable=`webhooks need PUBLIC_URL to be an address ${label} can reach`;
-  if(!publicUrl)return {reason:unreachable,note:'webhooks off without PUBLIC_URL'};
+  if(setting==='off')return {reason:'webhooks are off (TASKSYNC_WEBHOOKS=off)',note:'Instant updates are turned off on this server.'};
+  if(!caps.webhooks)return {reason:`${label} has no webhooks`,note:`${label} does not send instant updates.`};
+  const unreachable=`webhooks need PUBLIC_URL to be an address ${label} can reach`,reachable=`Instant updates need an address ${label} can reach.`;
+  if(!publicUrl)return {reason:unreachable,note:'Instant updates need a public address for this server.'};
   if(setting==='on')return undefined;
-  if(!reach)return {reason:'PUBLIC_URL is not checked yet',note:'checking PUBLIC_URL'};
-  if(reach.loopback)return {reason:unreachable,note:PRIVATE_NOTE};
+  if(!reach)return {reason:'PUBLIC_URL is not checked yet',note:'Checking whether instant updates can work.'};
+  if(reach.loopback)return {reason:unreachable,note:reachable};
   const needs=`${label} needs a public${caps.webhooks.https?' HTTPS':''} address`;
-  if(caps.webhooks.publicAddress&&!reach.publicAddress)return {reason:`${reach.reason??'PUBLIC_URL is not public'}: ${needs}`,note:PRIVATE_NOTE};
-  if(caps.webhooks.https&&!reach.https)return {reason:`PUBLIC_URL is not HTTPS: ${needs}`,note:'webhooks off without HTTPS'};
+  if(caps.webhooks.publicAddress&&!reach.publicAddress)return {reason:`${reach.reason??'PUBLIC_URL is not public'}: ${needs}`,note:`Instant updates need a public${caps.webhooks.https?' HTTPS':''} address.`};
+  if(caps.webhooks.https&&!reach.https)return {reason:`PUBLIC_URL is not HTTPS: ${needs}`,note:'Instant updates need an HTTPS address.'};
   return undefined;
 }
-const PRIVATE_NOTE='webhooks off on a private address';
 export const webhooksBlocked=(setting:WebhookSetting,publicUrl:string|undefined,reach:Reachability|undefined,caps:Capabilities,label:string):string|undefined=>webhooksBlockedWhy(setting,publicUrl,reach,caps,label)?.reason;
 /** Registered, but the provider's handshake did not come within its timeout. */
 export function handshakeMissing(caps:Capabilities,rec:DeliveryRecord,now:number):boolean {
@@ -83,10 +83,10 @@ export function deliveryStatus(d:Delivery,count:number,hint?:string):string {
 export interface DeliverySummary { mode:Delivery['mode']; summary:string; reason:string }
 /** "1 min", "2 min", "15 s". */
 export const shortEvery=(ms:number)=>ms%60_000===0?`${ms/60_000} min`:`${Math.round(ms/1000)} s`;
-/** "Live updates", "Checking every 2 min", "Checking every 2 min: webhooks off on a private address". `count`: webhooks
- *  registered; `note`: why webhooks are off. */
+/** "Live updates", "Checking every 2 min.", "Checking every 2 min. Instant updates need a public HTTPS address." `count`:
+ *  webhooks registered; `note`: why webhooks are off, in plain words. */
 export function deliverySummary(d:Delivery,count:number,note?:string):DeliverySummary {
-  const checking=`Checking every ${shortEvery(d.nextPollMs)}`;
-  const summary=d.mode==='live'?'Live updates':d.mode==='off'?(note?`${checking}: ${note}`:checking):d.mode==='failed'?`${checking}: webhooks failed`:count?`${checking}: webhooks not delivering yet`:checking;
-  return {mode:d.mode,summary,reason:d.reason};
+  const checking=`Checking every ${shortEvery(d.nextPollMs)}.`;
+  const why=d.mode==='off'?note:d.mode==='failed'?'Instant updates failed; trying again later.':d.mode==='pending'&&count?'Waiting for the first instant update.':undefined;
+  return {mode:d.mode,summary:d.mode==='live'?'Live updates':why?`${checking} ${why}`:checking,reason:d.reason};
 }

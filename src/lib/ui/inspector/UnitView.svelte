@@ -16,6 +16,7 @@
   import { annotate, initials, color, nameOf } from '../../sync/sync.svelte';
   import { features, taskService } from '../../model/features.svelte';
   import { taskUrl } from '../taskUrls';
+  import { loadTaskAccount, taskSyncWhy } from '../taskAccounts.svelte';
   import { env, runCommand, toast, ui, type Theme } from '../shell.svelte';
   import { AFFILIATIONS, AFF_LABEL, CONDITIONS, LIFECYCLE_LABEL, RINGS, band, dayMonth, echelonRange, orderLine, ringOf, unitLabel } from '../words';
   import { slotFor, token } from '../verbs';
@@ -46,6 +47,10 @@
     const bound = doc.settings.taskSync, service = taskService(bound?.provider);
     return unit.remote && bound && service ? taskUrl(service, bound.root, unit.remote) : null;
   });
+  /** Why Sync now and Status cannot run (the same rule as the map's task sync section), or null. */
+  const taskService0 = $derived(taskService(doc.settings.taskSync?.provider) ?? features.taskSync[0]);
+  $effect(() => { if (taskService0) loadTaskAccount(taskService0.id); });
+  const taskWhy = $derived(taskService0 ? taskSyncWhy(taskService0.id, doc.settings.taskSync?.label ?? taskService0.label, Boolean(doc.settings.taskSync)) : null);
 
   const cmd = (verb: string, args: Record<string, unknown> = {}): Command => ({ verb, args: { unit: unit.id, ...args } });
   /** The command-bar text of this unit's command. */
@@ -472,16 +477,20 @@
 </Section>
 
 {#if features.taskSync.length}
-  <Section kind={K} key="tasks" title={doc.settings.taskSync?.label ?? 'Task sync'} summary={taskLink ? 'linked to a task' : doc.settings.taskSync ? 'no task yet' : 'not bound'} open={false}>
+  {@const bound = doc.settings.taskSync}
+  {@const ts = textOf({ verb: 'tasks', args: { action: 'sync' } }, doc)}
+  {@const tt = textOf({ verb: 'tasks', args: { action: 'status' } }, doc)}
+  <Section kind={K} key="tasks" title="Task sync" summary={taskLink ? 'linked to a task' : bound ? 'no task yet' : 'not bound'} open={false}>
     <Field label="Task" cmd={null}>
-      {#if taskLink}<a class="task-link" data-testid="tasks-task" href={taskLink} target="_blank" rel="noopener noreferrer">Task ↗</a>{:else}<span class="muted">{doc.settings.taskSync ? 'Not synced to a task yet.' : 'This map is not bound to a task service.'}</span>{/if}
+      {#if taskLink}<a class="task-link" data-testid="tasks-task" href={taskLink} target="_blank" rel="noopener noreferrer">Open {unit.designation} in {bound?.label} ↗</a>{:else}<span class="muted">{bound ? 'Not synced to a task yet.' : 'This map is not bound to a task service.'}</span>{/if}
     </Field>
-    <Field label="Map sync" entry={slot('tasks', 'sync')} cmd="/tasks sync">
+    {#if taskWhy}<p class="muted" data-testid="tasks-why">{taskWhy}</p>{/if}
+    <Field label="Sync" entry={slot('tasks', 'sync')} cmd={ts}>
       <div class="pair">
-        <button class="btn" data-testid="tasks-sync" title="/tasks sync" use:echoes={'/tasks sync'} onclick={() => runCommand({ verb: 'tasks', args: { action: 'sync' } })}>Sync</button>
-        <button class="btn" data-testid="tasks-status" title="/tasks status" use:echoes={'/tasks status'} onclick={() => runCommand({ verb: 'tasks', args: { action: 'status' } })}>Status</button>
+        <button class="btn" data-testid="tasks-sync" aria-disabled={taskWhy ? 'true' : undefined} title={taskWhy ?? ts} use:echoes={ts} onclick={() => { if (!taskWhy) runCommand({ verb: 'tasks', args: { action: 'sync' } }); }}>Sync now</button>
+        <button class="btn" data-testid="tasks-status" aria-disabled={taskWhy ? 'true' : undefined} title={taskWhy ?? tt} use:echoes={tt} onclick={() => { if (!taskWhy) runCommand({ verb: 'tasks', args: { action: 'status' } }); }}>Status</button>
       </div>
-      <span class="note">Sync and Status act on the whole map, not only this unit.</span>
+      <span class="note">Sync now and Status act on the whole map, not only this unit.</span>
     </Field>
   </Section>
 {/if}
@@ -508,6 +517,8 @@
   .ttl { font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sub { color: var(--ink-2); font-size: 12px; }
   .task-link { display: inline-block; margin-top: 2px; font-size: 12px; color: var(--ink); }
+  .btn[aria-disabled='true'] { opacity: 0.45; cursor: default; }
+  :global([data-tier='phone']) .task-link { display: inline-flex; align-items: center; min-height: 44px; }
   .actions { display: flex; flex-wrap: wrap; gap: var(--s1); margin-bottom: var(--s2); }
   .actions .btn { flex: 1 1 0; min-width: max-content; justify-content: center; padding: 0 6px; letter-spacing: 0.06em; }
   .btn.primary { background: var(--ink); color: var(--panel); border-color: var(--ink); }

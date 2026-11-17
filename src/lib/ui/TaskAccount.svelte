@@ -85,9 +85,9 @@
   header { display: flex; align-items: center; gap: var(--s1); padding: var(--s2) var(--s3); border-bottom: 1px solid var(--rule); background: var(--panel-2); }
   header .cap { flex: 1; color: var(--ink); }
   .body { padding: var(--s3); overflow: auto; display: flex; flex-direction: column; gap: var(--s2); }
-  p { margin: 0; font-size: 13px; line-height: 1.45; }
-  .muted { color: var(--ink-soft, var(--ink)); opacity: 0.8; }
-  .state { font-size: 14px; }
+  p { margin: 0; font-size: 12px; line-height: 1.45; color: var(--ink-2); }
+  .muted { color: var(--ink-3); }
+  .state { font-size: 12px; color: var(--ink); }
   .row { display: flex; gap: var(--s1); margin-top: var(--s1); }
   .row .field { flex: 1; height: 30px; font-family: var(--font-mono); }
   .error { color: var(--hostile, #b91c1c); font-weight: 600; }
