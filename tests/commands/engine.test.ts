@@ -88,7 +88,7 @@ describe('transaction invariants and command aliases',()=>{
  it('refuses invalid direct UI mutations without changing any part of the document',()=>{
   const before=structuredClone(state.doc!);
   for(const cmd of [
-   {verb:'new',args:{title:'Duplicate',designation:'IRS'}},
+   {verb:'new',args:{title:'Bad designation',designation:'-IRS'}},
    {verb:'attack',args:{unit:'tools',target:'irs',role:'main'}},
    {verb:'bda',args:{unit:'irs',strength:-1}},
    {verb:'sector',args:{action:'remove',sectorId:'work'}},

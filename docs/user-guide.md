@@ -80,6 +80,10 @@ The browser synthesizes three quiet console cues (no audio files): two rising to
 
 ## Map commands
 
+### Designations
+
+`/new … as <designation>` and `/rename <unit> "<title>" as <designation>` set a unit's designation. If the name is taken, the next free number is added: `as DELTA` gives DELTA2 when DELTA exists, then DELTA3. A name that already ends in a number is used as typed, so `as DELTA2` fails with `Designation DELTA2 is already taken` when DELTA2 exists.
+
 ### Control measures
 
 `/obj|/ea|/nai move <name> [to <sector>] <hq|near|mid|far>` (the ring words `close`, `deep` and `aoi` also work everywhere) or `move <name> near <unit>`; `/pl date <name> <date>` re-dates a phase line (phase lines sit at their date and are not dragged); `/obj|/ea|/nai|/pl rename <name> "<new name>"` renames one (orders and axes on it keep pointing at it). All are ordinary undoable ops. `/find <unit>`, `/find obj|ea|nai|pl <name>` and `/find sector <name>` select the object and open its view in the sidebar; a unit or an area is also centered on the map.

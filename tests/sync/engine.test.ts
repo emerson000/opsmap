@@ -163,9 +163,9 @@ describe('sync engine', () => {
     await flush();
     hub.holding = true;
     b.engine.submit({ verb: 'done', args: { unit: 'u1' } });
-    a.engine.submit({ verb: 'rename', args: { unit: 'u1', title: 'x', designation: 'BRAVO' } });
+    a.engine.submit({ verb: 'rename', args: { unit: 'u1', title: 'x', designation: 'BRAVO1' } });
     // Make A's op fail on the server: something else takes the designation first.
-    hub.commit(null, 'sys-1', newUnit('Other', 'BRAVO'));
+    hub.commit(null, 'sys-1', newUnit('Other', 'BRAVO1'));
     hub.release();
     await flush();
     expect(a.rejects).toHaveLength(1);

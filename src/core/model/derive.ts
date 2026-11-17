@@ -7,6 +7,17 @@ export function effectiveCondition(u: Unit): Condition {
   }
   return 'none';
 }
+/**
+ * A designation given with `as`: taken as is when free. When it is taken and does not end in a digit, the next free
+ * numbered one (DELTA → DELTA2, DELTA3…). One that ends in a digit is never changed, so the caller rejects a duplicate.
+ */
+export function freeDesignation(wanted: string, taken: Set<string>): string {
+  const occupied=new Set([...taken].map(d=>d.toUpperCase()));
+  if (!occupied.has(wanted) || /\d$/.test(wanted)) return wanted;
+  let suffix=2;
+  while (occupied.has(`${wanted}${suffix}`)) suffix++;
+  return `${wanted}${suffix}`;
+}
 export function designationFrom(title: string, taken: Set<string>): string {
   const words=title.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toUpperCase().match(/[A-Z0-9]+/g) ?? [];
   const base=words.join('').slice(0,8);
