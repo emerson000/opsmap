@@ -14,7 +14,7 @@ import { dayInstant } from '../../../server/tasksync/merge';
 import { parse } from '../../../src/core/commands/grammar';
 import { seedDoc } from '../../../src/core/model/seed';
 import { DEFAULT_TZ } from '../../../src/core/model/time';
-import { FakeAsana } from './fake-asana';
+import { FakeAsana, TAG_COLORS } from './fake-asana';
 import { providerContract } from '../provider-contract';
 
 const TOKEN = '2/1001/5000:fake0000token';
@@ -85,6 +85,16 @@ describe('Asana provider', () => {
     as.calls.length = 0;
     for (const bad of ['short', 'has a space in it ok', 'x'.repeat(513), `${TOKEN}\n`]) await expect(p.verify(bad)).rejects.toBeInstanceOf(RemoteAuthError);
     expect(as.calls).toEqual([]);
+    as.rateLimit('me', 20);
+    await expect(p.verify(TOKEN)).rejects.toEqual(new RateLimited(20));
+  });
+  it('makes every identity and state tag with a color Asana accepts', async () => {
+    const s = new AsanaProvider(() => as).connect(TOKEN), root = await s.resolveRoot('Ops');
+    const c = await s.ensureContainers(root, [{ sectorId: 'w', name: 'Work' }], {});
+    for (const a of ['hostile', 'suspect', 'friend', 'assumed', 'neutral', 'unknown', 'pending'] as const) await s.createTask(root, { title: a, container: c.w, affiliation: a, status: a === 'unknown' ? 'active' : 'blocked' }, 'UTC');
+    expect([...as.tagsById.values()].map(t => t.color).every(x => x !== undefined && TAG_COLORS.includes(x))).toBe(true);
+    expect([...as.tagsById.values()].find(t => t.name === 'unknown')?.color).toBe('light-yellow');
+    expect(as.tagsById.size).toBe(9);
   });
   it('maps refusals: 429 is RateLimited (Retry-After, else 60 s), 401 and 403 a refused token, 404 from getTask null', async () => {
     const s = new AsanaProvider(() => as).connect(TOKEN), root = await s.resolveRoot('Ops');

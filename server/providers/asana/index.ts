@@ -1,7 +1,7 @@
 // Asana as a task provider: on when ASANA_SYNC=1 (or true). The descriptor, the capabilities, the token check and the
 // session (adapter.ts); the task sync engine does the rest. Webhooks are not registered yet: the engine polls.
-import { AsHttpError, HttpAsApi, type AsApi } from './api';
-import { asanaSession } from './adapter';
+import { HttpAsApi, type AsApi } from './api';
+import { asanaSession, translate } from './adapter';
 import { RemoteAuthError, type Capabilities, type ProviderDescriptor, type ProviderFactory, type ProviderSession, type TaskProvider } from '../../tasksync/contract';
 import type { ProviderModule } from '../../tasksync/registry';
 
@@ -25,7 +25,7 @@ export class AsanaProvider implements TaskProvider {
   async verify(token: string): Promise<{ username: string }> {
     if (!wellFormedToken(token)) throw new RemoteAuthError('That does not look like an Asana personal access token');
     try { const me = await this.makeApi(token).me(); return { username: me.name || me.gid }; }
-    catch (error) { if (error instanceof AsHttpError && (error.status === 401 || error.status === 403)) throw new RemoteAuthError(error.message); throw error; }
+    catch (error) { throw translate(error); }
   }
   connect(token: string): ProviderSession { return asanaSession(this.makeApi(token), this.descriptor.label); }
 }

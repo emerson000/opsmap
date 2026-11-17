@@ -10,8 +10,8 @@ import { NOTE_LIMIT } from '../../tasksync/merge';
 import { IDENTITY_NAMES, affiliationOfName } from '../identity';
 import { AsHttpError, type AsApi, type AsNewTask, type AsProject, type AsRef, type AsSection, type AsTag, type AsTask, type AsTaskFields } from './api';
 
-/** Identity tags, in Asana's color names closest to the frame colors. */
-export const IDENTITY_COLORS: Record<Affiliation, string> = { hostile: 'light-red', suspect: 'light-orange', friend: 'light-blue', assumed: 'light-teal', neutral: 'light-green', unknown: 'light-brown', pending: 'light-warm-gray' };
+/** Identity tags, in Asana's tag colors closest to the frame colors (Asana accepts only its own color names). */
+export const IDENTITY_COLORS: Record<Affiliation, string> = { hostile: 'light-red', suspect: 'light-orange', friend: 'light-blue', assumed: 'light-teal', neutral: 'light-green', unknown: 'light-yellow', pending: 'light-warm-gray' };
 /** The state tags: neither means to do; completed means done whatever the tags say. */
 export const STATE_TAGS = { active: 'doing', blocked: 'blocked' } as const;
 const STATE_COLORS: Record<string, string> = { doing: 'dark-blue', blocked: 'dark-red' };
@@ -179,8 +179,9 @@ export class AsanaSession implements ProviderSession {
   }
   async createTask(root: RemoteRoot, fields: TaskWrite & { title: string; container: string }, tz: string): Promise<RemoteTask> {
     const body: AsNewTask = { name: fields.title, ...(fields.note ? { notes: fields.note } : {}), ...(fields.due ? { due_on: fields.due } : {}), ...(fields.status === 'done' ? { completed: true } : {}) };
-    // Put in its section explicitly: a task made with only a project may land in no section.
-    let t = await this.api.createTask(fields.parent ? { ...body, parent: fields.parent } : { ...body, memberships: [{ project: root.id, section: fields.container }] });
+    // Put in its section explicitly: a task made with only a project may land in no section. Asana refuses
+    // memberships without projects (400 "You should specify one of workspace, parent, projects").
+    let t = await this.api.createTask(fields.parent ? { ...body, parent: fields.parent } : { ...body, projects: [root.id], memberships: [{ project: root.id, section: fields.container }] });
     t = await this.setState(root, t, fields.status);
     if (fields.affiliation !== undefined) t = await this.setIdentity(root, t, fields.affiliation);
     this.raw.set(t.gid, t);

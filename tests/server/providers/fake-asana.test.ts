@@ -74,4 +74,17 @@ describe('FakeAsana (spike behavior)', () => {
     a.rateLimit('me', 12); expect(await a.me().catch(e => e)).toMatchObject({ status: 429, retryAfterS: 12 }); expect(await a.me()).toMatchObject({ gid: '1' });
     expect(new AsHttpError(429, 'x', 3).retryAfterS).toBe(3);
   });
+  it('live probe: memberships alone are refused; projects with memberships land in the section; one membership per project', async () => {
+    const { a, p, s } = await setup();
+    await expect(a.createTask({ name: 'M', memberships: [{ project: p.gid, section: s.gid }] })).rejects.toMatchObject({ status: 400, message: expect.stringContaining('You should specify one of workspace, parent, projects') });
+    const t = await a.createTask({ name: 'M', projects: [p.gid], memberships: [{ project: p.gid, section: s.gid }] });
+    expect(t.memberships).toEqual([{ project: { gid: p.gid, name: 'Ops' }, section: { gid: s.gid, name: 'Home' } }]);
+  });
+  it('live probe: tag colors outside Asana’s set are refused; writing due_on clears due_at', async () => {
+    const { a, ws, p } = await setup();
+    await expect(a.createTag(ws, 'x', 'light-brown')).rejects.toMatchObject({ status: 400 });
+    expect((await a.createTag(ws, 'y', 'light-yellow')).name).toBe('y');
+    const t = await a.createTask({ name: 'D', projects: [p.gid], due_at: '2026-12-15T23:30:00.000Z' });
+    expect(await a.updateTask(t.gid, { due_on: '2026-12-20' })).toMatchObject({ due_on: '2026-12-20', due_at: null });
+  });
 });

@@ -8,6 +8,8 @@ import { AsHttpError } from '../../../server/providers/asana/api';
 import type { AsApi, AsMembership, AsNewTask, AsProject, AsSection, AsTag, AsTask, AsTaskFields, AsUser, AsWebhook } from '../../../server/providers/asana/api';
 
 interface Rec { gid: string; name: string; notes: string; completed: boolean; completedAt: number | null; due_on: string | null; due_at: string | null; modified: number; parent: string | null; memberships: { project: string; section?: string }[]; tags: string[] }
+/** The tag colors Asana accepts (live probe, 2026-11-17). */
+export const TAG_COLORS = ['dark-blue', 'dark-brown', 'dark-green', 'dark-orange', 'dark-pink', 'dark-purple', 'dark-red', 'dark-teal', 'dark-warm-gray', 'light-blue', 'light-green', 'light-orange', 'light-pink', 'light-purple', 'light-red', 'light-teal', 'light-warm-gray', 'light-yellow', 'none'];
 const notFound = (method: string, path: string, what = 'Not a recognized ID') => new AsHttpError(404, `Asana ${method} ${path}: ${what}`);
 
 export class FakeAsana implements AsApi {
@@ -75,7 +77,8 @@ export class FakeAsana implements AsApi {
   private touch(r: Rec) { r.modified = this.clock = this.clock + 1000; }
   private apply(r: Rec, f: AsTaskFields) {
     if (f.name !== undefined) r.name = f.name; if (f.notes !== undefined) r.notes = f.notes;
-    if (f.due_on !== undefined) r.due_on = f.due_on; if (f.due_at !== undefined) r.due_at = f.due_at;
+    // Live probe 2026-11-17: writing due_on clears due_at.
+    if (f.due_on !== undefined) { r.due_on = f.due_on; r.due_at = null; } if (f.due_at !== undefined) r.due_at = f.due_at;
     if (f.completed !== undefined && f.completed !== r.completed) { r.completed = f.completed; r.completedAt = f.completed ? this.clock : null; }
     this.touch(r);
   }
@@ -86,7 +89,9 @@ export class FakeAsana implements AsApi {
   }
   async createTask({ parent, projects, memberships, workspace: _w, ...fields }: AsNewTask) {
     this.enter('createTask', fields.name); if (parent && !this.tasksById.has(parent)) throw notFound('POST', `/tasks/${parent}/subtasks`);
-    const r: Rec = { gid: this.id(), name: '', notes: '', completed: false, completedAt: null, due_on: null, due_at: null, modified: this.clock, parent: parent ?? null, memberships: parent ? [] : [...(projects ?? []).map(project => ({ project })), ...(memberships ?? []).map(m => ({ project: m.project, ...(m.section ? { section: m.section } : {}) }))], tags: [] };
+    // Live probe 2026-11-17: memberships alone are refused; projects (or workspace) must come with them.
+    if (!parent && !projects?.length && !_w) throw new AsHttpError(400, 'Asana POST /tasks: You should specify one of workspace, parent, projects');
+    const r: Rec = { gid: this.id(), name: '', notes: '', completed: false, completedAt: null, due_on: null, due_at: null, modified: this.clock, parent: parent ?? null, memberships: parent ? [] : [...(projects ?? []).filter(project => !memberships?.some(m => m.project === project)).map(project => ({ project })), ...(memberships ?? []).map(m => ({ project: m.project, ...(m.section ? { section: m.section } : {}) }))], tags: [] };
     for (const m of parent ? [] : memberships ?? []) { if (!this.projectsById.has(m.project) || m.section && this.sectionsById.get(m.section)?.project !== m.project) throw new AsHttpError(400, 'Asana POST /tasks: memberships: Not a recognized ID'); }
     this.tasksById.set(r.gid, r); this.apply(r, fields); return this.view(r);
   }
@@ -110,6 +115,7 @@ export class FakeAsana implements AsApi {
   async tags(workspace: string) { this.enter('tags', workspace); return [...this.tagsById.values()].filter(t => t.workspace === workspace).map(t => ({ gid: t.gid, name: t.name })); }
   async createTag(workspace: string, name: string, color?: string) {
     this.enter('createTag', workspace, name); if (!workspace || !this.workspaces.has(workspace)) throw new AsHttpError(400, 'Asana POST /tags: You should specify one of workspace');
+    if (color !== undefined && !TAG_COLORS.includes(color)) throw new AsHttpError(400, `Asana POST /tags: color: Invalid value: ${color}`);
     const t = { gid: this.id(), name, workspace, ...(color ? { color } : {}) }; this.tagsById.set(t.gid, t); return { gid: t.gid, name };
   }
   async addTag(task: string, tag: string) { this.enter('addTag', task, tag); const r = this.rec(task, 'POST', `/tasks/${task}/addTag`); if (!this.tagsById.has(tag)) throw notFound('POST', `/tasks/${task}/addTag`, 'tag: Not a recognized ID'); if (!r.tags.includes(tag)) r.tags.push(tag); this.touch(r); }
