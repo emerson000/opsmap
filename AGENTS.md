@@ -1,6 +1,6 @@
 # AGENTS.md
 
-Rules for coding agents working in this repository. `README.md` is the overview; the manual is in `docs/` (`user-guide.md`, `mcp.md`, `vikunja.md`, `operations.md`). Read the part for the area you change.
+Rules for coding agents working in this repository. `README.md` is the overview; the manual is in `docs/` (`user-guide.md`, `mcp.md`, `task-sync.md`, `vikunja.md`, `asana.md`, `operations.md`). Read the part for the area you change.
 
 ## Project layout
 
@@ -10,8 +10,10 @@ Rules for coding agents working in this repository. `README.md` is the overview;
   - `commands/apply.ts`: `apply(doc, command, now)`, the only code that changes a map document.
   - `commands/suggest.ts`: command bar autocomplete.
 - `src/lib/` — the Svelte 5 client: `ui/` (command bar, inspector sidebar, sheet, top bar), `map/` (SVG map, gestures, menus), `commands/` (client dispatch, undo, recent units), `sync/` (WebSocket client).
-- `server/` — Hono HTTP server, WebSocket hub (`hub.ts`), maps (`maps.ts`), MCP server (`mcp.ts`), Vikunja sync (`vikunja/`).
-- `tests/` — Vitest unit tests. `e2e/` — Playwright browser tests.
+- `server/` — Hono HTTP server, WebSocket hub (`hub.ts`), maps (`maps.ts`), MCP server (`mcp.ts`).
+  - `tasksync/`: the provider-neutral task sync: the contract (`contract.ts`), the engine, delivery modes, the credential store and the routes.
+  - `providers/<id>/`: one adapter per task service (`vikunja/`, `asana/`, and `fake/` for tests), registered in `providers/index.ts`.
+- `tests/` — Vitest unit tests (`tests/live/` holds opt-in tests against real services, not part of `npm test`). `e2e/` — Playwright browser tests.
 
 ## Commands
 
@@ -31,6 +33,10 @@ Every change to a map is a `Command` (`{ verb, args }`) that goes through `apply
 1. Do not change a map document anywhere except in `apply()`. UI code calls `run()` or `dispatch()` with a `Command`; server code calls `hub.submit()`.
 2. A new capability starts in the grammar: add the verb or argument to `VERBS` and `SYNTAX`, parse it in `parse()`, apply it in `apply()`, and add its autocomplete to `suggest.ts`. Then add the UI and MCP surfaces described below. Do not add a capability that only one surface can reach.
 3. A UI control builds the same `Command` that `parse()` returns for the equivalent text, with the same argument names and values. Do not write a second code path with different rules, limits or log text.
+
+## Task services
+
+A task service (Vikunja, Asana, the next one) is an adapter only. It lives in `server/providers/<id>/`, implements `TaskProvider` from `server/tasksync/contract.ts`, and is added with one line to `MODULES` in `server/providers/index.ts`. Do not name a service, or branch on one, in the engine, the core, the client or MCP: they read the descriptor and the capabilities. `tests/architecture.test.ts` must pass. Run the new adapter through `providerContract` (`tests/server/provider-contract.ts`). `docs/task-sync.md` (**Adding a provider**) walks through it.
 
 ## Parity: MCP and the command bar
 

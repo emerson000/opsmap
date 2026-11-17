@@ -14,7 +14,7 @@ A personal operations map. Your tasks, problems, people and places are drawn as 
 - A five-paragraph SITREP: enemy, friendly, terrain, changes since the morning turn, and commander's intent.
 - Several users and several maps on one server, with live updates.
 - An MCP server for agents. An agent sends the same command text as the command bar and gets the same result.
-- Optional two-way sync with Vikunja for tasks, dates, state and identity labels.
+- Optional two-way task sync with Vikunja or Asana: titles, dates, notes, state, sectors, identity and task forces as subtasks.
 - Layouts for phone, tablet and desktop, with a bottom sheet and touch gestures on phones. Day (light table) and Night (ops center) themes.
 
 ![opsmap in the Day theme](docs/screenshot-day.png)
@@ -55,5 +55,6 @@ Register `PUBLIC_URL/auth/callback` as the redirect URI with your provider, and 
 
 - [User guide](docs/user-guide.md): gestures, keys, the sidebar, SITREP and every map command.
 - [MCP and HTTP API](docs/mcp.md): tools, tokens and map management for agents.
-- [Vikunja sync](docs/vikunja.md): setup and what syncs.
+- [Task sync](docs/task-sync.md): binding a map to a task service, how changes merge and arrive, and adding a service.
+- [Vikunja sync](docs/vikunja.md) and [Asana sync](docs/asana.md): setup and what syncs with each.
 - [Operations](docs/operations.md): configuration, sign-in, security, backup and restore.

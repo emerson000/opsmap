@@ -12,10 +12,39 @@
 | `DATA_DIR` | Database, backups and secrets (default `/data`). |
 | `OPSMAP_TZ` | Calendar zone for maps (else `TZ`, else `UTC`). |
 | `VIKUNJA_URL` | Turns on Vikunja sync. See [vikunja.md](vikunja.md). |
-| `TASKSYNC_WEBHOOKS` | `auto` (default): task services post webhooks to `PUBLIC_URL` when they can reach it; `on`: try even when it looks private; `off`: poll only. |
-| `TASKSYNC_POLL_SECONDS` | Overrides how often task sync polls (15 seconds at least). For development. |
-| `OPSMAP_SECRET_KEY_FILE` | Key that seals stored Vikunja tokens (default `DATA_DIR/secrets/master.key`). |
+| `ASANA_SYNC` | `1` or `true` turns on Asana sync. See [asana.md](asana.md). |
+| `TASKSYNC_WEBHOOKS` | `auto` (default): task services post webhooks to `PUBLIC_URL` when they can reach it; `on`: try even when it looks private; `off`: poll only. See [Running on a LAN or as a dev server](#running-on-a-lan-or-as-a-dev-server). |
+| `TASKSYNC_POLL_SECONDS` | Overrides how often task sync polls, for every service (15 seconds at least). For development. |
+| `OPSMAP_SECRET_KEY_FILE` | Key that seals stored task service tokens (default `DATA_DIR/secrets/master.key`). Back it up separately from the database. |
 | `OPSMAP_DEV_USERS`, `OPSMAP_ADMIN_EMAILS` | Development sign-in only; refused in production and on a non-loopback `HOST`. |
+
+## Running on a LAN or as a dev server
+
+Task sync ([task-sync.md](task-sync.md)) polls every bound map, and that works everywhere: on a development server at `http://127.0.0.1:8080`, on a LAN, on a tailnet and on the public internet. Webhooks only make changes from the service arrive sooner, and only work when the service can reach `PUBLIC_URL`. The server works out a delivery mode for each bound map and never logs an error because webhooks cannot work.
+
+| Mode | When | `/tasks status` (sidebar) |
+|---|---|---|
+| off | `TASKSYNC_WEBHOOKS=off`; `PUBLIC_URL` unset or loopback; or `PUBLIC_URL` does not meet the service's needs (Asana needs a public HTTPS address) | `polling every 2 minutes (webhooks off: Asana needs a public HTTPS address; PUBLIC_URL is a private address (192.168.1.5))` or `polling every minute (webhooks need PUBLIC_URL to be an address Vikunja can reach)` (`Checking every 2 min. Instant updates need a public HTTPS address.`) |
+| pending | registered, no signed delivery in the last 15 minutes | `5 webhooks, none delivered yet: ‹hint› · polling every minute`; after earlier deliveries, `5 webhooks · last delivery 18:22:59Z · polling every minute` (`Checking every 1 min. Waiting for the first instant update.`) |
+| live | a signed delivery in the last 15 minutes | `1 webhook · last delivery 12:00:00Z` (`Live updates`) |
+| failed | the service refused the webhook, or (Asana) its handshake did not arrive within 30 seconds | `webhooks failed: ‹reason›, retrying at 12:10:00Z · polling every 2 minutes` (`Checking every 2 min. Instant updates failed; trying again later.`) |
+
+- A loopback, private (RFC 1918), CGNAT or Tailscale (`100.64.0.0/10`), link-local or IPv6 unique-local address counts as private, and so does a name ending in `.local`, `.lan`, `.internal`, `.home.arpa` or `.ts.net`. The server resolves `PUBLIC_URL` at start and every hour.
+- Asana needs a public HTTPS `PUBLIC_URL`, for example through a reverse proxy with a certificate or a tunnel. On anything else it polls every 2 minutes and makes no webhook calls.
+- A Vikunja on the same LAN can reach a private address if it runs with `VIKUNJA_OUTGOINGREQUESTS_ALLOWNONROUTABLEIPS=true`. Start opsmap with `TASKSYNC_WEBHOOKS=on` so it registers webhooks for a private `PUBLIC_URL`.
+- While webhooks are not live, opening a map in a browser, coming back to its tab, or an MCP call on it pulls within about 2 seconds.
+- For development, `TASKSYNC_POLL_SECONDS=15` polls every 15 seconds. `OPSMAP_FAKE_PROVIDER=1` with `NODE_ENV=test` adds an in-memory service named Fake, which the e2e tests use.
+
+## Upgrading to provider-neutral task sync
+
+A server that synced with Vikunja under `/vk` moves its sync data into the provider-neutral tables on its first start ([task-sync.md](task-sync.md#upgrading-from-a-server-that-synced-only-with-vikunja)). Before you deploy:
+
+1. Back up the database: take a completed nightly backup, or stop the container and copy `opsmap.db` with its `-wal` and `-shm` files. Keep the secret key file with it.
+2. Run the dry run on a copy, not on the live database: `DATA_DIR=/path/to/copy npx tsx server/cli.ts tasks migrate --dry-run` (or `node dist/server/cli.js tasks migrate --dry-run` in the image, with `DATA_DIR` set to the copy). It changes no sync data, but it opens the database with the server's schema setup, which can add tables or columns. Check that each map says `ok` for its snapshots, the binding you expect and the number of linked units.
+3. Make sure the secret key file (`OPSMAP_SECRET_KEY_FILE`, or `DATA_DIR/secrets/master.key`) is present where the new server runs. Tokens are copied to the new table only when the server can open them. Without the key they stay in the old table until a start that has it; if the key is lost, every user must connect their account again.
+4. Deploy, then run `/tasks status` on each bound map. It should match its `/vk status` from before the deploy: the same project, sectors and linked units. Only the last sync time differs.
+5. Vikunja webhooks keep their path (`/api/vikunja/hook/‹map›`), so the existing ones keep delivering and are not made again. A delivery should show in `/tasks status` within a few minutes of a change in Vikunja.
+6. Browser tabs opened before the deploy must reload before `/tasks` and the Task sync section work.
 
 ## Development sign-in
 
