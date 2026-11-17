@@ -764,7 +764,7 @@
           {@const y = dragging && drag ? drag.y : carried ? su.y + moving!.dy : su.y}
           {@const pk = pickUnit(su.id)}
           <g class="unit" class:pick-dim={pk === false} class:pick-ok={pk === true} class:dragging class:lifted={drag?.kind === 'unit' && lifted === su.id} class:selected={su.selected} class:link-target={link?.targetId === su.id}
-            class:link-valid={link?.targetId === su.id && link.valid} class:complete={su.unit.lifecycle === 'done' && su.unit.affiliation === 'friend'}
+            class:link-valid={link?.targetId === su.id && link.valid} class:complete={su.unit.lifecycle === 'done' && su.unit.affiliation === 'friend'} class:blocked={su.unit.lifecycle === 'blocked'}
             data-unit-id={su.id} data-interactive transform="translate({x} {y})"
             role="button" tabindex="0" aria-label="{su.unit.designation}: {su.unit.title}"
             ondblclick={(e) => e.stopPropagation()} onkeydown={(e) => unitKey(e, su.id)}
@@ -793,6 +793,13 @@
               <image pointer-events="none" href={sym.href} x={-sym.center.x * s} y={-sym.center.y * s} width={sym.width * s} height={sym.height * s} />
               {#if su.unit.lifecycle === 'done' && su.unit.affiliation === 'friend'}
                 <path d="M0 0 H20 M14 -4 L20 0 L14 4" transform="translate(0 {28*s}) rotate({su.unit.pos.theta+180}) scale({s})" class="withdraw" />
+              {/if}
+              {#if su.unit.lifecycle === 'blocked'}
+                <!-- Blocked: a no-entry mark at the lower right, with the reason as its tooltip. -->
+                <g class="blocked-mark" data-testid="blocked-mark" transform="translate({18 * s} {15 * s}) scale({s})">
+                  <circle r="6.5" /><path d="M-3.6 0 H3.6" />
+                  <title>Blocked{su.unit.note ? `: ${su.unit.note}` : ''} (/unblock {su.unit.designation})</title>
+                </g>
               {/if}
               {#if su.unit.keyTerrain}
                 {@const kt = keyTerrainSymbol(11, theme)}
@@ -1085,6 +1092,8 @@
   .flash { fill: none; stroke: var(--om-select); stroke-width: 3; transform-box: fill-box; transform-origin: center; animation: flash 0.6s ease-out 3; }
   .pulse { fill: var(--om-hostile); opacity: 0; transform-box: fill-box; transform-origin: center; animation: pulse 2.4s ease-out infinite; pointer-events: none; }
   .pin { fill: none; stroke: var(--om-ink); stroke-width: 1.4; }
+  .blocked-mark circle { fill: var(--om-hostile); stroke: var(--om-halo); stroke-width: 1.5; }
+  .blocked-mark path { stroke: #fff; stroke-width: 2.4; stroke-linecap: round; }
   .stack-frame { opacity: 0.6; }
   .stack-badge { cursor: pointer; }
   .stack-hit { fill: transparent; }

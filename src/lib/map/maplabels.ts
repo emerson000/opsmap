@@ -62,6 +62,8 @@ export function mapLabels(doc: Doc, scene: Scene, o: MapLabelOptions): Map<strin
     if (o.declutter && !u.selected && !(unit.affiliation === 'hostile' || unit.affiliation === 'suspect') && !mains.has(u.id) && (u.ring === 'far' || u.ring === 'beyond')) return [];
     const lines = [unit.designation + (u.ring === 'hq' && unit.echelon ? ` ${unit.echelon.toUpperCase()}` : '') + (unit.reinforced && staff ? ` (${unit.reinforced})` : '')];
     if (unit.lifecycle === 'done' && unit.affiliation === 'friend') lines.push('COMPLETE');
+    // Phones keep labels to one line where they can; the no-entry mark already shows a blocked unit there.
+    if (unit.lifecycle === 'blocked' && o.maxOffset === undefined) lines.push('BLOCKED');
     if (staff && unit.dueAt && (u.ring === 'hq' || u.ring === 'near' || u.ring === 'mid' || u.selected || o.hoveredId === u.id)) lines.push(formatDtg(unit.dueAt));
     if (detail) { if (unit.note) lines.push(...unit.note.match(/.{1,30}/g) ?? []); if (unit.rating) lines.push(`J ${unit.rating}`); if (unit.parentId) lines.push(`TF ${unit.parentId.toUpperCase()}`); }
     return [{ id: u.id, x: u.x, y: u.y, lines, strength: staff ? unit.strength : undefined, selected: u.selected }];

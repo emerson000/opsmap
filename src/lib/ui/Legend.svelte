@@ -16,7 +16,7 @@
   const statuses = $derived([
     { label: 'Present (to do / active)', s: sym('13031000141211000000') },
     { label: 'Planned: dashed frame', s: sym('13031010141211000000') },
-    { label: 'Blocked: single slash', s: sym('13031030141211000000') },
+    { label: 'Blocked: slash, red no-entry mark, BLOCKED', s: sym('13031030141211000000', {staffComments:'BLOCKED'}) },
     { label: 'Done friendly: COMPLETE, faded, withdrawing', s: sym('13031020141211000000', {staffComments:'COMPLETE'}) },
     { label: 'Destroyed hostile: X', s: sym('13061040141211000000') },
     { label: 'Task force bracket', s: sym('13031004161211000000') },

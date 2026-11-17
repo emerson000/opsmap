@@ -10,7 +10,7 @@ export function toSidc(u:Unit):string {
   if(u.sidcOverride) return u.sidcOverride;
   const fn=FUNCTION_BY_KEY[u.fn];
   const condition=effectiveCondition(u);
-  const status=u.presence==='planned'?'1':u.condition!=='none'?statuses[u.condition]:u.lifecycle==='blocked'?'3':u.lifecycle==='done'?(u.affiliation==='hostile'?'4':'2'):statuses[condition];
+  const status=u.presence==='planned'?'1':u.lifecycle==='blocked'&&(u.condition==='none'||u.condition==='fully-capable')?'3':u.condition!=='none'?statuses[u.condition]:u.lifecycle==='done'?(u.affiliation==='hostile'?'4':'2'):statuses[condition];
   // A command post is a headquarters, whatever its function.
   const h=(u.fn==='hq'||u.cp?2:0)+(u.taskForce?4:0);
   const echelon=fn.symbolSet==='10' && u.echelon?ECHELONS.find(e=>e.key===u.echelon)?.code??'00':'00';
