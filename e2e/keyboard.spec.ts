@@ -37,3 +37,36 @@ test('arrows and WASD pan, + and - zoom, and typing is not hijacked', async ({ b
   expect(errors(page)).toEqual([]);
   await page.context().close();
 });
+
+test('Alt+arrows select the next unit that way on the map, from the sidebar too', async ({ browser, baseURL }) => {
+  const page = await userPage(browser, 'alice', baseURL!, true);
+  await openMap(page);
+  const center = (id: string) => page.locator(`g.unit[data-unit-id="${id}"] > g > image:not(.stack-frame)`).first().boundingBox().then(b => ({ x: b!.x + b!.width / 2, y: b!.y + b!.height / 2 }));
+  const selected = () => page.locator('g.unit.selected').getAttribute('data-unit-id');
+  await page.locator('body').click({ position: { x: 640, y: 300 } });
+  // Nothing selected: from the middle of the map.
+  await page.keyboard.press('Alt+ArrowRight');
+  const first = await selected();
+  expect(first).toBeTruthy();
+  await expect(page.getByTestId('inspector')).toHaveAttribute('data-kind', 'unit');
+  const a = await center(first!);
+  await page.keyboard.press('Alt+ArrowLeft');
+  const second = await selected();
+  expect(second).not.toBe(first);
+  expect((await center(second!)).x).toBeLessThan(a.x);
+  // The new unit has focus, so Enter and the menu key act on it; Alt+arrows keep working with focus in the sidebar.
+  await expect(page.locator(`g.unit[data-unit-id="${second}"]`)).toBeFocused();
+  await page.getByTestId('inspector').focus();
+  const b = await center(second!);
+  await page.keyboard.press('Alt+ArrowDown');
+  const third = await selected();
+  expect(third).not.toBe(second);
+  expect((await center(third!)).y).toBeGreaterThan(b.y);
+  // Typing is left alone.
+  const input = page.getByTestId('command-input');
+  await input.click(); await input.fill('/note x');
+  await page.keyboard.press('Alt+ArrowUp');
+  expect(await selected()).toBe(third);
+  expect(errors(page)).toEqual([]);
+  await page.context().close();
+});

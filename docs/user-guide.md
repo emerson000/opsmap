@@ -42,7 +42,7 @@ Theme follows the system (`prefers-color-scheme`, live) unless this browser pick
 
 ## Keyboard
 
-The arrow keys or W A S D pan the map (Shift pans farther; WASD follows key position, so it works on any layout), `+` or `=` zooms in and `-` zooms out around the middle of the map, `0` fits it, `/` opens the command bar and Ctrl+Z / Ctrl+Shift+Z undo and redo. Map keys do nothing while you type, in menus, dialogs and lists, or in the side panels, where arrows scroll; Ctrl/⌘ combinations stay the browser's.
+The arrow keys or W A S D pan the map (Shift pans farther; WASD follows key position, so it works on any layout), `+` or `=` zooms in and `-` zooms out around the middle of the map, `0` fits it, `/` opens the command bar and Ctrl+Z / Ctrl+Shift+Z undo and redo. Alt+arrow keys select the nearest unit in that direction on the screen, starting from the selected unit (or the middle of the map when none is selected); the map pans to keep it in view, and its view opens in the sidebar. Alt+arrows also work from the sidebar. Map keys do nothing while you type, in menus, dialogs and lists, or in the side panels, where arrows scroll; Ctrl/⌘ combinations stay the browser's.
 
 ## Mouse and menus
 

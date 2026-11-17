@@ -146,6 +146,37 @@
     userMoved = true;
     applyView({ x: view2d.x - dx, y: view2d.y - dy, k: view2d.k });
   }
+  /**
+   * Alt+arrow: select the nearest unit on the map in a screen direction from the selected unit (from the
+   * middle of the visible map when none is selected), within 45° of it, else anywhere on that side. The new
+   * unit takes keyboard focus and is panned into view. False when there is no unit that way.
+   */
+  export function selectToward(dir: 'left' | 'right' | 'up' | 'down'): boolean {
+    const [dx, dy] = { left: [-1, 0], right: [1, 0], up: [0, -1], down: [0, 1] }[dir];
+    const w = container.clientWidth, h = container.clientHeight, k = view2d.k;
+    const from = scene.units.find(u => u.id === selection.selectedId)
+      ?? { id: '', x: (insets.left + (w - insets.right - insets.left) / 2 - view2d.x) / k, y: (insets.top + (h - insets.bottom - insets.top) / 2 - view2d.y) / k };
+    let best: { id: string; x: number; y: number; score: number; cone: boolean } | null = null;
+    for (const u of scene.units) {
+      if (u.id === from.id) continue;
+      const vx = u.x - from.x, vy = u.y - from.y;
+      const along = vx * dx + vy * dy, across = Math.abs(vx * dy - vy * dx);
+      if (along <= 0.5) continue;
+      // Inside the 45° cone beats outside it; then the nearest, with sideways distance counting double.
+      const cone = across <= along, score = along + 2 * across;
+      if (!best || (cone && !best.cone) || (cone === best.cone && score < best.score)) best = { id: u.id, x: u.x, y: u.y, score, cone };
+    }
+    if (!best) return false;
+    selectUnit(best.id);
+    // Keep it on screen, clear of the panels, with room for its label.
+    const m = 48, sx = view2d.x + best.x * k, sy = view2d.y + best.y * k;
+    const left = insets.left + m, right = w - insets.right - m, top = insets.top + m, bottom = h - insets.bottom - m;
+    const px = sx < left ? sx - left : sx > right ? sx - right : 0, py = sy < top ? sy - top : sy > bottom ? sy - bottom : 0;
+    if (px || py) panBy(px, py);
+    const id = best.id;
+    requestAnimationFrame(() => (svg?.querySelector(`g.unit[data-unit-id="${CSS.escape(id)}"]`) as SVGGElement | null)?.focus({ preventScroll: true }));
+    return true;
+  }
   let flashId = $state<string | null>(null);
   let flashTimer: ReturnType<typeof setTimeout> | undefined;
   /** Pan (and zoom in a little) to a unit; units beyond the map pan to their sector chevron. */

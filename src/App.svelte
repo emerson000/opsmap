@@ -216,6 +216,13 @@
       return;
     }
     if (typing) return;
+    // Alt+arrows select the next unit on the map that way (not in menus, dialogs or lists, where arrows already mean something).
+    const toward = ({ ArrowLeft: 'left', ArrowRight: 'right', ArrowUp: 'up', ArrowDown: 'down' } as Record<string, 'left' | 'right' | 'up' | 'down'>)[e.key];
+    if (toward && e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && !(e.target as HTMLElement | null)?.closest?.('[contenteditable], [role="menu"], [role="dialog"], [role="listbox"]')) {
+      e.preventDefault();
+      if (map && !map.selectToward(toward)) toast(`No unit ${toward === 'up' ? 'above' : toward === 'down' ? 'below' : `to the ${toward}`}`, 'info');
+      return;
+    }
     if(e.key==='0'){e.preventDefault();map?.fitView();return;}
     // Arrows and WASD (by key position, so any layout) pan the map (Shift: farther); + and - zoom. Not where arrows already mean something: menus,
     // dialogs, lists and radio groups, or the side panels, which scroll. Ctrl/⌘ combinations stay the browser's.

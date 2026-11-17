@@ -53,6 +53,7 @@
     ['/', 'Command bar'],
     ['0', 'Fit the map'],
     ['Arrows or WASD  ·  +  −', 'Pan (Shift: farther) · zoom in, out'],
+    ['Alt+arrows', 'Select the next unit that way on the map'],
     ['Ctrl+Z  ·  Ctrl+Shift+Z', 'Undo · redo'],
     ['Menu key or Shift+F10', 'The focused unit’s menu'],
     ['Esc', 'Close the composer, a menu or the selection; cancel a map pick'],
