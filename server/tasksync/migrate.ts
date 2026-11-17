@@ -74,7 +74,7 @@ function boot(store:Store,mapId:string,snap:SnapshotRow|undefined):Doc {
   let doc=snap?upgradeSnapshot(snap):emptyDoc('UTC');
   for(const op of store.db.prepare('SELECT seq,cmd,at,user_id,source,via FROM ops WHERE map_id=? AND seq>? ORDER BY seq').all(mapId,snap?.seq??0) as {seq:number;cmd:string;at:string;user_id:string;source:string;via:string|null}[]) {
     const result=apply(doc,JSON.parse(op.cmd),new Date(op.at),op.user_id,op.via??op.source);
-    if('error'in result)throw new Error(`replay failed at operation ${op.seq}`);
+    if('error'in result)throw new Error(`Replay failed at operation ${op.seq}`);
     doc=result.doc;
   }
   return doc;

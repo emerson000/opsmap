@@ -174,6 +174,7 @@ describe('D8 migration on a journal that cannot be replayed from empty', () => {
     const store = unreplayableStore();
     store.db.exec('DELETE FROM snapshots');
     expect(() => new Hub(store, 'main', 'UTC')).toThrow('Replay failed at operation 4');
+    expect(taskSyncSummary(store)).toEqual(['map main: no snapshots; binding unknown (Replay failed at operation 4); 4 units linked']);
   });
 
   it('upgrades the snapshot in place, keeps its row, and boots from it with the later legacy ops', () => {
@@ -217,6 +218,17 @@ describe('D8 migration on a journal that cannot be replayed from empty', () => {
 });
 
 describe('Hub startup', () => {
+  it('keeps the snapshots of a database that never recorded snapshots_v2_reset', () => {
+    const store = unreplayableStore();
+    store.db.prepare("DELETE FROM meta WHERE key='snapshots_v2_reset'").run();
+    migrateTaskSync(store);
+    const before = snapshots(store).map(r => r.seq);
+    const hub = new Maps(store, 'UTC').get('main')!;
+    expect(hub.seq).toBe(8);
+    expect(hub.doc.settings.taskSync).toMatchObject({ provider: 'vikunja', root: '39' });
+    expect(snapshots(store).map(r => r.seq)).toEqual(before);
+    expect(before).toEqual([6]);
+  });
   it('deletes no snapshot and reads a legacy one with its binding, even before the migration', () => {
     const store = unreplayableStore();
     const before = JSON.stringify(snapshots(store));

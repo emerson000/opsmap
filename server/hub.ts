@@ -19,8 +19,6 @@ export class Hub {
   readonly listeners=new Set<(op:Op)=>void>();
   constructor(readonly store:Store,readonly mapId:string=DEFAULT_MAP,readonly tz:string=DEFAULT_TZ) {
     this.doc=emptyDoc(tz);
-    // New core semantics and attribution require one replay from the authoritative op history.
-    if(store.meta('snapshots_v2_reset')!=='1'){store.db.exec('DELETE FROM snapshots');store.setMeta('snapshots_v2_reset','1');}
     const snap=store.db.prepare('SELECT * FROM snapshots WHERE map_id=? ORDER BY seq DESC LIMIT 1').get(mapId) as {seq:number;doc:string}|undefined;
     // The journal cannot always replay from empty (rules changed after old ops), so a snapshot is never cleared here; one
     // still in the legacy shape (before the D8 migration upgrades it) is read with its binding.
