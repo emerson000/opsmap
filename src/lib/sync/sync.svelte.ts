@@ -84,6 +84,13 @@ function present(): void {
   setDoc(doc.settings.view === prefs.view ? doc : { ...doc, settings: { ...doc.settings, view: prefs.view } });
 }
 
+/** The open map and its binding, '' when it is not bound. */
+function bindingKey(): string {
+  const b = engine?.doc.settings.taskSync;
+  return engine?.map && b ? `${engine.map}:${b.provider}:${b.root}` : '';
+}
+let shownBinding = '';
+
 function mirror(): void {
   if (!engine) return;
   live.status = engine.status;
@@ -92,7 +99,10 @@ function mirror(): void {
   live.users = Object.fromEntries(engine.users);
   if (engine.maps.length) live.maps = engine.maps;
   if (JSON.stringify(engine.taskSync) !== JSON.stringify(features.taskSync)) features.taskSync = engine.taskSync;
-  if (engine.map && engine.map !== live.mapId) { live.mapId = engine.map; live.taskDelivery = null; remember(engine.map); }
+  if (engine.map && engine.map !== live.mapId) { live.mapId = engine.map; remember(engine.map); }
+  // A new map or binding (unbind, rebind): the previous binding's delivery summary no longer applies.
+  const key = bindingKey();
+  if (key !== shownBinding) { shownBinding = key; live.taskDelivery = null; }
   live.version++;
 }
 
@@ -201,7 +211,7 @@ function connect(map: string | undefined): void {
     openMap: id => switchMap(id),
     tasks: args => {
       void engine!.tasks(args).then(r => {
-        if (r.ok && r.delivery) live.taskDelivery = r.delivery;
+        if (r.ok && r.delivery && bindingKey() === shownBinding) live.taskDelivery = r.delivery;
         if (r.ok) { lastResult.text = r.log; lastResult.ok = true; lastResult.seq++; toast(r.log, 'info'); }
         else { lastResult.text = r.error; lastResult.ok = false; lastResult.seq++; toast(r.error); }
       });
@@ -338,11 +348,13 @@ if (typeof window !== 'undefined') window.addEventListener('pagehide', saveCache
 // The delivery summary is asked for again too, so it is not stale after the tab was away.
 if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') { engine?.nudgeTasks(); checkTaskDelivery(); } });
 
-let deliveryAskedAt = 0;
+const asked = { key: '', at: 0 };
 /** Ask for the open map's /tasks status without showing it, for the task sync section's delivery summary. Only on a
- *  bound map, and at most once every 2 s (a view and its section opening together ask once). */
+ *  bound map, and at most once every 2 s per map and binding (a view and its section opening together ask once; a
+ *  map switch or a new binding asks at once). An answer for a binding that has since changed is dropped. */
 export function checkTaskDelivery(): void {
-  if (!engine?.doc.settings.taskSync || Date.now() - deliveryAskedAt < 2000) return;
-  deliveryAskedAt = Date.now();
-  void engine.tasks({ action: 'status' }).then(r => { if (r.ok && r.delivery) live.taskDelivery = r.delivery; });
+  const key = bindingKey();
+  if (!engine || !key || (key === asked.key && Date.now() - asked.at < 2000)) return;
+  asked.key = key; asked.at = Date.now();
+  void engine.tasks({ action: 'status' }).then(r => { if (r.ok && r.delivery && bindingKey() === key) live.taskDelivery = r.delivery; });
 }

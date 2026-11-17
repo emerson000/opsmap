@@ -31,13 +31,14 @@
   const cap = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
   const tasks = (action: string, args: Record<string, unknown> = {}): Command => ({ verb: 'tasks', args: { action, ...args } });
   const slot = (form: string) => slotFor('tasks', form, kind);
-  /** Why Bind and Unbind cannot run now (no account), and why Sync and Status cannot (no account, or not bound). */
+  /** Why Bind… cannot run now (it uses this viewer's token). Once the map is bound, Sync now, Status, Unbind… and the
+   *  switches run with the binder's token or as plain map changes, as from the command bar: no viewer account needed. */
   const noAccount = $derived(taskAccountWhy(service?.id, serviceLabel));
-  const syncWhy = $derived(taskSyncWhy(service?.id, serviceLabel, Boolean(bound)));
+  const syncWhy = $derived(taskSyncWhy(serviceLabel, Boolean(bound)));
 
   // The delivery mode comes with the /tasks status answer: asked quietly when the view opens, when the binding
   // changes and when the section body opens (deliveryLine), so it does not go stale.
-  const boundKey = $derived(bound && !noAccount ? `${live.mapId}:${bound.provider}:${bound.root}` : '');
+  const boundKey = $derived(bound ? `${live.mapId}:${bound.provider}:${bound.root}` : '');
   $effect(() => { if (boundKey) checkTaskDelivery(); });
   const deliveryLine = (_node: HTMLElement) => { if (boundKey) checkTaskDelivery(); };
   const delivery = $derived(bound ? live.taskDelivery : null);
@@ -93,7 +94,7 @@
         </Field>
       {/if}
     {/if}
-    {#if noAccount}
+    {#if noAccount && !bound}
       <p class="why" data-testid="tasks-why">{noAccount} <button class="link" type="button" data-opens="task-account" title="Open your {serviceLabel} account: paste a token" onclick={() => (ui.taskAccountOpen = service.id)}>{serviceLabel}…</button></p>
     {/if}
     {#if bound}
@@ -111,11 +112,12 @@
             {#each fields as f (f)}
               {@const on = isOn(f)}
               {@const t = tryFormat(fieldCmd(f), doc)}
-              <div class="sw-row" title={t ?? undefined} use:echoes={t}>
-                <span class="sw-label" id="tasks-field-{kind}-{f}">{FIELD_LABEL[f]}<span class="sw-hint">{FIELD_HINT[f]}</span></span>
-                <button class="knob-btn" type="button" role="switch" aria-checked={on} aria-labelledby="tasks-field-{kind}-{f}" data-testid="tasks-field-{f}" data-field={f}
-                  title={t ?? undefined} onclick={() => runCommand(fieldCmd(f))}><span class="knob"></span></button>
-              </div>
+              <!-- The whole row is the switch, so its hit area is the row (44 px on phone). -->
+              <button class="sw-row" type="button" role="switch" aria-checked={on} data-testid="tasks-field-{f}" data-field={f}
+                title={t ?? undefined} use:echoes={t} onclick={() => runCommand(fieldCmd(f))}>
+                <span class="sw-label">{FIELD_LABEL[f]}<span class="sw-hint">{FIELD_HINT[f]}</span></span>
+                <span class="knob-btn" aria-hidden="true"><span class="knob"></span></span>
+              </button>
             {/each}
           </div>
           {#if bound.off?.length}<span class="hint">Not synced: {bound.off.map(f => FIELD_LABEL[f]).join(', ')}. Opsmap keeps its own values.</span>{/if}
@@ -125,8 +127,8 @@
     <Field label="Map link" entry={bound ? slot('unbind') : slot('bind')} cmd={bound ? tryFormat(tasks('unbind'), doc) : bindText}>
       {#if bound}
         {@const t = tryFormat(tasks('unbind'), doc)}
-        <button class="btn" type="button" data-testid="tasks-unbind" class:on={unbinding} aria-disabled={noAccount ? 'true' : undefined} aria-expanded={unbinding} title={noAccount ?? t ?? undefined} use:echoes={t}
-          onclick={() => { if (!noAccount) unbinding = !unbinding; }}>Unbind…</button>
+        <button class="btn" type="button" data-testid="tasks-unbind" class:on={unbinding} aria-expanded={unbinding} title={t ?? undefined} use:echoes={t}
+          onclick={() => (unbinding = !unbinding)}>Unbind…</button>
         {#if unbinding}
           <div class="confirm" role="alertdialog" aria-label="Unbind the map">
             <p>Unbind the whole map from {bound.title}? Sync stops for every sector.</p>
@@ -137,25 +139,26 @@
       {:else}
         <button class="btn" type="button" data-testid="tasks-bind" class:on={binding} aria-disabled={noAccount ? 'true' : undefined} aria-expanded={binding} title={noAccount ?? bindText ?? undefined} use:echoes={bindText}
           onclick={openBind}>Bind…</button>
-        {#if binding}
-          <form class="bind" data-testid="tasks-bind-form" onsubmit={bind}>
-            <div class="inline">
-              <input class="field" bind:value={project} placeholder="{service.label} {service.rootNoun}" aria-label="{service.label} {service.rootNoun}" />
-              <button class="btn" type="submit" disabled={!project.trim()} title={bindText ?? undefined} use:echoes={bindText}>Bind</button>
-            </div>
-            {#if fields.length}
-              <fieldset class="synced" title="An unchecked field is left out: {bindText}">
-                <legend>Fields to sync</legend>
-                {#each fields as f (f)}
-                  <label title="{FIELD_LABEL[f]}: {FIELD_HINT[f]}"><input type="checkbox" checked={!unchecked.includes(f)} onchange={(e) => keep(f, e.currentTarget.checked)} />{FIELD_LABEL[f]}</label>
-                {/each}
-              </fieldset>
-            {/if}
-          </form>
-        {/if}
       {/if}
       <span class="hint">Bind and unbind act on the whole map{sector ? ', not only this sector' : ''}: each sector is its own {service.containerNoun}.</span>
     </Field>
+    <!-- Its own full-width row, so the name input gets the whole column. -->
+    {#if !bound && binding}
+      <form class="bind" data-testid="tasks-bind-form" onsubmit={bind}>
+        <div class="inline">
+          <input class="field" bind:value={project} placeholder="{service.label} {service.rootNoun}" aria-label="{service.label} {service.rootNoun}" />
+          <button class="btn" type="submit" disabled={!project.trim()} title={bindText ?? undefined} use:echoes={bindText}>Bind</button>
+        </div>
+        {#if fields.length}
+          <fieldset class="synced" title="An unchecked field is left out: {bindText}">
+            <legend>Fields to sync</legend>
+            {#each fields as f (f)}
+              <label title="{FIELD_LABEL[f]}: {FIELD_HINT[f]}"><input type="checkbox" checked={!unchecked.includes(f)} onchange={(e) => keep(f, e.currentTarget.checked)} />{FIELD_LABEL[f]}</label>
+            {/each}
+          </fieldset>
+        {/if}
+      </form>
+    {/if}
   </Section>
 {/if}
 
@@ -173,18 +176,20 @@
   .link { background: none; border: 0; padding: 0; color: var(--friend); text-decoration: underline; text-underline-offset: 2px; font: inherit; }
   .pair { display: flex; flex-wrap: wrap; gap: var(--s1); }
   .switches { display: flex; flex-direction: column; }
-  .sw-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); min-height: 32px; border-bottom: 1px dotted var(--rule); }
+  .sw-row { display: flex; align-items: center; justify-content: space-between; gap: var(--s2); width: 100%; min-height: 32px; padding: 2px 0; border: 0; border-bottom: 1px dotted var(--rule); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+  .sw-row:hover .sw-label { text-decoration: underline; text-underline-offset: 2px; }
+  .sw-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
   .sw-row:last-child { border-bottom: 0; }
   .sw-label { display: flex; flex-direction: column; font-size: 13px; font-weight: 600; color: var(--ink); }
   .sw-hint { font-size: 11px; font-weight: 400; color: var(--ink-3); }
   /* The knob switch, as the Legend's single-key switch. */
-  .knob-btn { position: relative; flex: none; width: 36px; height: 20px; padding: 0; border: 1px solid var(--rule-strong); border-radius: 10px; background: var(--panel-2); }
+  .knob-btn { display: inline-block; position: relative; flex: none; box-sizing: border-box; width: 36px; height: 20px; padding: 0; border: 1px solid var(--rule-strong); border-radius: 10px; background: var(--panel-2); }
   .knob { position: absolute; top: 2px; left: 2px; width: 14px; height: 14px; border-radius: 50%; background: var(--ink-3); transition: left 120ms ease-out; }
-  .knob-btn[aria-checked='true'] { background: var(--accent-bg); border-color: var(--accent); }
-  .knob-btn[aria-checked='true'] .knob { left: 18px; background: var(--accent); }
+  [aria-checked='true'] > .knob-btn { background: var(--accent-bg); border-color: var(--accent); }
+  [aria-checked='true'] > .knob-btn .knob { left: 18px; background: var(--accent); }
   @media (prefers-reduced-motion: reduce) { .knob { transition: none; } }
   .hint { display: block; margin-top: var(--s1); font-size: 12px; color: var(--ink-3); }
-  .bind { margin-top: var(--s1); }
+  .bind { margin: 0 0 var(--s2); }
   .inline { display: flex; gap: var(--s1); }
   .inline .field { flex: 1; min-width: 0; }
   .synced { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 2px var(--s2); margin: var(--s1) 0 0; padding: 0; border: 0; font-size: 12px; color: var(--ink-2); }
@@ -196,6 +201,6 @@
   :global([data-tier='phone']) .synced label, :global([data-tier='phone']) .sw-row { min-height: 44px; }
   :global([data-tier='phone']) .knob-btn { width: 52px; height: 32px; border-radius: 16px; }
   :global([data-tier='phone']) .knob { width: 24px; height: 24px; top: 3px; left: 3px; }
-  :global([data-tier='phone']) .knob-btn[aria-checked='true'] .knob { left: 23px; }
+  :global([data-tier='phone']) [aria-checked='true'] > .knob-btn .knob { left: 23px; }
   :global([data-tier='phone']) .ext, :global([data-tier='phone']) .link { display: inline-flex; align-items: center; min-height: 44px; }
 </style>

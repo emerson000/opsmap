@@ -174,6 +174,41 @@ test.describe('tablet', () => {
   });
 });
 
+test.describe('shared map', () => {
+  test.use({ viewport: { width: 1440, height: 900 } });
+  test('a second user with no token can sync, check status and switch fields on a map someone else bound', async ({ browser, page, baseURL }, info) => {
+    test.skip(phoneProject(info.project.name), 'desktop project only');
+    await start(page, baseURL!);
+    // Alice connects and binds from the command bar.
+    const saved = await page.context().request.put('/api/tasksync/fake/account', { data: JSON.stringify({ token: 'fake-alice' }), headers: { origin: baseURL!, 'content-type': 'application/json' } });
+    expect(saved.ok()).toBe(true);
+    await command(page, '/tasks bind fake "Ops shared"');
+    await expect(result(page)).toContainText('FAKE BOUND TO OPS SHARED — ');
+
+    // Bob has no Fake token: everything but Bind… works, as from his command bar.
+    const bob = await browser.newPage({ baseURL, viewport: { width: 1440, height: 900 } });
+    await signIn(bob.context(), 'bob');
+    await bob.context().request.delete('/api/tasksync/fake/account', { headers: { origin: baseURL! } });
+    watchErrors(bob);
+    await bob.goto('/');
+    await expect(bob.getByTestId('connection')).toHaveAttribute('data-status', 'live');
+    const section = await openSection(bob);
+    await expect(section.getByTestId('tasks-root')).toHaveText('Ops shared ↗');
+    await expect(section.getByTestId('tasks-delivery')).toHaveText(/^Checking every 1 min\./);
+    await expect(section.getByTestId('tasks-why')).toHaveCount(0);
+    for (const id of ['tasks-sync', 'tasks-status', 'tasks-unbind']) await expect(section.getByTestId(id)).not.toHaveAttribute('aria-disabled', 'true');
+    await section.getByTestId('tasks-sync').click();
+    await expect(result(bob)).toContainText('FAKE SYNC — ');
+    await section.getByTestId('tasks-field-note').click();
+    await expect(result(bob)).toContainText('FAKE NOTE SYNC OFF');
+    await command(bob, '/find LEAK');
+    const unit = await openSection(bob);
+    await expect(unit.getByTestId('tasks-sync')).not.toHaveAttribute('aria-disabled', 'true');
+    expect(errors(bob)).toEqual([]);
+    await bob.context().close();
+  });
+});
+
 test('task sync from the phone sheet', async ({ page, baseURL }, info) => {
   test.skip(!phoneProject(info.project.name), 'phone projects only');
   await start(page, baseURL!);

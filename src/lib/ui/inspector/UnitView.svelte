@@ -16,7 +16,7 @@
   import { annotate, initials, color, nameOf } from '../../sync/sync.svelte';
   import { features, taskService } from '../../model/features.svelte';
   import { taskUrl } from '../taskUrls';
-  import { loadTaskAccount, taskSyncWhy } from '../taskAccounts.svelte';
+  import { taskSyncWhy } from '../taskAccounts.svelte';
   import { env, runCommand, toast, ui, type Theme } from '../shell.svelte';
   import { AFFILIATIONS, AFF_LABEL, CONDITIONS, LIFECYCLE_LABEL, RINGS, band, dayMonth, echelonRange, orderLine, ringOf, unitLabel } from '../words';
   import { slotFor, token } from '../verbs';
@@ -48,9 +48,7 @@
     return unit.remote && bound && service ? taskUrl(service, bound.root, unit.remote) : null;
   });
   /** Why Sync now and Status cannot run (the same rule as the map's task sync section), or null. */
-  const taskService0 = $derived(taskService(doc.settings.taskSync?.provider) ?? features.taskSync[0]);
-  $effect(() => { if (taskService0) loadTaskAccount(taskService0.id); });
-  const taskWhy = $derived(taskService0 ? taskSyncWhy(taskService0.id, doc.settings.taskSync?.label ?? taskService0.label, Boolean(doc.settings.taskSync)) : null);
+  const taskWhy = $derived(taskSyncWhy(doc.settings.taskSync?.label ?? features.taskSync[0]?.label ?? 'a task service', Boolean(doc.settings.taskSync)));
 
   const cmd = (verb: string, args: Record<string, unknown> = {}): Command => ({ verb, args: { unit: unit.id, ...args } });
   /** The command-bar text of this unit's command. */
