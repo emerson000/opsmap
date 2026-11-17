@@ -397,6 +397,17 @@ describe('Vikunja identity labels', () => {
     expect(vk.calls.filter(c => /label/i.test(c))).toEqual([]);
     expect(vk.labelsOf(leak.id)).toEqual(['errand']);
   });
+  it('with identity switched off, a task made in Vikunja keeps its identity label', async () => {
+    await bind();
+    const family = doc().sectors.find(s => s.name === 'Family')!;
+    const t = vk.add(vkId(family)!, { title: 'Parking ticket', labels: [vk.label('hostile'), vk.label('errand')] });
+    await sync.run(hub().mapId);
+    expect(byTask(t.id)).toMatchObject({ affiliation: 'hostile' });
+    run('/tasks field identity off');
+    await sync.run(hub().mapId);
+    expect(vk.labelsOf(t.id)).toEqual(['errand', 'hostile']);
+    expect(vk.labelsOf(vkId(unit('LEAK'))!)).toEqual([]);
+  });
   it('each task gets one identity label, created on first use', async () => {
     await bind();
     expect(vk.labelsOf(vkId(unit('LEAK'))!)).toEqual(['hostile']);

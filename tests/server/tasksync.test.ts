@@ -421,6 +421,48 @@ describe('task sync engine: field switches (D21)', () => {
     expect(t.calls('updateTask')).toEqual([]);
   });
 
+  it('a task linked by its title while identity is off keeps its identity', async () => {
+    const t = await setup();
+    await t.engine.request(t.mapId, { action: 'bind', provider: 'fake', name: 'Ops', off: ['identity'] }, user, 'web');
+    const work = t.doc().sectors.find(s => s.id === 'work')!.remote!;
+    const twin = t.fake.remoteCreate(t.root(), { title: 'Fix fence', container: work }, 'hostile');
+    t.run('/new "Fix fence" in Work');
+    t.fake.calls.length = 0;
+    await t.engine.run(t.mapId);
+    expect(t.doc().units.find(u => u.title === 'Fix fence')?.remote).toBe(twin.id);
+    expect(t.fake.tasks.get(twin.id)!.affiliations).toEqual(['hostile']);
+    expect(nulls(t)).toEqual([]);
+  });
+
+  it('a task made in the service keeps its identity when identity is switched off', async () => {
+    const t = await setup();
+    await t.bind();
+    const household = t.doc().sectors.find(s => s.id === 'household')!.remote!;
+    const made = t.fake.remoteCreate(t.root(), { title: 'Parking ticket', container: household }, 'hostile');
+    await t.engine.run(t.mapId);
+    expect(t.doc().units.find(u => u.remote === made.id)).toMatchObject({ affiliation: 'hostile' });
+    t.run('/tasks field identity off');
+    t.fake.calls.length = 0;
+    await t.engine.run(t.mapId);
+    expect(t.fake.tasks.get(made.id)!.affiliations).toEqual(['hostile']);
+    // The tasks opsmap made lose theirs.
+    expect(nulls(t).map(c => c.args[1])).not.toContain(made.id);
+    expect(taskOf(t, 'LEAK').affiliations).toEqual([]);
+  });
+
+  it('a link agreed before D21 counts as pushed when the task carries exactly the unit\'s identity', async () => {
+    const t = await setup();
+    await t.bind();
+    const strip = (d: string) => { const u = t.unit(d), b = t.engine.tables.base(t.mapId, u.id)!; delete b.idPushed; t.engine.tables.setBase(t.mapId, u.id, u.remote!, b); };
+    strip('LEAK'); strip('IRSRSP');
+    // IRSRSP's task names another identity than its unit: not opsmap's label.
+    t.fake.remoteUpdate(t.unit('IRSRSP').remote!, { affiliations: ['neutral'] });
+    t.run('/tasks field identity off');
+    await t.engine.run(t.mapId);
+    expect(taskOf(t, 'LEAK').affiliations).toEqual([]);
+    expect(taskOf(t, 'IRSRSP').affiliations).toEqual(['neutral']);
+  });
+
   it('/tasks status lists the fields that are off, in order', async () => {
     const t = await setup();
     await t.bind();

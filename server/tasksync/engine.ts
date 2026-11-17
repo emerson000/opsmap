@@ -261,7 +261,7 @@ export class TaskSyncEngine implements SyncService {
   private effectiveFields(p:TaskProvider,doc:Doc):ReadonlySet<Field> {const off=this.switchedOff(doc);return new Set(FIELDS.filter(k=>p.capabilities.fields.has(FIELD_KEY[k])&&!off.has(k)));}
   private switchedOff(doc:Doc):ReadonlySet<Field> {return new Set((doc.settings.taskSync?.off??[]).map(f=>SWITCHED[f]));}
   /** The agreed values as stored, with the fields that were off when they were agreed. */
-  private record(c:Cycle,f:Fields):Base {return {...f,...(c.off.size?{off:FIELDS.filter(k=>c.off.has(k))}:{})};}
+  private record(c:Cycle,f:Fields,idPushed:boolean):Base {return {...f,...(c.off.size?{off:FIELDS.filter(k=>c.off.has(k))}:{}),idPushed};}
   private system(mapId:string,p:TaskProvider,args:Record<string,unknown>):Op {
     const cmd:Command={verb:'tasks',args};
     return this.hub(mapId).internal(SYSTEM,'system',cmd,p.descriptor.id);
@@ -372,7 +372,7 @@ export class TaskSyncEngine implements SyncService {
             ...(has('status')&&f.status?{status:f.status}:{}),...(has('progress')?{progress:(f.progress??0)/100}:{}),...(has('affiliation')?{affiliation:u.affiliation}:{})},tz);
           // The unit went away while the service answered (an undo of its capture): take the new task back.
           if(!this.hub(mapId).doc.units.some(x=>x.id===u.id)){await session.deleteTask?.(root,made.id).catch(()=>undefined);return;}
-          links[u.id]=made.id;this.tables.setBase(mapId,u.id,made.id,this.record(c,f));c.stats.created++;fetched.set(made.id,{...made,parent:null,parents:[],relations:[]});
+          links[u.id]=made.id;this.tables.setBase(mapId,u.id,made.id,this.record(c,f,has('affiliation')));c.stats.created++;fetched.set(made.id,{...made,parent:null,parents:[],relations:[]});
         });
       }
     }finally{
@@ -398,7 +398,7 @@ export class TaskSyncEngine implements SyncService {
           ...(has('due')&&t.due!==null?{dueAt:t.dueAt??dayInstant(t.due,tz)}:{}),...(has('note')&&f.note?{note:f.note.slice(0,NOTE_LIMIT)}:{}),
           ...(has('status')&&f.status&&f.status!=='todo'?{status:f.status}:{}),...(has('affiliation')&&f.affiliation&&f.affiliation!=='pending'?{affiliation:f.affiliation}:{})});
         const now=this.hub(mapId).doc,u=now.units.find(x=>x.remote===t.id)!;
-        this.tables.setBase(mapId,u.id,t.id,this.record(c,unitFields(u,now,limits)));c.stats.added++;
+        this.tables.setBase(mapId,u.id,t.id,this.record(c,unitFields(u,now,limits),false));c.stats.added++;
       });
     }
   }
@@ -412,7 +412,10 @@ export class TaskSyncEngine implements SyncService {
     const back=(saved?.off??[]).filter(k=>declared.has(k)),B:Fields|undefined=saved&&back.length?{...saved,...Object.fromEntries(back.map(k=>[k,T[k]]))}:saved;
     // Identity switched off since (or a task just linked while it is off): the identity tags or labels opsmap manages
     // come off the task, once; the base records it.
-    const clear=off.has('affiliation')&&c.provider.capabilities.fields.has('affiliation')&&!saved?.off?.includes('affiliation')&&t.affiliations.length>0;
+    // Only an identity opsmap wrote: not one on a task linked by its title or made in the service. A base from before
+    // D21 counts as written when the task carries exactly the unit's identity (opsmap assigned every label then).
+    const pushedBefore=saved===undefined?false:saved.idPushed??(t.affiliations.length===1&&t.affiliations[0]===u.affiliation);
+    const clear=pushedBefore&&off.has('affiliation')&&c.provider.capabilities.fields.has('affiliation')&&!saved?.off?.includes('affiliation')&&t.affiliations.length>0;
     const {merged,pull,push:wanted}=mergeFields(U,T,B,Date.parse(u.updatedAt)>=Date.parse(t.updatedAt),t.progress,declared);
     let push=wanted;
     if(Object.keys(pull).length) {
@@ -443,7 +446,8 @@ export class TaskSyncEngine implements SyncService {
     if(Object.keys(write).length){await session.updateTask(root,t,write,tz);pushed=1;}
     // The agreed values are what was merged, not the unit read again: an edit made during the push must still count
     // as a change on the next cycle.
-    this.tables.setBase(mapId,u.id,t.id,this.record(c,merged));
+    // Cleared: nothing opsmap wrote is left; pushed: the identity on the task is opsmap's.
+    this.tables.setBase(mapId,u.id,t.id,this.record(c,merged,clear?false:pushedBefore||typeof write.affiliation==='string'&&pushed===1));
     return pushed;
   }
   /** The declared fields of the task as opsmap wants it. */
