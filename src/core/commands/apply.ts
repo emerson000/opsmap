@@ -1,6 +1,6 @@
 import ms from 'milsymbol';
 import type { Affiliation, Command, CommandPost, ControlMeasure, Sector, Doc, Echelon, FunctionKey, Order, Ring, Unit, Touched } from '../model/types';
-import { designationFrom, effectiveCondition, freeDesignation, titleAsDesignation } from '../model/derive';
+import { claimDesignation, designationOfTitle, effectiveCondition, freeDesignationForTitle } from '../model/derive';
 import { ECHELONS, echelonIndex } from '../model/echelon';
 import { FUNCTIONS } from '../model/functions';
 import { AO_SIZES, AREA_SIZES, RING_R, RING_ORDER, orderRing, ringIndex, ringName, aoScale, aoSizeName, placementFits, areaShape, freeSpot, polarToXY, resolvePlacement, ringForRadius, normalizeDeg, radiusForDate, sectorAt, snap, xyToPolar, type AreaSize } from '../model/geometry';
@@ -18,6 +18,8 @@ export const sizes:Record<string,Echelon>=Object.fromEntries(ECHELONS.flatMap(e=
 Object.assign(sizes,{team:'tm',crew:'tm',squad:'sqd',section:'sec',platoon:'plt',company:'coy',battalion:'bn',regiment:'rgt',group:'rgt',brigade:'bde',division:'div'});
 export const functions:Record<string,FunctionKey>=Object.fromEntries(FUNCTIONS.flatMap(f=>[f.key,...f.aliases].map(k=>[k,f.key])));
 const rings:Ring[]=['hq','near','mid','far','beyond'];
+/** Every designation a unit gets, typed with `as` or made from its title, passes here: one set of rules (claimDesignation). */
+function designate(others:readonly Unit[],wanted:string):string {const r=claimDesignation(wanted,new Set(others.map(u=>u.designation)));if('error'in r)throw new CommandError(r.error);return r.designation;}
 export function uniqueId(prefix:string,values:readonly {id:string}[]):string {
   const taken=new Set(values.map(v=>v.id));let n=1;while(taken.has(`${prefix}${n}`))n++;return `${prefix}${n}`;
 }
@@ -161,8 +163,7 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
         const affiliation=identities[String(a.affiliation??'pending')],fn=functions[String(a.fn??'inf')],echelon=sizes[String(a.echelon??'sec')];
         requireThat(affiliation&&fn&&echelon,'Invalid identity, function, or echelon');
         const sector=item(doc.sectors,a.sectorId??doc.sectors.find(s=>s.name==='Household')?.id??doc.sectors[0]?.id,'sector');
-        const title=text(a.title??'New unit','title');const taken=new Set(doc.units.map(u=>u.designation)),typed=a.designation!==undefined?text(a.designation,'designation').toUpperCase():a.title!==undefined?titleAsDesignation(title):undefined,designation=typed!==undefined?freeDesignation(typed,taken):designationFrom(a.title===undefined?'':title,taken);
-        requireThat(/^[A-Z0-9][A-Z0-9_-]*$/.test(designation),'Designation must use letters, numbers, underscores, or hyphens');requireThat(!taken.has(designation),`Designation ${designation} is already taken`);
+        const title=text(a.title??'New unit','title');const designation=designate(doc.units,a.designation!==undefined?text(a.designation,'designation'):designationOfTitle(a.title===undefined?'':title));
         const ring=(a.ring??'far') as Ring;requireThat(rings.includes(ring),'Invalid ring');
         const kind=fn==='person'?'person':fn==='place'?'place':fn==='event'?'event':'unit';
         const u:Unit={id:uniqueId('u',doc.units),title,designation,kind,affiliation:a.affiliation===undefined&&kind==='person'?'neutral':affiliation,fn,echelon,lifecycle:'todo',presence:'present',condition:'none',sectorId:sector.id,pos:freeSpot(doc,sector.id,ring),createdAt:at,updatedAt:at};
@@ -176,7 +177,7 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
       case 'id': {const u=unit(),identity=identities[String(a.affiliation)];requireThat(identity,'Invalid identity');checkPerson(u,identity,a.confirm);u.affiliation=identity;changed(u);log=`${u.designation} ID ${identity.toUpperCase()}`;break;}
       case 'size': {const u=unit(),size=sizes[String(a.echelon)];requireThat(size,'Invalid echelon');if(u.echelon&&size!==u.echelon)u.reinforced=echelonIndex(size)>echelonIndex(u.echelon)?'+':'-';u.echelon=size;changed(u);log=`${u.designation} RESIZED ${size.toUpperCase()}${u.reinforced?` (${u.reinforced})`:''}`;if(echelonIndex(size)>=8&&!u.taskForce&&!doc.units.some(c=>c.parentId===u.id))log+=' — Consider a task force with subordinate units';break;}
       case 'fn': {const u=unit(),fn=functions[String(a.fn)];requireThat(fn,'Invalid function');const kind=fn==='person'?'person':fn==='place'?'place':fn==='event'?'event':'unit';requireThat(kind!=='person'||u.affiliation!=='hostile'||a.confirm===true,'Mark a person hostile? Add confirm to proceed.');u.fn=fn;u.kind=kind;changed(u);log=`${u.designation} FUNCTION ${fn.toUpperCase()}`;break;}
-      case 'rename': {const u=unit();u.title=text(a.title,'title');if(a.designation!==undefined){const wanted=text(a.designation,'designation').toUpperCase(),taken=new Set(doc.units.filter(other=>other.id!==u.id).map(other=>other.designation)),d=freeDesignation(wanted,taken);requireThat(/^[A-Z0-9][A-Z0-9_-]*$/.test(d),'Designation must use letters, numbers, underscores, or hyphens');requireThat(!taken.has(d),`Designation ${d} is already taken`);u.designation=d;}changed(u);log=`${u.designation} RENAMED ${u.title}`;break;}
+      case 'rename': {const u=unit();u.title=text(a.title,'title');if(a.designation!==undefined)u.designation=designate(doc.units.filter(other=>other.id!==u.id),text(a.designation,'designation'));changed(u);log=`${u.designation} RENAMED ${u.title}`;break;}
       case 'move': {
         const u=unit(),fromSector=u.sectorId;
         if(a.r!==undefined||a.theta!==undefined){const pos=snap({r:finite(a.r,'radius'),theta:finite(a.theta,'angle')},doc.sectors);if(a.sectorId!==undefined)requireThat(pos.sectorId===a.sectorId,'Position does not belong to the selected sector');u.pos={r:pos.r,theta:pos.theta};u.sectorId=pos.sectorId;}
@@ -495,7 +496,7 @@ function vikunja(doc:Doc,cmd:Command,now:Date):MutationResult {
       const task=positiveId(a.task,'Vikunja task');requireThat(!cur.units.some(u=>u.vk===task),'That Vikunja task is already linked');
       const sector=item(cur.sectors,a.sectorId,'sector');
       // A task title is never refused as a duplicate designation: sync picks a free one.
-      const title=text(a.title,'title');step('new',{title,designation:designationFrom(title,new Set(cur.units.map(u=>u.designation))),sectorId:sector.id,...(typeof a.dueAt==='string'?{dueAt:a.dueAt}:{}),...(typeof a.affiliation==='string'?{affiliation:a.affiliation}:{})});
+      const title=text(a.title,'title');step('new',{title,designation:freeDesignationForTitle(title,new Set(cur.units.map(u=>u.designation))),sectorId:sector.id,...(typeof a.dueAt==='string'?{dueAt:a.dueAt}:{}),...(typeof a.affiliation==='string'?{affiliation:a.affiliation}:{})});
       const u=cur.units.at(-1)!;u.vk=task;
       if(typeof a.note==='string'&&a.note.trim())u.note=a.note;
       settle(u.id,a.status as VkStatus|undefined);

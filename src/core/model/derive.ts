@@ -7,37 +7,42 @@ export function effectiveCondition(u: Unit): Condition {
   }
   return 'none';
 }
+/** The characters a designation may use. */
+export const DESIGNATION_FORMAT=/^[A-Z0-9][A-Z0-9_-]*$/;
 /**
- * A designation given with `as`: taken as is when free. When it is taken and does not end in a digit, the next free
- * numbered one (DELTA → DELTA2, DELTA3…). One that ends in a digit is never changed, so the caller rejects a duplicate.
+ * The designation a title asks for: its letters and digits, at most 8 (E1, FIXSINK, PLAN2025), or NEW when
+ * there are none. Only a request: it goes through claimDesignation like one typed with `as`.
  */
-export function freeDesignation(wanted: string, taken: Set<string>): string {
-  const occupied=new Set([...taken].map(d=>d.toUpperCase()));
-  if (!occupied.has(wanted) || /\d$/.test(wanted)) return wanted;
-  let suffix=2;
-  while (occupied.has(`${wanted}${suffix}`)) suffix++;
-  return `${wanted}${suffix}`;
-}
-/**
- * A title typed as a designation: one word of letters and digits, ending in a digit, that fits a designation
- * whole (E1, BRAVO2). `/new "E1"` then means the designation E1, with the same rule as `as E1`: never renumbered.
- */
-export function titleAsDesignation(title: string): string | undefined {
-  const t=title.trim().toUpperCase();
-  return /^[A-Z0-9]{1,8}$/.test(t)&&/[0-9]$/.test(t)?t:undefined;
-}
-/**
- * A free designation made from a title: its letters and digits, at most 8. When that is taken, the next free
- * number; after a base that ends in a digit, with a hyphen (PLAN2025-2), so it never reads as another number.
- */
-export function designationFrom(title: string, taken: Set<string>): string {
+export function designationOfTitle(title: string): string {
   const words=title.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toUpperCase().match(/[A-Z0-9]+/g) ?? [];
-  const base=words.join('').slice(0,8);
-  const occupied=new Set([...taken].map(d=>d.toUpperCase()));
-  if(!base){let n=1;while(occupied.has(`NEW${n}`))n++;return `NEW${n}`;}
-  if (!occupied.has(base)) return base;
-  const sep=/[0-9]$/.test(base)?'-':'';
+  return words.join('').slice(0,8) || 'NEW';
+}
+/**
+ * The one place a requested designation becomes a unit's designation, whether it was typed with `as` or made
+ * from the title: every rule lives here. Free: used as is. Taken and not ending in a digit: the next free
+ * number (DELTA → DELTA2). Taken and ending in a digit: refused, never renumbered.
+ */
+export function claimDesignation(wanted: string, taken: ReadonlySet<string>): { designation: string } | { error: string } {
+  const d=wanted.trim().toUpperCase();
+  if (!DESIGNATION_FORMAT.test(d)) return { error: 'Designation must use letters, numbers, underscores, or hyphens' };
+  const occupied=new Set([...taken].map(x=>x.toUpperCase()));
+  if (!occupied.has(d)) return { designation: d };
+  if (/[0-9]$/.test(d)) return { error: `Designation ${d} is already taken` };
   let suffix=2;
-  while (occupied.has(`${base}${sep}${suffix}`)) suffix++;
-  return `${base}${sep}${suffix}`;
+  while (occupied.has(`${d}${suffix}`)) suffix++;
+  return { designation: `${d}${suffix}` };
+}
+/**
+ * For callers that must never be refused (tasks from Vikunja): what claimDesignation gives for the title, or,
+ * when it refuses a taken name that ends in a digit, that name with a free hyphen number (E1-2), which it accepts.
+ */
+export function freeDesignationForTitle(title: string, taken: ReadonlySet<string>): string {
+  const base=designationOfTitle(title),first=claimDesignation(base,taken);
+  if ('designation' in first) return first.designation;
+  const occupied=new Set([...taken].map(x=>x.toUpperCase()));
+  let suffix=2;
+  while (occupied.has(`${base}-${suffix}`)) suffix++;
+  const r=claimDesignation(`${base}-${suffix}`,taken);
+  if ('error' in r) throw new Error(r.error);
+  return r.designation;
 }

@@ -84,7 +84,7 @@ The browser synthesizes three quiet console cues (no audio files): two rising to
 
 `/new … as <designation>` and `/rename <unit> "<title>" as <designation>` set a unit's designation. If the name is taken, the next free number is added: `as DELTA` gives DELTA2 when DELTA exists, then DELTA3. A name that already ends in a number is used as typed, so `as DELTA2` fails with `Designation DELTA2 is already taken` when DELTA2 exists.
 
-Without `as`, the designation comes from the title. A title that is one word ending in a number, such as `/new "E1"`, counts as a typed designation: it is E1, or the error above when E1 exists. Any other title gives its letters and digits (at most 8) and is never refused: `Delta` gives DELTA, then DELTA2; `Plan 2025` gives PLAN2025, then PLAN2025-2. Tasks from Vikunja follow the same rule but are never refused (a second task titled `E1` becomes E1-2).
+Without `as`, the title asks for a designation: its letters and digits, at most 8 (`/new "E1"` asks for E1, `Delta` for DELTA, `Plan 2025` for PLAN2025, `Fix the sink` for FIXTHESI), and that request follows exactly the rules above. So a second `/new "Delta"` gives DELTA2, and a second `/new "E1"` or `/new "Plan 2025"` fails; add `as <designation>` to choose another. Tasks from Vikunja are never refused: a second task titled `E1` becomes E1-2.
 
 ### Control measures
 

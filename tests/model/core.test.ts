@@ -4,7 +4,7 @@ import type { Affiliation, Doc, Unit } from '../../src/lib/model/types';
 import { ECHELONS } from '../../src/lib/model/echelon';
 import { FUNCTIONS } from '../../src/lib/model/functions';
 import { toSidc, renderSymbol, symbolOptions } from '../../src/lib/model/sidc';
-import { effectiveCondition, designationFrom } from '../../src/lib/model/derive';
+import { effectiveCondition, claimDesignation, designationOfTitle } from '../../src/lib/model/derive';
 import { ringForDate, radiusForDate, snap, sectorAt, polarToXY, xyToPolar, freeSpot } from '../../src/lib/model/geometry';
 import { forceRatio } from '../../src/lib/model/forceRatio';
 import { seedDoc } from '../../src/lib/model/seed';
@@ -80,12 +80,14 @@ describe('derived fields', () => {
   it('derives stable unique uppercase designations even for unicode and punctuation', () => {
     const taken=new Set<string>();
     for (const title of ['Fix sink','Fix sink','École café','🔥','/','Fix sink']) {
-      const d=designationFrom(title,taken);
-      expect(d).toMatch(/^[A-Z0-9]+$/);
-      expect(taken.has(d)).toBe(false);
-      taken.add(d);
+      const r=claimDesignation(designationOfTitle(title),taken);
+      if('error' in r) throw new Error(r.error);
+      expect(r.designation).toMatch(/^[A-Z0-9]+$/);
+      expect(taken.has(r.designation)).toBe(false);
+      taken.add(r.designation);
     }
-    expect(designationFrom('Fix sink', new Set())).toBe(designationFrom('Fix sink',new Set()));
+    expect(designationOfTitle('École café')).toBe('ECOLECAF');
+    expect(designationOfTitle('🔥')).toBe('NEW');
   });
 });
 
