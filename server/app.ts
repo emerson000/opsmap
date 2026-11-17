@@ -20,10 +20,13 @@ import { Credentials } from './tasksync/credentials';
 import { taskRequestArgs, taskSyncRoutes } from './tasksync/routes';
 import { HOOK_PATHS, LEGACY_ROUTES } from './providers';
 import { TaskSyncEngine } from './tasksync/engine';
+import { migrateTaskSync } from './tasksync/migrate';
 import { pollOverride, webhookSetting } from './tasksync/delivery';
 export interface AppOptions { /** The task services; from the environment when not given. */ registry?:ProviderRegistry }
 export function createApp(config:Config,options:AppOptions={}) {
-  const store=new Store(join(config.dataDir,'opsmap.db')),maps=new Maps(store,config.tz),hub=maps.default,auth=new Auth(store,config),app=new Hono();
+  // The D8 move runs before any map loads, with or without a task service configured (the engine runs it again, a no-op).
+  const store=new Store(join(config.dataDir,'opsmap.db'));migrateTaskSync(store);
+  const maps=new Maps(store,config.tz),hub=maps.default,auth=new Auth(store,config),app=new Hono();
   // Task sync with the configured services. Each user's token is sealed with the server's secret key (made only when
   // a service is configured); a map syncs with its binder's token.
   const registry=options.registry??ProviderRegistry.fromEnv(process.env);

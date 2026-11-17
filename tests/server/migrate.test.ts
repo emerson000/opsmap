@@ -3,6 +3,11 @@
 import { describe, expect, it } from 'vitest';
 import { Store } from '../../server/db';
 import { Maps } from '../../server/maps';
+import { Hub } from '../../server/hub';
+import { apply } from '../../src/core/commands/apply';
+import { parse } from '../../src/core/commands/grammar';
+import { emptyDoc } from '../../src/core/model/seed';
+import type { Command, Doc } from '../../src/core/model/types';
 import { SecretBox } from '../../server/secrets';
 import { Credentials } from '../../server/tasksync/credentials';
 import { ProviderRegistry } from '../../server/tasksync/registry';
@@ -33,14 +38,35 @@ function oldStore(): Store {
   const base = (title: string) => JSON.stringify({ title, due: null, note: '', progress: null, status: 'todo', sector: 'household', affiliation: 'pending' });
   for (const [unit, task, title] of [['u1', 101, 'Roof leak'], ['u2', 102, 'Taxes'], ['u4', 103, 'Call plumber']] as const) store.db.prepare('INSERT INTO vk_links VALUES(?,?,?,?)').run('main', unit, task, base(title));
   store.db.prepare('INSERT INTO vk_maps VALUES(?,?,?,?,?,?,?)').run('main', 's3cret', JSON.stringify([{ project: 40, id: 7 }, { project: 41, id: 8 }]), 'u1', at, at, JSON.stringify({ parents: { u2: 101, u1: null }, edges: ['["link","u1","u2"]'], refused: [] }));
-  store.db.prepare('INSERT INTO snapshots(map_id,seq,doc,at) VALUES(?,?,?,?)').run('main', 3, '{"stale":true}', at);
+  store.db.prepare('INSERT INTO snapshots(map_id,seq,doc,at) VALUES(?,?,?,?)').run('main', 3, legacy(replayed(store, 3)), at);
+  store.setMeta('snapshots_v2_reset', '1');
   return store;
 }
+
+/** The map after ops 1..upTo as the server of the time computed it: ops it refused are skipped (old rules let them through). */
+function replayed(store: Store, upTo: number): Doc {
+  let doc = emptyDoc('UTC');
+  for (const op of store.db.prepare('SELECT cmd,at,user_id,via FROM ops WHERE map_id=? AND seq<=? ORDER BY seq').all('main', upTo) as { cmd: string; at: string; user_id: string; via: string }[]) {
+    const result = apply(doc, JSON.parse(op.cmd) as Command, new Date(op.at), op.user_id, op.via);
+    if (!('error' in result)) doc = result.doc;
+  }
+  return doc;
+}
+/** A document in the shape snapshots had before task sync was provider-neutral: settings.vikunja, numeric `vk` ids. */
+function legacy(doc: Doc): string {
+  const raw = JSON.parse(JSON.stringify(doc)) as { settings: Record<string, unknown>; sectors: Record<string, unknown>[]; units: Record<string, unknown>[] };
+  const bound = raw.settings.taskSync as { root: string; title: string; by?: string } | undefined;
+  delete raw.settings.taskSync;
+  if (bound) raw.settings.vikunja = { project: Number(bound.root), title: bound.title, ...(bound.by ? { by: bound.by } : {}) };
+  for (const x of [...raw.sectors, ...raw.units]) if (x.remote !== undefined) { x.vk = Number(x.remote); delete x.remote; }
+  return JSON.stringify(raw);
+}
+const snapshots = (store: Store) => store.db.prepare('SELECT map_id,seq,doc FROM snapshots ORDER BY map_id,seq').all() as { map_id: string; seq: number; doc: string }[];
 
 describe('D8 migration', () => {
   it('reports what it would move, without changing anything', () => {
     const store = oldStore();
-    expect(taskSyncSummary(store)).toEqual(['map main: bound to Vikunja project 39, 3 units linked, 1 tokens']);
+    expect(taskSyncSummary(store)).toEqual(['map main: snapshots 3 ok; bound to Vikunja project 39; 3 units linked, 3 in the document; 1 tokens']);
     expect(tables(store)).toEqual(expect.arrayContaining(['vk_links', 'vk_maps', 'vk_tokens']));
     expect(store.meta('tasksync_v1')).toBeUndefined();
   });
@@ -51,7 +77,7 @@ describe('D8 migration', () => {
     const credentials = new Credentials(store, box, registry);
     migrateTaskSync(store);
     expect(tables(store).filter(t => t.startsWith('vk_'))).toEqual([]);
-    expect(store.db.prepare('SELECT COUNT(*) AS n FROM snapshots').get()).toEqual({ n: 0 });
+    expect(snapshots(store).map(r => r.seq)).toEqual([3]);
     expect(store.db.prepare('SELECT unit_id,remote_id,base FROM ts_links ORDER BY unit_id').all()).toEqual([
       { unit_id: 'u1', remote_id: '101', base: expect.stringContaining('"sector":"household"') },
       { unit_id: 'u2', remote_id: '102', base: expect.any(String) },
@@ -116,3 +142,90 @@ describe('D8 migration', () => {
     expect(store.meta('tasksync_v1')).toBe('1');
   });
 });
+
+/** Production's case: the journal cannot be replayed from empty (op 4 is an /unpin that today's rules refuse), so the
+ *  snapshot after it is the only reliable state. The migration upgrades snapshots in place and never clears them. */
+function unreplayableStore(): Store {
+  const store = new Store(':memory:');
+  const at = '2026-11-01T12:00:00.000Z';
+  let seq = 0;
+  const op = (cmd: object, userId = 'u1', via = 'web') => store.db.prepare('INSERT INTO ops(map_id,seq,op_id,user_id,source,at,cmd,log,inverse,principal,via) VALUES(?,?,?,?,?,?,?,?,?,?,?)')
+    .run('main', ++seq, crypto.randomUUID(), userId, 'web', at, JSON.stringify(cmd), 'x', '{"units":[],"orders":[],"measures":[],"sectors":[],"top":{}}', `user:${userId}`, via);
+  const text = (raw: string) => { const p = parse(raw, emptyDoc('UTC')); if (!p.ok) throw new Error(p.error); return p.cmd; };
+  op(text('/new hostile "Roof leak" as LEAK'));
+  op(text('/new pending "Taxes" as TAX'));
+  op(text('/new pending "Dentist" as DENT'));
+  op({ verb: 'unpin', args: { unit: 'u1' }, raw: '/unpin LEAK' });
+  op({ verb: 'vk', args: { action: 'bound', project: 39, title: 'Ops', by: 'u1', sectors: { work: 40, household: 41, family: 42, wellness: 43, productivity: 44 } } }, 'system', 'vikunja');
+  op({ verb: 'vk', args: { action: 'links', links: { u1: 101, u2: 102 } } }, 'system', 'vikunja');
+  store.db.prepare('INSERT INTO snapshots(map_id,seq,doc,at) VALUES(?,?,?,?)').run('main', 6, legacy(replayed(store, 6)), at);
+  op({ verb: 'vk', args: { action: 'add', task: 103, title: 'Call plumber', sectorId: 'household' } }, 'system', 'vikunja');
+  op({ verb: 'vk', args: { action: 'links', links: { u3: 104 } } }, 'system', 'vikunja');
+  store.db.exec(`CREATE TABLE vk_links(map_id TEXT NOT NULL,unit_id TEXT NOT NULL,task_id INTEGER NOT NULL,base TEXT NOT NULL,PRIMARY KEY(map_id,unit_id));
+    CREATE TABLE vk_maps(map_id TEXT PRIMARY KEY,secret TEXT NOT NULL,hooks TEXT NOT NULL DEFAULT '[]',owner TEXT,hooks_checked TEXT,last_delivery TEXT,relations TEXT);`);
+  for (const [unit, task] of [['u1', 101], ['u2', 102], ['u4', 103], ['u3', 104]] as const) store.db.prepare('INSERT INTO vk_links VALUES(?,?,?,?)').run('main', unit, task, '{}');
+  store.db.prepare('INSERT INTO vk_maps(map_id,secret,owner) VALUES(?,?,?)').run('main', 's3cret', 'u1');
+  store.setMeta('snapshots_v2_reset', '1');
+  return store;
+}
+
+describe('D8 migration on a journal that cannot be replayed from empty', () => {
+  it('fails the old way: clearing the snapshots and replaying the whole journal', () => {
+    const store = unreplayableStore();
+    store.db.exec('DELETE FROM snapshots');
+    expect(() => new Hub(store, 'main', 'UTC')).toThrow('Replay failed at operation 4');
+  });
+
+  it('upgrades the snapshot in place, keeps its row, and boots from it with the later legacy ops', () => {
+    const store = unreplayableStore();
+    expect(taskSyncSummary(store)).toEqual(['map main: snapshots 6 ok; bound to Vikunja project 39; 4 units linked, 4 in the document']);
+    expect(store.meta('tasksync_v1')).toBeUndefined();
+    migrateTaskSync(store);
+    const rows = snapshots(store);
+    expect(rows.map(r => [r.map_id, r.seq])).toEqual([['main', 6]]);
+    const stored = JSON.parse(rows[0].doc);
+    expect(stored.settings.vikunja).toBeUndefined();
+    expect(stored.settings.taskSync).toEqual({ provider: 'vikunja', label: 'Vikunja', root: '39', title: 'Ops', by: 'u1' });
+    expect(rows[0].doc).not.toMatch(/"vk":/);
+    const hub = new Maps(store, 'UTC').get('main')!;
+    expect(hub.seq).toBe(8);
+    expect(hub.doc.settings.taskSync).toEqual({ provider: 'vikunja', label: 'Vikunja', root: '39', title: 'Ops', by: 'u1' });
+    expect(hub.doc.sectors.map(s => s.remote)).toEqual(['40', '41', '42', '43', '44']);
+    expect(hub.doc.units.map(u => [u.id, u.designation, u.remote])).toEqual([['u1', 'LEAK', '101'], ['u2', 'TAX', '102'], ['u3', 'DENT', '104'], ['u4', expect.any(String), '103']]);
+    expect(snapshots(store).map(r => r.seq)).toEqual([6]);
+    expect(taskSyncSummary(store)).toEqual(['already migrated']);
+  });
+
+  it('aborts the whole migration on a snapshot that does not upgrade, naming the map and seq', () => {
+    const store = unreplayableStore();
+    store.db.prepare('INSERT INTO snapshots(map_id,seq,doc,at) VALUES(?,?,?,?)').run('main', 7, '{"stale":true}', '2026-11-01T12:00:00.000Z');
+    const before = JSON.stringify(snapshots(store));
+    expect(taskSyncSummary(store)[0]).toMatch(/^map main: snapshots 6 ok, 7 fails \(Invalid document: unsupported version\);/);
+    expect(() => migrateTaskSync(store)).toThrow('Snapshot of map main at seq 7 does not upgrade: Invalid document: unsupported version');
+    expect(JSON.stringify(snapshots(store))).toBe(before);
+    expect(store.meta('tasksync_v1')).toBeUndefined();
+    expect(store.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name='vk_links'").get()).toEqual({ n: 1 });
+  });
+
+  it('upgrades the snapshots of a server where D8 already ran without them (its own meta key)', () => {
+    const store = unreplayableStore();
+    store.setMeta('tasksync_v1', '1');
+    migrateTaskSync(store);
+    expect(JSON.parse(snapshots(store)[0].doc).settings.taskSync).toMatchObject({ provider: 'vikunja', root: '39' });
+    expect(store.meta('tasksync_snapshots_v1')).toBe('1');
+  });
+});
+
+describe('Hub startup', () => {
+  it('deletes no snapshot and reads a legacy one with its binding, even before the migration', () => {
+    const store = unreplayableStore();
+    const before = JSON.stringify(snapshots(store));
+    const hub = new Hub(store, 'main', 'UTC');
+    expect(hub.seq).toBe(8);
+    expect(hub.doc.settings.taskSync).toMatchObject({ provider: 'vikunja', root: '39' });
+    expect(hub.doc.units.filter(u => u.remote).length).toBe(4);
+    new Maps(store, 'UTC');
+    expect(JSON.stringify(snapshots(store))).toBe(before);
+  });
+});
+

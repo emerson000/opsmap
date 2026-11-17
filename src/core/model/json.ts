@@ -3,7 +3,7 @@ import { SYNC_FIELDS, type Doc } from './types';
 import { ECHELONS } from './echelon';
 import { FUNCTION_BY_KEY } from './functions';
 import { orderRing } from './geometry';
-import { stripLegacy } from './legacy';
+import { stripLegacy, upgradeLegacy } from './legacy';
 const object=(value:unknown):value is Record<string,unknown>=>typeof value==='object' && value!==null && !Array.isArray(value);
 const string=(value:unknown):value is string=>typeof value==='string';
 const finite=(value:unknown):value is number=>typeof value==='number' && Number.isFinite(value);
@@ -26,6 +26,8 @@ function records(value:unknown,label:string):Record<string,unknown>[] {
   }
   return value as Record<string,unknown>[];
 }
+/** A document the server stored (a snapshot): one in the legacy shape (legacy.ts) keeps its binding, in the neutral names. */
+export function importStored(text:string):Doc {const raw:unknown=JSON.parse(text);if(object(raw))upgradeLegacy(raw);return importJson(JSON.stringify(raw));}
 export function importJson(text:string):Doc {
   const value:unknown=JSON.parse(text);
   requireValid(object(value),'object');

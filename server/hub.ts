@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Command, Doc, InversePatch } from '../src/core/model/types';
 import { emptyDoc } from '../src/core/model/seed';
-import { importJson } from '../src/core/model/json';
+import { importJson, importStored } from '../src/core/model/json';
 import { apply } from '../src/core/commands/apply';
 import { createInverse } from '../src/core/model/patch';
 import { Store, DEFAULT_MAP } from './db';
@@ -21,10 +21,10 @@ export class Hub {
     this.doc=emptyDoc(tz);
     // New core semantics and attribution require one replay from the authoritative op history.
     if(store.meta('snapshots_v2_reset')!=='1'){store.db.exec('DELETE FROM snapshots');store.setMeta('snapshots_v2_reset','1');}
-    // Task sync fields became provider-neutral: snapshots hold the old ones, the journal replays into the new.
-    if(store.meta('snapshots_tasksync_reset')!=='1'){store.db.exec('DELETE FROM snapshots');store.setMeta('snapshots_tasksync_reset','1');}
     const snap=store.db.prepare('SELECT * FROM snapshots WHERE map_id=? ORDER BY seq DESC LIMIT 1').get(mapId) as {seq:number;doc:string}|undefined;
-    if(snap){this.doc=this.zoned(importJson(snap.doc));this.seq=snap.seq;}
+    // The journal cannot always replay from empty (rules changed after old ops), so a snapshot is never cleared here; one
+    // still in the legacy shape (before the D8 migration upgrades it) is read with its binding.
+    if(snap){this.doc=this.zoned(importStored(snap.doc));this.seq=snap.seq;}
     for(const op of this.since(this.seq)) {
       const result=apply(this.doc,op.cmd,new Date(op.at),op.userId,op.via??op.source);
       if('error'in result)throw new Error(`Replay failed at operation ${op.seq}`);
