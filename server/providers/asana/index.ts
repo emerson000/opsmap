@@ -2,7 +2,7 @@
 // session (adapter.ts) and webhooks (handshake and signature); the task sync engine does the rest. Webhooks need a public
 // HTTPS PUBLIC_URL (D19): elsewhere the engine never registers them and polls.
 import { HttpAsApi, type AsApi } from './api';
-import { asanaHookCount, asanaSession, receiveAsanaWebhook, translate, type Handshakes } from './adapter';
+import { asanaHookCount, asanaSession, preverifyAsana, receiveAsanaWebhook, translate, type Handshakes } from './adapter';
 import { RemoteAuthError, type Capabilities, type ProviderDescriptor, type ProviderFactory, type ProviderSession, type TaskProvider, type WebhookResult } from '../../tasksync/contract';
 import type { ProviderModule } from '../../tasksync/registry';
 
@@ -33,6 +33,7 @@ export class AsanaProvider implements TaskProvider {
   connect(token: string): ProviderSession { return asanaSession(this.makeApi(token), this.descriptor.label, this.handshakes); }
   receiveWebhook(headers: Headers, body: string, secret: string, state: unknown, request?: { url: string }): WebhookResult { return receiveAsanaWebhook(headers, body, secret, state, this.handshakes, request?.url); }
   hookCount(hooks: unknown): number { return asanaHookCount(hooks); }
+  preverify(state: unknown, url: string): boolean { return preverifyAsana(state, url, this.handshakes); }
 }
 /** ASANA_SYNC=1 or true turns Asana on. */
 export const asanaProvider: ProviderFactory = env => /^(1|true)$/i.test((env.ASANA_SYNC ?? '').trim()) ? new AsanaProvider() : undefined;

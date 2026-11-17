@@ -436,6 +436,27 @@ describe('Asana webhooks', () => {
       run('/tasks unbind'); await sync.run(hub().mapId);
     }
   });
+  it('preverify: the stored webhook’s nonce or the handshake in flight passes; anything else, or no map, fails', async () => {
+    let during: boolean[] = [];
+    as.handshake = (target, headers) => { during = [sync.preverify('asana', hub().mapId, target), sync.preverify('asana', hub().mapId, hookUrl())]; return sync.webhook('asana', mapOf(target), headers, '', target); };
+    await bind();
+    expect(during).toEqual([true, false]);
+    const target = only().target;
+    expect(sync.preverify('asana', hub().mapId, target)).toBe(true);
+    for (const url of [hookUrl(), `${hookUrl()}?h=${'C'.repeat(22)}`, `${target}x`]) expect(sync.preverify('asana', hub().mapId, url)).toBe(false);
+    expect(sync.preverify('asana', 'nope', target)).toBe(false);
+    expect(sync.preverify('vikunja', hub().mapId, target)).toBe(false);
+    run('/tasks unbind'); await sync.run(hub().mapId);
+    expect(sync.preverify('asana', hub().mapId, target)).toBe(false);
+  });
+  it('a createWebhook error comes back fresh: no cause, nothing else that could hold the URL', async () => {
+    as.createWebhook = async (_r, t) => { const e = new AsHttpError(500, 'Asana POST /webhooks: Server Error'); Object.assign(e, { cause: new Error(t), target: t }); throw e; };
+    as.workspace(WS); const project = await as.createProject(WS, 'Hooks');
+    const error = await new AsanaProvider(() => as).connect(TOKEN).ensureWebhooks!({ id: project.gid, title: 'Hooks' }, [], hookUrl(), 's'.repeat(64), null, false).then(() => undefined, (e: unknown) => e as Error & { cause?: unknown });
+    expect(error!.message).toBe('Asana POST /webhooks: Server Error');
+    expect(error!.cause).toBeUndefined();
+    expect(JSON.stringify(Object.entries(error!))).not.toContain('?h=');
+  });
   it('a signed delivery to the bare hook URL or another nonce gets 401 (C1)', async () => {
     await bind(); clock.queue = [];
     const d = as.delivery(only().gid, [EVENT]);

@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -38,6 +38,24 @@ describe('Vikunja over HTTP and WebSocket', () => {
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toMatch(/^Could not reach Vikunja/);
     expect(await (await fetch(`${url}/api/tasksync/asana/account`, { headers: { cookie } })).json()).toEqual({ error: 'Unknown task service: asana' });
+  });
+
+  it('webhook under forged spam: Vikunja has no preverify, so its deliveries get 429 until the bucket refills (polling covers it)', async () => {
+    runtime.store.db.prepare(`INSERT INTO ts_maps(map_id,provider,secret,hooks) VALUES('main','vikunja','s3cret','[{"project":40,"id":1}]')`).run();
+    const body = JSON.stringify({ event_name: 'task.updated', data: {} });
+    const post = (signature: string) => fetch(`${url}/api/vikunja/hook/main`, { method: 'POST', headers: { 'content-type': 'application/json', 'x-vikunja-signature': signature }, body });
+    const good = createHmac('sha256', 's3cret').update(body).digest('hex');
+    // The buckets refill with Date.now: hold it still, so the test sees exactly the tokens it spent.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+    expect((await post(good)).status).toBe(200);
+    const spam: number[] = [];
+    for (let i = 0; i < 70; i++) spam.push((await post('0'.repeat(64))).status);
+    expect(spam).toContain(429);
+    for (let i = 0; i < 10; i++) expect((await post(good)).status).toBe(429);
+    vi.setSystemTime(Date.now() + 400);
+    expect((await post(good)).status).toBe(200);
+    } finally { vi.useRealTimers(); }
   });
 
   it('webhook: only a delivery signed with the map secret is accepted', async () => {

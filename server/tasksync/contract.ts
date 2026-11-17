@@ -44,6 +44,9 @@ export interface TaskProvider {
   connect(token:string):ProviderSession;
   /** `request.url`: the URL it was posted to, query included (a provider may register its hook with a per-webhook token there). */
   receiveWebhook?(headers:Headers, body:string, secret:string, state:unknown, request?:{ url:string }):WebhookResult;
+  /** A cheap check of the URL alone against the stored state (ts_maps.state), used only while forged traffic has
+   *  emptied the hook's rate limit: false answers 429 without reading the body. Without it, those requests get 429. */
+  preverify?(state:unknown, url:string):boolean;
   hookCount?(hooks:unknown):number;                                          // webhooks in ensureWebhooks' state, for status; else one per container
 }
 export type ProviderFactory=(env:NodeJS.ProcessEnv)=>TaskProvider|undefined;

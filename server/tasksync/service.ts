@@ -9,6 +9,8 @@ export interface SyncService {
   request(mapId:string,args:Record<string,unknown>,user:User,source:Op['source']):Promise<string>;
   /** A delivery to POST /api/tasksync/:provider/hook/:map; `url`: the URL it was posted to, query included. */
   webhook(provider:string,mapId:string,headers:Headers,body:string,url?:string):WebhookResult;
+  /** While the hook's rate limit is empty: may this request be read at all? False for an unknown or unbound map. */
+  preverify?(provider:string,mapId:string,url:string):boolean;
   /** Someone is looking at the map: pull soon when webhooks are not live. */
   nudge(mapId:string):void;
   /** How the map learns of remote changes, in one line for the sidebar; undefined when the map is not bound. */

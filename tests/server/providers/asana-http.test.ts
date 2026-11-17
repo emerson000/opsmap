@@ -1,5 +1,5 @@
 import { inspect } from 'node:util';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { HttpAsApi, AsHttpError, TASK_FIELDS } from '../../../server/providers/asana/api';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -155,20 +155,29 @@ describe('Asana webhook route', () => {
   it('limits deliveries per map with 429, for every provider; another map is still answered (I2)', async () => {
     const post = (map: string, path = '/api/tasksync/asana/hook') => fetch(`${url}${path}/${map}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
     const statuses: number[] = [];
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
     for (let i = 0; i < 80; i++) statuses.push((await post('main')).status);
     expect(statuses.slice(0, 20).every(s => s === 401)).toBe(true);
     expect(statuses).toContain(429);
     expect((await post('other')).status).toBe(401);
     const res = await post('main'); expect(res.status).toBe(429); expect(res.headers.get('retry-after')).toBe('1');
+    } finally { vi.useRealTimers(); }
   });
   it('a validly signed delivery is never limited, even while forged spam has emptied the map’s bucket (fix 2)', async () => {
     runtime.store.db.prepare(`INSERT INTO ts_maps(map_id,provider,secret,hooks,state) VALUES('main','asana','engine-secret','{"gid":"9001","nonce":"n0nce"}','{"secret":"hook-secret","nonce":"n0nce"}')`).run();
     const body = '{"events":[{"action":"changed"}]}', sig = createHmac('sha256', 'hook-secret').update(body).digest('hex');
     const post = (headers: Record<string, string>) => fetch(`${url}/api/tasksync/asana/hook/main?h=n0nce`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body });
-    const spam: number[] = [];
-    for (let i = 0; i < 80; i++) spam.push((await post({ 'x-hook-signature': '0'.repeat(64) })).status);
-    expect(spam).toContain(429);
-    expect((await post({ 'x-hook-signature': '0'.repeat(64) })).status).toBe(429);
-    for (let i = 0; i < 100; i++) expect((await post({ 'x-hook-signature': sig })).status).toBe(200);
+    // The buckets refill with Date.now: hold it still, so the test sees exactly the tokens it spent.
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      const spam: number[] = [];
+      for (let i = 0; i < 80; i++) spam.push((await post({ 'x-hook-signature': '0'.repeat(64) })).status);
+      expect(spam).toContain(429);
+      expect((await post({ 'x-hook-signature': '0'.repeat(64) })).status).toBe(429);
+      for (let i = 0; i < 100; i++) expect((await post({ 'x-hook-signature': sig })).status).toBe(200);
+      // A wrong nonce fails preverify: 429 without the body being read.
+      expect((await fetch(`${url}/api/tasksync/asana/hook/main?h=other`, { method: 'POST', headers: { 'x-hook-signature': sig }, body })).status).toBe(429);
+    } finally { vi.useRealTimers(); }
   });
 });

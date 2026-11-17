@@ -264,6 +264,16 @@ export class TaskSyncEngine implements SyncService {
     if(result.trigger)this.schedule(mapId,500);
     return result;
   }
+  /** Whether a hook request is worth reading while its rate limit is empty: the provider's preverify, given the map's
+   *  stored state. False for an unknown map or one not bound here (no ts_maps row, as webhook() checks), and with no stored state unless a registration is open (its
+   *  handshake is what would store one). */
+  preverify(provider:string,mapId:string,url:string):boolean {
+    const p=this.registry.get(provider),row=this.tables.row(mapId);
+    if(!p?.preverify||!row||row.provider!==provider||!this.maps.get(mapId))return false;
+    const state=this.tables.state(mapId);
+    if(state===null&&!this.registering.has(mapId))return false;
+    return p.preverify(state,url);
+  }
   /** Unbound or deleted: remove its webhooks and sync state. Tasks stay in the service. */
   private async release(mapId:string):Promise<void> {
     const row=this.tables.row(mapId);if(!row)return;

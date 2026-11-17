@@ -54,15 +54,23 @@ export function taskSyncRoutes(app:Hono,{config,auth,registry,credentials,sync,l
     b.at=now;return b.bucket.take();
   };
   const refuse=(c:Context,provider:string,status:400|401|404,error:string)=>{
-    const map=(c.req.param('map')??'').slice(0,128),ip=(c.env as { incoming?:{ socket?:{ remoteAddress?:string } } }|undefined)?.incoming?.socket?.remoteAddress;
-    const byIp=!ip||charge(`ip ${ip}`,20,200),byMap=charge(`map ${provider} ${map}`,5,60);
-    if(!byIp||!byMap){c.header('Retry-After','1');return c.json({error:'Too many requests'},429);}
+    const charged=keys(c,provider).map(k=>k.startsWith('ip ')?charge(k,20,200):charge(k,5,60));
+    if(charged.includes(false)){c.header('Retry-After','1');return c.json({error:'Too many requests'},429);}
     return c.json({error},status);
   };
+  const keys=(c:Context,provider:string)=>{
+    const ip=(c.env as { incoming?:{ socket?:{ remoteAddress?:string } } }|undefined)?.incoming?.socket?.remoteAddress;
+    return [...(ip?[`ip ${ip}`]:[]),`map ${provider} ${(c.req.param('map')??'').slice(0,128)}`];
+  };
+  /** A bucket that exists and has no token left (checking takes none). */
+  const spent=(key:string)=>buckets.get(key)?.bucket.empty()??false;
   const hook=async(c:Context,provider:string)=>{
     if(!sync||!registry.get(provider))return c.json({error:'Not found'},404);
+    // Under forged traffic, read nothing unless the URL alone checks out against the map's stored state.
+    if(keys(c,provider).some(spent)&&!sync.preverify?.(provider,c.req.param('map')??'',c.req.url)){c.header('Retry-After','1');return c.json({error:'Too many requests'},429);}
     try {
-      const text=await boundedText(c.req.raw,512*1024),result=sync.webhook(provider,c.req.param('map')??'',c.req.raw.headers,text,c.req.url);
+      // Task services send small event payloads, well under 64 KiB.
+      const text=await boundedText(c.req.raw,64*1024),result=sync.webhook(provider,c.req.param('map')??'',c.req.raw.headers,text,c.req.url);
       if(result.status>=300)return refuse(c,provider,result.status===401?401:404,result.status===401?'Invalid signature':'Not found');
       for(const [name,value] of Object.entries(result.headers??{}))c.header(name,value);
       return c.json({ok:true},result.status as 200);

@@ -55,15 +55,22 @@ const secretOf = (state: unknown): { secret: string; nonce: string } | undefined
   return s && typeof s === 'object' && typeof s.secret === 'string' && typeof s.nonce === 'string' ? { secret: s.secret, nonce: s.nonce } : undefined;
 };
 export const asanaHookCount = (state: unknown) => hookOf(state) ? 1 : 0;
+/** The URL alone: its nonce is the stored webhook's, or that of a creation in flight. No body is read, no HMAC made. */
+export function preverifyAsana(state: unknown, url: string, handshakes: Handshakes): boolean {
+  const nonce = nonceIn(url); if (!nonce) return false;
+  const stored = secretOf(state)?.nonce;
+  let ok = stored !== undefined && sameText(stored, nonce);
+  for (const w of handshakes.values()) ok = sameText(w.nonce, nonce) || ok;
+  return ok;
+}
 /** The target's nonce: the only `h` in the query, or undefined. */
 const nonceIn = (url: string | undefined) => { try { const all = new URL(url ?? '').searchParams.getAll('h'); return all.length === 1 && all[0] ? all[0] : undefined; } catch { return undefined; } };
 const sameText = (a: string, b: string) => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
 /** `error` with each of `hidden` (the nonce'd target first, then the nonce), raw or URL-encoded once or twice, replaced. */
 function redact(error: unknown, hidden: string[]): unknown {
-  if (!(error instanceof Error)) return error;
-  let text = error.message;
+  let text = error instanceof Error ? error.message : String(error);
   for (const [i, h] of hidden.entries()) for (const form of [encodeURIComponent(encodeURIComponent(h)), encodeURIComponent(h), h]) text = text.split(form).join(i === 0 ? '‹target›' : '‹nonce›');
-  if (text === error.message) return error;
+  // Always a fresh error: no `cause` or other property that could still hold the URL.
   return error instanceof AsHttpError ? new AsHttpError(error.status, text, error.retryAfterS) : new Error(text);
 }
 const withNonce = (target: string, nonce: string) => `${target}${target.includes('?') ? '&' : '?'}h=${nonce}`;

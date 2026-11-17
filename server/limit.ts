@@ -2,7 +2,10 @@
 export class Bucket {
  private tokens:number;private at=Date.now();
  constructor(private rate:number,private capacity=rate*2){this.tokens=capacity;}
- take():boolean {const now=Date.now();this.tokens=Math.min(this.capacity,this.tokens+(now-this.at)*this.rate/1000);this.at=now;if(this.tokens<1)return false;this.tokens--;return true;}
+ private refill():void {const now=Date.now();this.tokens=Math.min(this.capacity,this.tokens+(now-this.at)*this.rate/1000);this.at=now;}
+ take():boolean {this.refill();if(this.tokens<1)return false;this.tokens--;return true;}
+ /** No token left now; takes none. */
+ empty():boolean {this.refill();return this.tokens<1;}
 }
 /** The request body as text, refusing more than `limit` bytes however the client declares its length. */
 export async function boundedText(request:Request,limit:number):Promise<string> {
