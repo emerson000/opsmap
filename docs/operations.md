@@ -12,6 +12,8 @@
 | `DATA_DIR` | Database, backups and secrets (default `/data`). |
 | `OPSMAP_TZ` | Calendar zone for maps (else `TZ`, else `UTC`). |
 | `VIKUNJA_URL` | Turns on Vikunja sync. See [vikunja.md](vikunja.md). |
+| `TASKSYNC_WEBHOOKS` | `auto` (default): task services post webhooks to `PUBLIC_URL` when they can reach it; `on`: try even when it looks private; `off`: poll only. |
+| `TASKSYNC_POLL_SECONDS` | Overrides how often task sync polls (15 seconds at least). For development. |
 | `OPSMAP_SECRET_KEY_FILE` | Key that seals stored Vikunja tokens (default `DATA_DIR/secrets/master.key`). |
 | `OPSMAP_DEV_USERS`, `OPSMAP_ADMIN_EMAILS` | Development sign-in only; refused in production and on a non-loopback `HOST`. |
 
