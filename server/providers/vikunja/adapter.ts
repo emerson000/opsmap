@@ -7,22 +7,13 @@ import type { Affiliation } from '../../../src/core/model/types';
 import { localDay } from '../../../src/core/model/time';
 import { RateLimited, RemoteAuthError, type ProviderSession, type RelationKind, type RemoteContainer, type RemoteRoot, type RemoteStatus, type RemoteTask, type Snapshot, type TaskWrite, type WebhookResult } from '../../tasksync/contract';
 import { dayInstant, NOTE_LIMIT } from '../../tasksync/merge';
+import { IDENTITY_NAMES, affiliationOfName } from '../identity';
 import { VkHttpError, type VkApi, type VkLabel, type VkProject, type VkRelationKind, type VkTask } from './api';
 
 /** Identity ↔ Vikunja label: the first title is the one created; the others are also read. Colors follow the frames. */
-export const AFFILIATION_LABELS: Record<Affiliation, { titles: string[]; color: string }> = {
-  hostile: { titles: ['hostile', 'enemy'], color: 'ff8080' },
-  suspect: { titles: ['suspect'], color: 'ffbb66' },
-  friend: { titles: ['friendly', 'friend'], color: '80e0ff' },
-  assumed: { titles: ['assumed', 'assumed friend'], color: 'b3ecff' },
-  neutral: { titles: ['neutral'], color: 'aaffaa' },
-  unknown: { titles: ['unknown'], color: 'ffff80' },
-  pending: { titles: ['pending'], color: 'fff3b0' },
-};
-const affiliationOfTitle = (title: string): Affiliation | undefined => {
-  const t = title.trim().toLowerCase();
-  return (Object.keys(AFFILIATION_LABELS) as Affiliation[]).find(a => AFFILIATION_LABELS[a].titles.includes(t));
-};
+const COLORS: Record<Affiliation, string> = { hostile: 'ff8080', suspect: 'ffbb66', friend: '80e0ff', assumed: 'b3ecff', neutral: 'aaffaa', unknown: 'ffff80', pending: 'fff3b0' };
+export const AFFILIATION_LABELS: Record<Affiliation, { titles: string[]; color: string }> = Object.fromEntries((Object.keys(COLORS) as Affiliation[]).map(a => [a, { titles: IDENTITY_NAMES[a], color: COLORS[a] }])) as Record<Affiliation, { titles: string[]; color: string }>;
+const affiliationOfTitle = affiliationOfName;
 /** The identities a task's labels name (normally zero or one). */
 const affiliationsOf = (t: VkTask): Affiliation[] => [...new Set((t.labels ?? []).map(l => affiliationOfTitle(l.title)).filter((a): a is Affiliation => a !== undefined))];
 

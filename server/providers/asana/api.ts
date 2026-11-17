@@ -14,7 +14,8 @@ export interface AsWebhook { gid: string; target: string; active?: boolean; reso
 export interface AsUser { gid: string; name: string; workspaces: AsRef[] }
 /** Fields a caller may write. `completed` and dates follow Asana: `due_on` is a day, `null` clears it. */
 export interface AsTaskFields { name?: string; notes?: string; completed?: boolean; due_on?: string | null; due_at?: string | null }
-export interface AsNewTask extends AsTaskFields { name: string; /** Makes a subtask (`POST /tasks/{parent}/subtasks`). */ parent?: string; /** Projects to put it in (top-level tasks only). */ projects?: string[]; workspace?: string }
+export interface AsNewTask extends AsTaskFields { name: string; /** Makes a subtask (`POST /tasks/{parent}/subtasks`). */ parent?: string; /** Projects to put it in (top-level tasks only). */ projects?: string[];
+  /** Project and section to put it in (top-level tasks only): a task made with `projects` alone may land in no section. */ memberships?: { project: string; section?: string }[]; workspace?: string }
 
 export const TASK_FIELDS = 'name,notes,completed,due_on,due_at,modified_at,parent,num_subtasks,memberships.section,memberships.project,tags.name';
 
@@ -43,8 +44,8 @@ export interface AsApi {
   /** Keeps the task's memberships. `null` makes it top-level, with no membership until `addProject`. */
   setParent(task: string, parent: string | null): Promise<void>;
   tags(workspace: string): Promise<AsTag[]>;
-  /** A tag needs its workspace. */
-  createTag(workspace: string, name: string): Promise<AsTag>;
+  /** A tag needs its workspace. `color`: an Asana color name such as `light-red`. */
+  createTag(workspace: string, name: string, color?: string): Promise<AsTag>;
   addTag(task: string, tag: string): Promise<void>;
   removeTag(task: string, tag: string): Promise<void>;
   webhooks(workspace: string, resource?: string): Promise<AsWebhook[]>;
@@ -103,7 +104,7 @@ export class HttpAsApi implements AsApi {
     try { return (await this.call<AsTask>('GET', `/tasks/${e(gid)}?${this.q({ opt_fields: TASK_FIELDS })}`)).data; }
     catch (error) { if (error instanceof AsHttpError && error.status === 404) return null; throw error; }
   }
-  createTask({ parent, projects, workspace, ...fields }: AsNewTask) { return this.call<AsTask>('POST', parent ? `/tasks/${e(parent)}/subtasks?${this.q({ opt_fields: TASK_FIELDS })}` : `/tasks?${this.q({ opt_fields: TASK_FIELDS })}`, parent ? fields : { ...fields, ...(projects ? { projects } : {}), ...(workspace ? { workspace } : {}) }).then(r => r.data); }
+  createTask({ parent, projects, memberships, workspace, ...fields }: AsNewTask) { return this.call<AsTask>('POST', parent ? `/tasks/${e(parent)}/subtasks?${this.q({ opt_fields: TASK_FIELDS })}` : `/tasks?${this.q({ opt_fields: TASK_FIELDS })}`, parent ? fields : { ...fields, ...(projects ? { projects } : {}), ...(memberships ? { memberships } : {}), ...(workspace ? { workspace } : {}) }).then(r => r.data); }
   updateTask(gid: string, fields: AsTaskFields) { return this.call<AsTask>('PUT', `/tasks/${e(gid)}?${this.q({ opt_fields: TASK_FIELDS })}`, fields).then(r => r.data); }
   async deleteTask(gid: string) { await this.call('DELETE', `/tasks/${e(gid)}`); }
   async addToSection(section: string, task: string) { await this.call('POST', `/sections/${e(section)}/addTask`, { task }); }
@@ -111,7 +112,7 @@ export class HttpAsApi implements AsApi {
   async removeProject(task: string, project: string) { await this.call('POST', `/tasks/${e(task)}/removeProject`, { project }); }
   async setParent(task: string, parent: string | null) { await this.call('POST', `/tasks/${e(task)}/setParent`, { parent }); }
   tags(workspace: string) { return this.list<AsTag>(`/tags?${this.q({ workspace, opt_fields: 'name' })}`); }
-  createTag(workspace: string, name: string) { return this.call<AsTag>('POST', '/tags', { name, workspace }).then(r => r.data); }
+  createTag(workspace: string, name: string, color?: string) { return this.call<AsTag>('POST', '/tags', { name, workspace, ...(color ? { color } : {}) }).then(r => r.data); }
   async addTag(task: string, tag: string) { await this.call('POST', `/tasks/${e(task)}/addTag`, { tag }); }
   async removeTag(task: string, tag: string) { await this.call('POST', `/tasks/${e(task)}/removeTag`, { tag }); }
   webhooks(workspace: string, resource?: string) { return this.list<AsWebhook>(`/webhooks?${this.q({ workspace, resource, opt_fields: 'target,active,resource.name' })}`); }

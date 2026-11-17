@@ -14,7 +14,7 @@ export class ProviderRegistry {
   private readonly byId=new Map<string,TaskProvider>();
   constructor(list:TaskProvider[]) {
     const names=new Set<string>();
-    for(const p of list){for(const name of [p.descriptor.id,...p.descriptor.aliases]){if(names.has(name))throw new Error(`Two task services use the name ${name}`);names.add(name);}this.byId.set(p.descriptor.id,p);}
+    for(const p of list){for(const name of new Set([p.descriptor.id,...p.descriptor.aliases])){if(names.has(name))throw new Error(`Two task services use the name ${name}`);names.add(name);}this.byId.set(p.descriptor.id,p);}
   }
   get(id:string):TaskProvider|undefined {return this.byId.get(id);}
   list():TaskProvider[] {return [...this.byId.values()];}

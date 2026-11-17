@@ -15,7 +15,7 @@ export class FakeAsana implements AsApi {
   projectsById = new Map<string, AsProject & { workspaceGid: string }>();
   sectionsById = new Map<string, AsSection & { project: string }>();
   tasksById = new Map<string, Rec>();
-  tagsById = new Map<string, AsTag & { workspace: string }>();
+  tagsById = new Map<string, AsTag & { workspace: string; color?: string }>();
   hooks = new Map<string, AsWebhook & { workspace: string }>();
   calls: string[] = [];
   private nextId = 5000;
@@ -84,9 +84,10 @@ export class FakeAsana implements AsApi {
     const { section, ...rest } = fields, r: Rec = { gid: this.id(), name: '', notes: '', completed: false, completedAt: null, due_on: null, due_at: null, modified: this.clock, parent: null, memberships: [{ project, ...(section ? { section } : {}) }], tags: [] };
     this.tasksById.set(r.gid, r); this.apply(r, rest); return this.view(r);
   }
-  async createTask({ parent, projects, workspace: _w, ...fields }: AsNewTask) {
+  async createTask({ parent, projects, memberships, workspace: _w, ...fields }: AsNewTask) {
     this.enter('createTask', fields.name); if (parent && !this.tasksById.has(parent)) throw notFound('POST', `/tasks/${parent}/subtasks`);
-    const r: Rec = { gid: this.id(), name: '', notes: '', completed: false, completedAt: null, due_on: null, due_at: null, modified: this.clock, parent: parent ?? null, memberships: parent ? [] : (projects ?? []).map(project => ({ project })), tags: [] };
+    const r: Rec = { gid: this.id(), name: '', notes: '', completed: false, completedAt: null, due_on: null, due_at: null, modified: this.clock, parent: parent ?? null, memberships: parent ? [] : [...(projects ?? []).map(project => ({ project })), ...(memberships ?? []).map(m => ({ project: m.project, ...(m.section ? { section: m.section } : {}) }))], tags: [] };
+    for (const m of parent ? [] : memberships ?? []) { if (!this.projectsById.has(m.project) || m.section && this.sectionsById.get(m.section)?.project !== m.project) throw new AsHttpError(400, 'Asana POST /tasks: memberships: Not a recognized ID'); }
     this.tasksById.set(r.gid, r); this.apply(r, fields); return this.view(r);
   }
   async updateTask(gid: string, fields: AsTaskFields) { this.enter('updateTask', gid); const r = this.rec(gid, 'PUT', `/tasks/${gid}`); this.apply(r, fields); return this.view(r); }
@@ -107,9 +108,9 @@ export class FakeAsana implements AsApi {
     r.parent = parent; this.touch(r);   // memberships are kept; null leaves the task wherever it was (none, after removeProject)
   }
   async tags(workspace: string) { this.enter('tags', workspace); return [...this.tagsById.values()].filter(t => t.workspace === workspace).map(t => ({ gid: t.gid, name: t.name })); }
-  async createTag(workspace: string, name: string) {
+  async createTag(workspace: string, name: string, color?: string) {
     this.enter('createTag', workspace, name); if (!workspace || !this.workspaces.has(workspace)) throw new AsHttpError(400, 'Asana POST /tags: You should specify one of workspace');
-    const t = { gid: this.id(), name, workspace }; this.tagsById.set(t.gid, t); return { gid: t.gid, name };
+    const t = { gid: this.id(), name, workspace, ...(color ? { color } : {}) }; this.tagsById.set(t.gid, t); return { gid: t.gid, name };
   }
   async addTag(task: string, tag: string) { this.enter('addTag', task, tag); const r = this.rec(task, 'POST', `/tasks/${task}/addTag`); if (!this.tagsById.has(tag)) throw notFound('POST', `/tasks/${task}/addTag`, 'tag: Not a recognized ID'); if (!r.tags.includes(tag)) r.tags.push(tag); this.touch(r); }
   async removeTag(task: string, tag: string) { this.enter('removeTag', task, tag); const r = this.rec(task, 'POST', `/tasks/${task}/removeTag`); r.tags = r.tags.filter(t => t !== tag); this.touch(r); }

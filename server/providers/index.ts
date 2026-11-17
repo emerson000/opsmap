@@ -3,8 +3,9 @@
 import type { ProviderFactory } from '../tasksync/contract';
 import type { ProviderModule } from '../tasksync/registry';
 import { vikunja } from './vikunja';
+import { asana } from './asana';
 import { fakeProvider } from './fake/provider';
-export const MODULES: ProviderModule[] = [vikunja, { id: 'fake', factory: fakeProvider }];
+export const MODULES: ProviderModule[] = [vikunja, asana, { id: 'fake', factory: fakeProvider }];
 export const PROVIDERS: ProviderFactory[] = MODULES.map(m => m.factory);
 /** Old webhook paths that still reach a provider (D7). */
 export const LEGACY_ROUTES = MODULES.flatMap(m => m.legacyRoutes ?? []);
