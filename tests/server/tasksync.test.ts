@@ -254,6 +254,22 @@ describe('task sync engine: delivery modes', () => {
     expect(t.engine.delivery(t.mapId).mode).toBe('pending');
   });
 
+  it('a delivery to a map with no webhook registered neither makes it live nor resets the backoff (I3)', async () => {
+    const off = await setup({ hookBase: 'https://opsmap.ribbon.ts.net', ips: ['100.101.1.2'] });
+    await off.bind(); off.clock.queue = [];
+    expect(off.deliver()).toMatchObject({ status: 200 });
+    expect(off.engine.delivery(off.mapId).mode).toBe('off');
+    expect(off.store.db.prepare('SELECT last_delivery FROM ts_maps').get()).toEqual({ last_delivery: null });
+    const failed = await setup();
+    failed.fake.failNext('ensureWebhooks', new Error('Fake refused the webhook'));
+    await failed.bind();
+    const before = failed.engine.delivery(failed.mapId);
+    expect(before.mode).toBe('failed');
+    expect(failed.deliver()).toMatchObject({ status: 200 });
+    expect(failed.engine.delivery(failed.mapId)).toEqual(before);
+    expect(failed.store.db.prepare('SELECT last_delivery FROM ts_maps').get()).toEqual({ last_delivery: null });
+  });
+
   it('no handshake within handshakeTimeoutMs: failed, and tried again at the next check', async () => {
     const t = await setup({ fake: { webhooks: { https: true, publicAddress: true, handshakeTimeoutMs: 30_000 } } });
     await t.bind();

@@ -43,6 +43,8 @@ export class TaskSyncEngine implements SyncService {
   private readonly planned=new Map<string,{ handle:unknown; at:number }>();
   private readonly info=new Map<string,Info>();
   private readonly nudged=new Map<string,number>();
+  /** Maps whose ensureWebhooks is open, with what a handshake asked to store: written only once the call succeeds. */
+  private readonly registering=new Map<string,{ store?:unknown }>();
   private poller?:ReturnType<typeof setInterval>;
   private stopped=false;
   private reach?:{ value:Reachability; at:number };
@@ -223,17 +225,19 @@ export class TaskSyncEngine implements SyncService {
     // registeredAt, containers, failure and failures are this check's; they are written onto the record as it is
     // after the call, because a handshake can arrive while the provider is still registering (handshakeAt, failures).
     let owned:(r:DeliveryRecord)=>void;
+    const registering:{ store?:unknown }={};this.registering.set(mapId,registering);
     try {
       // After a failure the webhooks are made again, not just checked.
       const state=await session.ensureWebhooks(root,containers,this.target(p,mapId),row.secret,hooks,force||Boolean(rec.failure));
       const renew=Boolean(rec.failure)||!rec.registeredAt||JSON.stringify(state??null)!==JSON.stringify(hooks);
       owned=r=>{if(renew)r.registeredAt=iso(now);r.containers=[...containers];delete r.failure;if(!p.capabilities.webhooks||!p.capabilities.webhooks.handshakeTimeoutMs)r.failures=0;};
-      this.tables.set(mapId,{hooks:JSON.stringify(state??null),hooks_checked:iso(now)});
+      // A handshake's secret is kept only when the registration it answered succeeded.
+      this.tables.set(mapId,{hooks:JSON.stringify(state??null),hooks_checked:iso(now),...(registering.store!==undefined?{state:JSON.stringify(registering.store)}:{})});
     }catch(error){
       if(error instanceof RateLimited||error instanceof RemoteAuthError)throw error;
       owned=r=>this.fail(r,message(error),now);
       this.tables.set(mapId,{hooks_checked:iso(now)});
-    }
+    }finally{this.registering.delete(mapId);}
     const fresh=this.tables.delivery(mapId),answered=fresh.handshakeAt!==undefined&&Date.parse(fresh.handshakeAt)>=now;
     fresh.root=root;fresh.failures=answered?0:rec.failures;
     owned(fresh);
@@ -242,16 +246,21 @@ export class TaskSyncEngine implements SyncService {
   private fail(rec:ReturnType<SyncTables['delivery']>,reason:string,now:number):void {
     rec.failures=(rec.failures??0)+1;rec.failure={reason,count:rec.failures,retryAt:iso(now+retryDelay(rec.failures))};
   }
-  /** A delivery to the provider's hook: checked by the provider with the map's secret. */
-  webhook(provider:string,mapId:string,headers:Headers,body:string):WebhookResult {
+  /** A delivery to the provider's hook: checked by the provider with the map's secret. It counts for the delivery mode
+   *  (live, the backoff) only while the map has webhooks registered, or during their registration (a handshake, whose
+   *  `store` waits for the registration to succeed); a `store` at any other time is dropped. */
+  webhook(provider:string,mapId:string,headers:Headers,body:string,url=''):WebhookResult {
     const p=this.registry.get(provider);if(!p?.receiveWebhook)return {status:404,trigger:false};
     const row=this.tables.row(mapId);if(!row||row.provider!==provider||!this.maps.get(mapId))return {status:401,trigger:false};
-    const result=p.receiveWebhook(headers,body,row.secret,this.tables.state(mapId));
+    const result=p.receiveWebhook(headers,body,row.secret,this.tables.state(mapId),{url});
     if(result.status>=300)return result;
-    const now=iso(this.now()),rec=this.tables.delivery(mapId);
-    rec.handshakeAt=now;rec.failures=0;delete rec.failure;this.tables.setDelivery(mapId,rec);
-    if(result.store!==undefined)this.tables.set(mapId,{state:JSON.stringify(result.store)});
-    if(result.trigger||result.live)this.tables.set(mapId,{last_delivery:now});
+    const now=iso(this.now()),registering=this.registering.get(mapId),registered=this.tables.hooks(mapId)!==null;
+    if(registering){if(result.store!==undefined)registering.store=result.store;}
+    if(registering||registered) {
+      // During a registration, ensureWebhooks's own outcome settles the failure and the backoff.
+      const rec=this.tables.delivery(mapId);rec.handshakeAt=now;if(!registering){rec.failures=0;delete rec.failure;}this.tables.setDelivery(mapId,rec);
+    }
+    if(registered&&(result.trigger||result.live))this.tables.set(mapId,{last_delivery:now});
     if(result.trigger)this.schedule(mapId,500);
     return result;
   }

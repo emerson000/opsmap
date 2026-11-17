@@ -152,7 +152,7 @@ export class FakeAsana implements AsApi {
   deactivate(gid: string) { this.hooks.get(gid)!.active = false; }
   /** A delivery of `events` from webhook `gid`, signed with its secret (X-Hook-Signature: hex HMAC-SHA256 of the raw body). */
   delivery(gid: string, events: unknown[], body = JSON.stringify({ events })) {
-    return { body, headers: new Headers({ 'content-type': 'application/json', 'x-hook-signature': createHmac('sha256', this.hookSecrets.get(gid)!).update(body).digest('hex') }) };
+    return { url: this.hooks.get(gid)?.target ?? '', body, headers: new Headers({ 'content-type': 'application/json', 'x-hook-signature': createHmac('sha256', this.hookSecrets.get(gid)!).update(body).digest('hex') }) };
   }
   async deleteWebhook(gid: string) { this.enter('deleteWebhook', gid); if (!this.hooks.delete(gid)) throw notFound('DELETE', `/webhooks/${gid}`); this.hookSecrets.delete(gid); }
 }

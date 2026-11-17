@@ -4,7 +4,7 @@ import type { Context, Hono } from 'hono';
 import type { Auth } from '../auth';
 import type { User } from '../db';
 import { originAllowed, warnOrigin, type Config } from '../config';
-import { boundedText } from '../limit';
+import { Bucket, boundedText } from '../limit';
 import { TASK_REQUESTS } from '../../src/core/commands/apply';
 import type { Credentials } from './credentials';
 import type { ProviderRegistry } from './registry';
@@ -40,11 +40,21 @@ export function taskSyncRoutes(app:Hono,{config,auth,registry,credentials,sync,l
   };
   app.put('/api/tasksync/:provider/account',c=>accountWrite(c,(user,provider,body)=>credentials!.save(user.id,provider,body.token)));
   app.delete('/api/tasksync/:provider/account',c=>accountWrite(c,async(user,provider)=>{credentials!.remove(user.id,provider);return {connected:false};}));
-  // Webhooks: authenticated by the provider's signature with the per-map secret, not by a session.
+  // Webhooks: authenticated by the provider's signature with the per-map secret, not by a session. Anyone can post, so
+  // each map gets a bucket (a burst of 60, refilled at 5 a second), and so does each client address (200, 20 a second).
+  const buckets=new Map<string,{ bucket:Bucket; at:number }>();let swept=Date.now();
+  const allowed=(key:string,rate:number,burst:number)=>{
+    const now=Date.now();
+    if(now-swept>60_000||buckets.size>10_000){swept=now;for(const [k,v] of buckets)if(now-v.at>60_000)buckets.delete(k);}
+    let b=buckets.get(key);if(!b){b={bucket:new Bucket(rate,burst),at:now};buckets.set(key,b);}
+    b.at=now;return b.bucket.take();
+  };
   const hook=async(c:Context,provider:string)=>{
     if(!sync||!registry.get(provider))return c.json({error:'Not found'},404);
+    const map=(c.req.param('map')??'').slice(0,128),ip=(c.env as { incoming?:{ socket?:{ remoteAddress?:string } } }|undefined)?.incoming?.socket?.remoteAddress;
+    if(ip&&!allowed(`ip ${ip}`,20,200)||!allowed(`map ${provider} ${map}`,5,60)){c.header('Retry-After','1');return c.json({error:'Too many requests'},429);}
     try {
-      const text=await boundedText(c.req.raw,512*1024),result=sync.webhook(provider,c.req.param('map')??'',c.req.raw.headers,text);
+      const text=await boundedText(c.req.raw,512*1024),result=sync.webhook(provider,c.req.param('map')??'',c.req.raw.headers,text,c.req.url);
       for(const [name,value] of Object.entries(result.headers??{}))c.header(name,value);
       return result.status<300?c.json({ok:true},result.status as 200):c.json({error:result.status===401?'Invalid signature':'Not found'},result.status as 401);
     }catch{return c.json({error:'Invalid request'},400);}

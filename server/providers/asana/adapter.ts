@@ -3,7 +3,7 @@
 // workspace on first use, reused by name); its parent Asana's parent task. Due dates are days (`due_on`): a `due_at`
 // is read as its day in the map's zone, and a write sets the day and clears the time. One session serves one sync
 // cycle, so it keeps what it read (the project's workspace and sections, the workspace's tags, the tasks) for that cycle.
-import { createHmac, timingSafeEqual } from 'node:crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Affiliation } from '../../../src/core/model/types';
 import { localDay } from '../../../src/core/model/time';
 import { RateLimited, RemoteAuthError, type ProviderSession, type RemoteRoot, type RemoteStatus, type RemoteTask, type Snapshot, type TaskWrite, type WebhookResult } from '../../tasksync/contract';
@@ -40,27 +40,42 @@ const dueOf = (t: AsTask, tz: string) => t.due_at ? localDay(new Date(t.due_at),
 const sectionIn = (t: AsTask, project: string) => t.memberships.find(m => m.project?.gid === project)?.section?.gid ?? null;
 
 /** Webhook creations in flight, by the map's secret (the engine's, passed to ensureWebhooks and receiveWebhook). Asana
- *  sends its handshake while `POST /webhooks` is still open; it is answered only then, and only once per creation. */
-export type Handshakes = Map<string, { answered: boolean }>;
-/** The webhook ensureWebhooks keeps (ts_maps.hooks): one per bound project. */
-const hookGid = (state: unknown) => state && typeof state === 'object' && typeof (state as { gid?: unknown }).gid === 'string' ? (state as { gid: string }).gid : undefined;
-/** The secret Asana's handshake gave (ts_maps.state, stored through WebhookResult.store). */
-const hookSecret = (state: unknown) => state && typeof state === 'object' && typeof (state as { secret?: unknown }).secret === 'string' ? (state as { secret: string }).secret : undefined;
-export const asanaHookCount = (state: unknown) => hookGid(state) ? 1 : 0;
-/** A handshake (`X-Hook-Secret`), echoed and stored only while a creation for this map is open; or a delivery, signed with
- *  that secret (`X-Hook-Signature`: hex HMAC-SHA256 of the body as received). A heartbeat (`events: []`) starts no cycle. */
-export function receiveAsanaWebhook(headers: Headers, body: string, mapSecret: string, state: unknown, handshakes: Handshakes): WebhookResult {
-  const refused: WebhookResult = { status: 401, trigger: false }, offered = headers.get('x-hook-secret');
+ *  sends its handshake while `POST /webhooks` is still open, to the target it was given, which carries a random nonce
+ *  (`?h=`) made for that creation. Only a handshake on that URL is answered, once; `offered` is the secret it gave. */
+export type Handshakes = Map<string, { nonce: string; offered?: string }>;
+interface HookState { gid: string; nonce: string }
+/** The webhook ensureWebhooks keeps (ts_maps.hooks): one per bound project, with the nonce of its target. */
+const hookOf = (state: unknown): HookState | undefined => {
+  const h = state as Partial<HookState> | null;
+  return h && typeof h === 'object' && typeof h.gid === 'string' && typeof h.nonce === 'string' ? { gid: h.gid, nonce: h.nonce } : undefined;
+};
+/** What the handshake gave (ts_maps.state, through WebhookResult.store): its secret, and the nonce of the target it came to. */
+const secretOf = (state: unknown): { secret: string; nonce: string } | undefined => {
+  const s = state as { secret?: unknown; nonce?: unknown } | null;
+  return s && typeof s === 'object' && typeof s.secret === 'string' && typeof s.nonce === 'string' ? { secret: s.secret, nonce: s.nonce } : undefined;
+};
+export const asanaHookCount = (state: unknown) => hookOf(state) ? 1 : 0;
+/** The target's nonce: the only `h` in the query, or undefined. */
+const nonceIn = (url: string | undefined) => { try { const all = new URL(url ?? '').searchParams.getAll('h'); return all.length === 1 && all[0] ? all[0] : undefined; } catch { return undefined; } };
+const sameText = (a: string, b: string) => { const x = Buffer.from(a), y = Buffer.from(b); return x.length === y.length && timingSafeEqual(x, y); };
+const withNonce = (target: string, nonce: string) => `${target}${target.includes('?') ? '&' : '?'}h=${nonce}`;
+/** A handshake (`X-Hook-Secret`), answered only on the target of the creation in flight for this map, and only once;
+ *  or a delivery, on the target the webhook was made with, signed with the handshake's secret (`X-Hook-Signature`: the
+ *  hex HMAC-SHA256 of the body as received, compared exactly: Asana sends lowercase hex). A heartbeat (`events: []`)
+ *  starts no cycle. */
+export function receiveAsanaWebhook(headers: Headers, body: string, mapSecret: string, state: unknown, handshakes: Handshakes, url?: string): WebhookResult {
+  const refused: WebhookResult = { status: 401, trigger: false }, offered = headers.get('x-hook-secret'), nonce = nonceIn(url);
+  if (!nonce) return refused;
   if (offered !== null) {
     const waiting = handshakes.get(mapSecret);
-    if (!waiting || waiting.answered || !/^[\x21-\x7e]{1,256}$/.test(offered)) return refused;
-    waiting.answered = true;
-    return { status: 200, headers: { 'X-Hook-Secret': offered }, store: { secret: offered }, trigger: false };
+    if (!waiting || waiting.offered !== undefined || !sameText(waiting.nonce, nonce) || !/^[\x21-\x7e]{1,256}$/.test(offered)) return refused;
+    waiting.offered = offered;
+    // The engine keeps `store` only once createWebhook has succeeded.
+    return { status: 200, headers: { 'X-Hook-Secret': offered }, store: { secret: offered, nonce }, trigger: false };
   }
-  const secret = hookSecret(state), signature = headers.get('x-hook-signature');
-  if (!secret || !signature) return refused;
-  const want = Buffer.from(createHmac('sha256', secret).update(body).digest('hex')), got = Buffer.from(signature.trim().toLowerCase());
-  if (want.length !== got.length || !timingSafeEqual(want, got)) return refused;
+  const stored = secretOf(state), signature = headers.get('x-hook-signature');
+  if (!stored || !signature || !sameText(stored.nonce, nonce)) return refused;
+  if (!sameText(createHmac('sha256', stored.secret).update(body).digest('hex'), signature)) return refused;
   let events: unknown; try { events = (JSON.parse(body) as { events?: unknown }).events; } catch { /* signed but not JSON: sync anyway */ }
   return Array.isArray(events) && events.length === 0 ? { status: 200, trigger: false, live: true } : { status: 200, trigger: true };
 }
@@ -240,27 +255,37 @@ export class AsanaSession implements ProviderSession {
   }
   async deleteTask(_root: RemoteRoot, id: string): Promise<void> { await this.api.deleteTask(id); }
 
-  /** One webhook on the project, posting to `target`. One Asana deactivated (after failed deliveries) or a second one is
-   *  deleted; a missing one is made. A refusal other than a rate limit or a refused token is a webhook failure (the
-   *  engine keeps polling and retries), never a sync error. */
-  async ensureWebhooks(root: RemoteRoot, _containers: string[], target: string, secret: string): Promise<unknown> {
+  /** One webhook on the project, posting to `target` with the nonce it was made with (kept in `state`). One Asana
+   *  deactivated (after failed deliveries), one whose nonce is not ours, or a second one is deleted; a missing one is
+   *  made. A refusal other than a rate limit or a refused token is a webhook failure (the engine keeps polling and
+   *  retries), never a sync error. */
+  async ensureWebhooks(root: RemoteRoot, _containers: string[], target: string, secret: string, state: unknown): Promise<unknown> {
+    const known = hookOf(state);
     try {
-      const mine = (await this.api.webhooks(await this.workspace(root), root.id)).filter(h => h.target === target), live = mine.find(h => h.active !== false);
+      const all = await this.api.webhooks(await this.workspace(root), root.id), mine = all.filter(h => h.target === target || h.target.startsWith(`${target}?`));
+      const live = known && mine.find(h => h.gid === known.gid && h.active !== false && h.target === withNonce(target, known.nonce));
       for (const h of mine) if (h !== live) await this.forget(h.gid);
-      return { gid: live?.gid ?? (await this.create(root.id, target, secret)).gid };
+      return live ? known : await this.create(root.id, target, secret);
     } catch (error) {
       if (error instanceof AsHttpError && error.status !== 429 && error.status !== 401) throw new Error(error.message);
       throw error;
     }
   }
-  async removeWebhooks(_root: RemoteRoot, state: unknown): Promise<void> { const gid = hookGid(state); if (gid) await this.forget(gid); }
+  async removeWebhooks(_root: RemoteRoot, state: unknown): Promise<void> { const h = hookOf(state); if (h) await this.forget(h.gid); }
   /** Asana answers `POST /webhooks` only after the handshake, so the handshake is expected for exactly this long. */
-  private async create(project: string, target: string, secret: string) {
-    const waiting = { answered: false }; this.handshakes.set(secret, waiting);
-    try { return await this.api.createWebhook(project, target); }
-    catch (error) {
-      // What Asana answers when the target did not echo the handshake (it waits a while first).
-      if (error instanceof AsHttpError && (error.status === 400 || error.status === 403)) throw new Error(`${this.label} could not complete the webhook handshake with PUBLIC_URL (HTTP ${error.status})`);
+  private async create(project: string, target: string, secret: string): Promise<HookState> {
+    const waiting: { nonce: string; offered?: string } = { nonce: randomBytes(16).toString('base64url') }; this.handshakes.set(secret, waiting);
+    try {
+      const made = await this.api.createWebhook(project, withNonce(target, waiting.nonce));
+      // Made, but the handshake never reached this server: deliveries could not be checked.
+      if (waiting.offered === undefined) { await this.forget(made.gid); throw new Error(`${this.label} made the webhook without a handshake this server answered`); }
+      return { gid: made.gid, nonce: waiting.nonce };
+    } catch (error) {
+      // What Asana answers when the target did not echo the handshake (it waits a while first). Its message, never a secret or the nonce.
+      if (error instanceof AsHttpError && (error.status === 400 || error.status === 403)) {
+        const said = error.message.replace(/^Asana [A-Z]+ \/webhooks: /, '').replace(/[?&]h=[\w-]*/g, '').replace(/[\x00-\x1f]/g, ' ').slice(0, 200);
+        throw new Error(`${this.label} could not complete the webhook handshake with PUBLIC_URL (HTTP ${error.status}: ${said})`);
+      }
       throw error;
     } finally { if (this.handshakes.get(secret) === waiting) this.handshakes.delete(secret); }
   }

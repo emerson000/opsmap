@@ -31,7 +31,7 @@ export class AsanaProvider implements TaskProvider {
     catch (error) { throw translate(error); }
   }
   connect(token: string): ProviderSession { return asanaSession(this.makeApi(token), this.descriptor.label, this.handshakes); }
-  receiveWebhook(headers: Headers, body: string, secret: string, state: unknown): WebhookResult { return receiveAsanaWebhook(headers, body, secret, state, this.handshakes); }
+  receiveWebhook(headers: Headers, body: string, secret: string, state: unknown, request?: { url: string }): WebhookResult { return receiveAsanaWebhook(headers, body, secret, state, this.handshakes, request?.url); }
   hookCount(hooks: unknown): number { return asanaHookCount(hooks); }
 }
 /** ASANA_SYNC=1 or true turns Asana on. */

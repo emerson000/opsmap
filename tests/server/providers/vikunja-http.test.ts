@@ -41,7 +41,8 @@ describe('Vikunja over HTTP and WebSocket', () => {
   });
 
   it('webhook: only a delivery signed with the map secret is accepted', async () => {
-    runtime.store.db.prepare("INSERT INTO ts_maps(map_id,provider,secret) VALUES('main','vikunja','s3cret')").run();
+    // A map with its webhooks registered (a delivery counts for the delivery mode only then).
+    runtime.store.db.prepare(`INSERT INTO ts_maps(map_id,provider,secret,hooks) VALUES('main','vikunja','s3cret','[{"project":40,"id":1}]')`).run();
     const body = JSON.stringify({ event_name: 'task.updated', time: new Date().toISOString(), data: {} });
     // The generic route, and the old one that Vikunja webhooks registered before task sync became provider-neutral.
     for (const path of ['/api/tasksync/vikunja/hook', '/api/vikunja/hook']) {

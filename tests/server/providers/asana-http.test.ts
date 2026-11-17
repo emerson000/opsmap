@@ -136,17 +136,29 @@ describe('Asana webhook route', () => {
   afterEach(async () => { await runtime.close(); rmSync(dir, { recursive: true, force: true }); });
 
   it('accepts a delivery signed over the raw body, refuses a tampered or unsigned one and an unasked handshake', async () => {
-    runtime.store.db.prepare(`INSERT INTO ts_maps(map_id,provider,secret,state) VALUES('main','asana','engine-secret','{"secret":"hook-secret"}')`).run();
+    runtime.store.db.prepare(`INSERT INTO ts_maps(map_id,provider,secret,hooks,state) VALUES('main','asana','engine-secret','{"gid":"9001","nonce":"n0nce"}','{"secret":"hook-secret","nonce":"n0nce"}')`).run();
     // Spacing that re-serializing the JSON would lose.
     const body = '{ "events" : [ { "action": "changed", "resource": { "gid": "7001" } } ] }\n';
-    const post = (headers: Record<string, string>, text = body) => fetch(`${url}/api/tasksync/asana/hook/main`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: text });
+    const post = (headers: Record<string, string>, text = body, path = '?h=n0nce') => fetch(`${url}/api/tasksync/asana/hook/main${path}`, { method: 'POST', headers: { 'content-type': 'application/json', ...headers }, body: text });
     const sig = createHmac('sha256', 'hook-secret').update(body).digest('hex');
     expect((await post({ 'x-hook-signature': sig })).status).toBe(200);
     expect((await post({ 'x-hook-signature': sig }, body.replace('7001', '7002'))).status).toBe(401);
     expect((await post({})).status).toBe(401);
+    // Signed, but not on the URL the webhook was made with.
+    expect((await post({ 'x-hook-signature': sig }, body, '')).status).toBe(401);
+    expect((await post({ 'x-hook-signature': sig }, body, '?h=other')).status).toBe(401);
     const handshake = await post({ 'x-hook-secret': 'b'.repeat(32) }, '');
     expect(handshake.status).toBe(401);
     expect(handshake.headers.get('x-hook-secret')).toBeNull();
-    expect((runtime.store.db.prepare("SELECT state FROM ts_maps WHERE map_id='main'").get() as { state: string }).state).toBe('{"secret":"hook-secret"}');
+    expect((runtime.store.db.prepare("SELECT state FROM ts_maps WHERE map_id='main'").get() as { state: string }).state).toBe('{"secret":"hook-secret","nonce":"n0nce"}');
+  });
+  it('limits deliveries per map with 429, for every provider; another map is still answered (I2)', async () => {
+    const post = (map: string, path = '/api/tasksync/asana/hook') => fetch(`${url}${path}/${map}`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: '{}' });
+    const statuses: number[] = [];
+    for (let i = 0; i < 80; i++) statuses.push((await post('main')).status);
+    expect(statuses.slice(0, 20).every(s => s === 401)).toBe(true);
+    expect(statuses).toContain(429);
+    expect((await post('other')).status).toBe(401);
+    const res = await post('main'); expect(res.status).toBe(429); expect(res.headers.get('retry-after')).toBe('1');
   });
 });

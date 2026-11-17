@@ -45,6 +45,8 @@ const status = () => sync.request(hub().mapId, { action: 'status' }, user, 'web'
 const taskOf = (d: string) => as.tasksById.get(unit(d).remote!)!;
 const tagsOf = (gid: string) => as.tasksById.get(gid)!.tags.map(t => as.tagsById.get(t)!.name).sort();
 const writes = () => as.calls.filter(c => !/^(me|projects|project|sections|tasks|subtasks|task|tags|webhooks) /.test(c + ' '));
+/** The map a hook URL posts to (the nonce is in the query). */
+const mapOf = (target: string) => decodeURIComponent(new URL(target).pathname.split('/hook/')[1]);
 const engine = (hookBase: string | undefined = 'https://opsmap.example', resolve = ['93.184.216.34']) =>
   new TaskSyncEngine(maps, registry, credentials, hookBase, 3_600_000, undefined, { resolve: async () => resolve });
 
@@ -58,7 +60,7 @@ beforeEach(async () => {
   await credentials.save(user.id, 'asana', TOKEN);
   sync = engine();
   // Asana's webhook handshake reaches the engine's hook while createWebhook is still open.
-  as.handshake = (target, headers) => sync.webhook('asana', decodeURIComponent(target.split('/hook/')[1]), headers, '');
+  as.handshake = (target, headers) => sync.webhook('asana', mapOf(target), headers, '', target);
 });
 
 describe('Asana provider', () => {
@@ -344,47 +346,87 @@ describe('Asana webhooks', () => {
   const due = () => clock.queue.filter(x => x.at <= clock.t);
   /** Runs the timers that are due and waits for the cycles they start. */
   const fire = async () => { const now = due(); clock.queue = clock.queue.filter(x => !now.includes(x)); for (const x of now) x.fn(); await (sync as unknown as { chains: Map<string, Promise<unknown>> }).chains.get(hub().mapId); };
-  const deliver = (gid: string, events: unknown[]) => { const d = as.delivery(gid, events); return sync.webhook('asana', hub().mapId, d.headers, d.body); };
+  const deliver = (gid: string, events: unknown[]) => { const d = as.delivery(gid, events); return sync.webhook('asana', hub().mapId, d.headers, d.body, d.url); };
+  const NONCE = /^\?h=[A-Za-z0-9_-]{22}$/;
+  /** The hook URL the engine gave, and the nonce Asana's webhook was made with. */
+  const nonced = (target: string) => { expect(target.startsWith(hookUrl())).toBe(true); expect(target.slice(hookUrl().length)).toMatch(NONCE); return target.slice(hookUrl().length + 3); };
   const EVENT = { action: 'changed', resource: { gid: '7001', resource_type: 'task' } };
   let answers: { status: number; headers?: Record<string, string> }[];
   beforeEach(() => {
     clock = new Clock(); answers = [];
     sync = clocked();
     // The handshake reaches the engine's hook while createWebhook is still open, as Asana sends it.
-    as.handshake = (target, headers) => { const r = sync.webhook('asana', decodeURIComponent(target.split('/hook/')[1]), headers, ''); answers.push(r); return r; };
+    as.handshake = (target, headers) => { const r = sync.webhook('asana', mapOf(target), headers, '', target); answers.push(r); return r; };
   });
 
   it('binding registers one webhook on the project at PUBLIC_URL/api/tasksync/asana/hook/<map>: pending until a delivery', async () => {
     await bind();
     const project = doc().settings.taskSync!.root;
-    expect(hookCalls()).toEqual([`webhooks ${WS}`, `createWebhook ${project} ${hookUrl()}`]);
-    expect(only()).toMatchObject({ target: hookUrl(), active: true, resource: { gid: project } });
+    expect(hookCalls()).toEqual([`webhooks ${WS}`, `createWebhook ${project} ${only().target}`]);
+    nonced(only().target);
+    expect(only()).toMatchObject({ active: true, resource: { gid: project } });
     expect(sync.delivery(hub().mapId)).toMatchObject({ mode: 'pending', nextPollMs: 120_000 });
     expect(await status()).toMatch(/· 1 webhook, none delivered yet · polling every 2 minutes · last sync/);
   });
   it('the handshake echoes X-Hook-Secret, and the secret is stored through WebhookResult.store, never shown', async () => {
     await bind();
-    const gid = only().gid, secret = as.hookSecrets.get(gid)!;
-    expect(answers).toEqual([{ status: 200, headers: { 'X-Hook-Secret': secret }, store: { secret }, trigger: false }]);
-    expect(JSON.parse(row()!.state!)).toEqual({ secret });
+    const gid = only().gid, secret = as.hookSecrets.get(gid)!, nonce = nonced(only().target);
+    expect(answers).toEqual([{ status: 200, headers: { 'X-Hook-Secret': secret }, store: { secret, nonce }, trigger: false }]);
+    expect(JSON.parse(row()!.state!)).toEqual({ secret, nonce });
+    expect(JSON.parse(row()!.hooks!)).toEqual({ gid, nonce });
     expect(await status()).not.toContain(secret);
     expect(JSON.stringify(await sync.deliveryInfo(hub().mapId))).not.toContain(secret);
   });
   it('a handshake is refused with 401 when no webhook creation for the map is in flight, or one was already answered', async () => {
     await bind();
     const stored = row()!.state;
-    const handshake = (secret: string) => sync.webhook('asana', hub().mapId, new Headers({ 'x-hook-secret': secret }), '');
+    const handshake = (secret: string, url = only().target) => sync.webhook('asana', hub().mapId, new Headers({ 'x-hook-secret': secret }), '', url);
     expect(handshake('f'.repeat(32))).toEqual({ status: 401, trigger: false });
     expect(row()!.state).toBe(stored);
     // A second handshake while the creation is still open (after the first stored its secret) is refused too.
     as.hooks.clear();
-    as.handshake = (target, headers) => { const first = sync.webhook('asana', hub().mapId, headers, ''); answers.push(handshake('e'.repeat(32))); return first; };
+    as.handshake = (target, headers) => { const first = sync.webhook('asana', hub().mapId, headers, '', target); answers.push(handshake('e'.repeat(32), target)); return first; };
     answers = [];
     await sync.request(hub().mapId, { action: 'sync' }, user, 'web');
     expect(answers).toEqual([{ status: 401, trigger: false }]);
-    expect(JSON.parse(row()!.state!)).toEqual({ secret: as.hookSecrets.get(only().gid) });
+    expect(JSON.parse(row()!.state!)).toEqual({ secret: as.hookSecrets.get(only().gid), nonce: nonced(only().target) });
     // A map that is not bound has no handshake to answer.
-    expect(sync.webhook('asana', 'nope', new Headers({ 'x-hook-secret': 'a'.repeat(32) }), '')).toEqual({ status: 401, trigger: false });
+    expect(sync.webhook('asana', 'nope', new Headers({ 'x-hook-secret': 'a'.repeat(32) }), '', 'https://opsmap.example/api/tasksync/asana/hook/nope')).toEqual({ status: 401, trigger: false });
+  });
+  it('a forged handshake (no nonce, a wrong one, or first in the window) gets 401 and is never stored; Asana’s still succeeds (C1)', async () => {
+    const forged: unknown[] = [];
+    as.handshake = (target, headers) => {
+      const forge = (url: string) => sync.webhook('asana', hub().mapId, new Headers({ 'x-hook-secret': 'evil'.repeat(8) }), '', url);
+      // The attacker knows the map id (it is in the map URL) but not the nonce, which only Asana was sent.
+      forged.push(forge(hookUrl()), forge(`${hookUrl()}?h=${'A'.repeat(22)}`), forge(`${hookUrl()}?h=`), forge(`${hookUrl()}?h=${new URL(target).searchParams.get('h')}x`));
+      const r = sync.webhook('asana', mapOf(target), headers, '', target); answers.push(r); return r;
+    };
+    await bind();
+    expect(forged).toEqual(Array(4).fill({ status: 401, trigger: false }));
+    expect(answers).toHaveLength(1); expect(answers[0].status).toBe(200);
+    expect(JSON.parse(row()!.state!).secret).toBe(as.hookSecrets.get(only().gid));
+    expect(row()!.state).not.toContain('evil');
+    expect(sync.delivery(hub().mapId).mode).toBe('pending');
+  });
+  it('a secret from a creation that then fails is dropped: the working one stays (C1 b)', async () => {
+    await bind();
+    const working = row()!.state, gid = only().gid;
+    const create = as.createWebhook.bind(as);
+    as.createWebhook = async (r, t) => { await create(r, t); throw new AsHttpError(400, 'Asana POST /webhooks: Something went wrong'); };
+    as.hooks.clear();
+    await sync.request(hub().mapId, { action: 'sync' }, user, 'web');
+    expect(answers.at(-1)!.status).toBe(200);
+    expect(row()!.state).toBe(working);
+    expect(sync.delivery(hub().mapId).mode).toBe('failed');
+    expect(gid).not.toBe(only().gid);
+  });
+  it('a signed delivery to the bare hook URL or another nonce gets 401 (C1)', async () => {
+    await bind(); clock.queue = [];
+    const d = as.delivery(only().gid, [EVENT]);
+    for (const url of [hookUrl(), `${hookUrl()}?h=${'B'.repeat(22)}`, `${only().target}x`, `${hookUrl()}?h=x&h=${nonced(only().target)}`]) expect(sync.webhook('asana', hub().mapId, d.headers, d.body, url)).toEqual({ status: 401, trigger: false });
+    expect(sync.webhook('asana', hub().mapId, d.headers, d.body)).toEqual({ status: 401, trigger: false });
+    expect(sync.delivery(hub().mapId).mode).toBe('pending');
+    expect(clock.queue).toEqual([]);
   });
   it('a signed delivery schedules a cycle and makes the mode live; the change arrives', async () => {
     await bind(); clock.queue = [];
@@ -406,10 +448,17 @@ describe('Asana webhooks', () => {
   it('unsigned, wrongly signed and tampered deliveries get 401 and change nothing', async () => {
     await bind(); clock.queue = [];
     const body = JSON.stringify({ events: [EVENT] }), good = as.delivery(only().gid, [EVENT]);
-    const post = (headers: Record<string, string>, text = body) => sync.webhook('asana', hub().mapId, new Headers(headers), text);
+    const post = (headers: Record<string, string>, text = body) => sync.webhook('asana', hub().mapId, new Headers(headers), text, good.url);
     expect(post({})).toEqual({ status: 401, trigger: false });
     expect(post({ 'x-hook-signature': createHmac('sha256', 'not the secret').update(body).digest('hex') })).toEqual({ status: 401, trigger: false });
     expect(post({ 'x-hook-signature': 'abc' })).toEqual({ status: 401, trigger: false });
+    // Compared exactly, as Asana sends it (lowercase hex): no case folding. (Headers itself drops surrounding spaces.)
+    const sig = good.headers.get('x-hook-signature')!;
+    expect(post({ 'x-hook-signature': sig.toUpperCase() })).toEqual({ status: 401, trigger: false });
+    expect(post({ 'x-hook-signature': `${sig}00` })).toEqual({ status: 401, trigger: false });
+    expect(post({ 'x-hook-signature': sig.slice(0, -2) })).toEqual({ status: 401, trigger: false });
+    expect(post({ 'x-hook-signature': sig })).toMatchObject({ status: 200 });
+    clock.queue = []; store.db.prepare('UPDATE ts_maps SET last_delivery=NULL').run();
     expect(post({ 'x-hook-signature': good.headers.get('x-hook-signature')! }, body.replace('changed', 'removed'))).toEqual({ status: 401, trigger: false });
     // The signature is over the body exactly as received: the same JSON spaced differently is not the signed body.
     expect(post({ 'x-hook-signature': good.headers.get('x-hook-signature')! }, JSON.stringify({ events: [EVENT] }, null, 1))).toEqual({ status: 401, trigger: false });
@@ -421,7 +470,7 @@ describe('Asana webhooks', () => {
     as.hooks.clear(); as.calls.length = 0;
     await sync.request(hub().mapId, { action: 'sync' }, user, 'web');
     expect(hookCalls().filter(c => c.startsWith('createWebhook'))).toHaveLength(1);
-    expect(only().target).toBe(hookUrl());
+    nonced(only().target);
     as.hooks.clear(); as.calls.length = 0;
     clock.t += 9 * 60_000; await sync.run(hub().mapId);
     expect(hookCalls()).toEqual([]);
@@ -433,10 +482,10 @@ describe('Asana webhooks', () => {
     await bind();
     const old = only().gid; as.deactivate(old); as.calls.length = 0;
     clock.t += 10 * 60_000; await sync.run(hub().mapId);
-    expect(hookCalls()).toEqual([`webhooks ${WS}`, `deleteWebhook ${old}`, `createWebhook ${doc().settings.taskSync!.root} ${hookUrl()}`]);
     const fresh = only();
+    expect(hookCalls()).toEqual([`webhooks ${WS}`, `deleteWebhook ${old}`, `createWebhook ${doc().settings.taskSync!.root} ${fresh.target}`]);
     expect(fresh).toMatchObject({ active: true });
-    expect(JSON.parse(row()!.state!)).toEqual({ secret: as.hookSecrets.get(fresh.gid) });
+    expect(JSON.parse(row()!.state!)).toEqual({ secret: as.hookSecrets.get(fresh.gid), nonce: nonced(fresh.target) });
     expect(deliver(fresh.gid, [EVENT]).status).toBe(200);
   });
   it('a handshake Asana never gets an answer to: failed (not a refused token), polling every 2 minutes, retried later', async () => {
@@ -445,7 +494,7 @@ describe('Asana webhooks', () => {
       await bind();
       expect(as.hooks.size).toBe(0);
       expect(sync.delivery(hub().mapId)).toMatchObject({ mode: 'failed', nextPollMs: 120_000 });
-      expect(await status()).toMatch(/webhooks failed: Asana could not complete the webhook handshake with PUBLIC_URL \(HTTP 40[03]\), retrying at \d\d:\d\d:\d\dZ · polling every 2 minutes/);
+      expect(await status()).toMatch(/webhooks failed: Asana could not complete the webhook handshake with PUBLIC_URL \(HTTP 40[03]: The remote server did not respond with the handshake secret\.\), retrying at \d\d:\d\d:\d\dZ · polling every 2 minutes/);
       expect(await status()).not.toMatch(/no token|last error/);
       run('/tasks unbind'); await sync.run(hub().mapId);
     }
@@ -465,7 +514,7 @@ describe('Asana webhooks', () => {
     const info = maps.create(user.id, 'Second');
     await sync.request(info.id, { action: 'bind', name: 'Second' }, user, 'web');
     const gid = only().gid;
-    expect(only().target).toBe(`https://opsmap.example/api/tasksync/asana/hook/${info.id}`);
+    expect(only().target).toMatch(new RegExp(`^https://opsmap\\.example/api/tasksync/asana/hook/${info.id}\\?h=[\\w-]{22}$`));
     maps.remove(info.id);
     await new Promise(r => setTimeout(r, 20));
     expect(as.hooks.size).toBe(0);
