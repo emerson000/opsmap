@@ -15,7 +15,7 @@
   import OrderLog from './lib/ui/OrderLog.svelte';
   import SitrepPanel from './lib/ui/SitrepPanel.svelte';
   import Legend from './lib/ui/Legend.svelte';
-  import VikunjaAccount from './lib/ui/VikunjaAccount.svelte';
+  import TaskAccount from './lib/ui/TaskAccount.svelte';
   import AccessTokens from './lib/ui/AccessTokens.svelte';
   import Toasts from './lib/ui/Toasts.svelte';
   import Login from './lib/ui/Login.svelte';
@@ -332,11 +332,11 @@
   {#if ui.sitrepOpen}
     <div class="sitrep-layer"><SitrepPanel {doc} {now} /></div>
   {/if}
-  {#if ui.vikunjaOpen}
-    <div class="sitrep-layer vk-layer"><VikunjaAccount /></div>
+  {#if ui.taskAccountOpen}
+    <div class="sitrep-layer account-layer">{#key ui.taskAccountOpen}<TaskAccount provider={ui.taskAccountOpen} />{/key}</div>
   {/if}
   {#if ui.tokensOpen}
-    <div class="sitrep-layer vk-layer"><AccessTokens /></div>
+    <div class="sitrep-layer account-layer"><AccessTokens /></div>
   {/if}
   {#if ui.legendOpen}
     <div class="legend-layer"><Legend {theme} /></div>
@@ -362,7 +362,7 @@
   .bar-wrap { width: 100%; max-width: 760px; pointer-events: auto; }
   .toast-layer { position: absolute; top: calc(var(--bar-h) + 8px); left: calc(var(--left-w) + 16px); right: calc(var(--right-w) + 16px); z-index: var(--z-toast); }
   .sitrep-layer { position: absolute; top: calc(var(--bar-h) + 16px); left: calc(var(--left-w) + 16px); right: calc(var(--right-w) + 16px); z-index: var(--z-panel); display: flex; justify-content: center; }
-  .vk-layer { z-index: calc(var(--z-panel) + 2); }
+  .account-layer { z-index: calc(var(--z-panel) + 2); }
   .pick-layer { position: absolute; top: calc(var(--bar-h) + 8px); left: calc(var(--left-w) + 16px); right: calc(var(--right-w) + 16px); z-index: var(--z-pick); display: flex; justify-content: center; pointer-events: none; }
   .pick-layer > :global(*) { width: min(440px, 100%); pointer-events: auto; }
   /* Out of flow, so the dock height (and the map's insets) stay the same while picking. */
@@ -385,7 +385,7 @@
   .app.phone.kb .bottom { padding-bottom: 8px; }
   .app.phone .bar-wrap { max-width: none; }
   .app.phone .toast-layer { top: calc(var(--top-h) + 8px); left: 8px; right: 8px; }
-  .app.phone .sitrep-layer, .app.phone .legend-layer, .app.phone .vk-layer { top: calc(var(--top-h) + 8px); left: 8px; right: 8px; bottom: calc(var(--dock-h) + 8px); display: flex; justify-content: center; align-items: stretch; }
+  .app.phone .sitrep-layer, .app.phone .legend-layer, .app.phone .account-layer { top: calc(var(--top-h) + 8px); left: 8px; right: 8px; bottom: calc(var(--dock-h) + 8px); display: flex; justify-content: center; align-items: stretch; }
   .app.phone .sitrep-layer > :global(*), .app.phone .legend-layer > :global(*) { max-height: 100%; }
   .app.phone .orientation { font-size: 13px; }
   .gest-hint { display: block; margin-top: 4px; font-weight: 600; }

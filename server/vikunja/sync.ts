@@ -6,7 +6,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Affiliation, Command, Doc, Order, Unit } from '../../src/core/model/types';
 import { boundElsewhere, NOT_BOUND, type RemoteChanges as VkChanges, type RemoteStatus as VkStatus } from '../../src/core/commands/apply';
-import type { ProviderInfo } from '../../src/core/commands/grammar';
 import { localDay } from '../../src/core/model/time';
 import type { Maps } from '../maps';
 import type { Hub, Op } from '../hub';
@@ -14,8 +13,6 @@ import type { Store, User } from '../db';
 import type { VkApi, VkLabel, VkProject, VkRelationKind, VkTask } from './api';
 
 export interface VkFields { title: string; due: string | null; note: string; progress: number | null; status: VkStatus | null; sector: string | null; affiliation: Affiliation | null }
-/** The task services the grammar offers, until providers register themselves: Vikunja when it is configured. */
-export const taskProviders = (on: boolean): ProviderInfo[] => on ? [{ id: 'vikunja', label: 'Vikunja', aliases: ['vk'], rootNoun: 'project' }] : [];
 /** A document's remote id (task or sector project) as Vikunja's number. */
 const vkOf = (x: { remote?: string } | undefined): number | undefined => x?.remote === undefined ? undefined : Number(x.remote);
 const ids = (r: Record<string, number>): Record<string, string> => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, String(v)]));

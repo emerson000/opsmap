@@ -22,6 +22,9 @@ export interface Op {
 }
 export interface PresenceEntry { userId: string; selectedId: string | null }
 /** A shared map. The first one in the server's list is the default. */
+/** A task service the server has (server/tasksync/contract.ts ProviderDescriptor): its names, nouns and URL templates
+ *  ({root} {container} {id}), so the UI can show it without naming any service. */
+export interface ProviderDescriptor { id: string; label: string; aliases: string[]; rootNoun: string; containerNoun: string; tokenHelp: string; tokenUrl?: string; urls: { root: string; container?: string; task: string } }
 export interface MapInfo { id: string; name: string; createdAt?: string; createdBy?: string | null }
 
 export type ClientMessage =
@@ -30,12 +33,12 @@ export type ClientMessage =
   | { t: 'undo'; opId: string }
   | { t: 'redo'; opId: string }
   | { t: 'presence'; selectedId: string | null }
-  | { t: 'vk'; opId: string; args: Record<string, unknown> }
+  | { t: 'tasks'; opId: string; args: Record<string, unknown> }
   | { t: 'ping' };
 
 export type ServerMessage =
-  | { t: 'welcome'; me: User; users: User[]; seq: number; doc?: Doc; ops?: Op[]; map?: string; maps?: MapInfo[]; fallback?: boolean; vikunja?: { url: string } | null }
-  | { t: 'vk'; opId: string; ok: boolean; log?: string; error?: string }
+  | { t: 'welcome'; me: User; users: User[]; seq: number; doc?: Doc; ops?: Op[]; map?: string; maps?: MapInfo[]; fallback?: boolean; taskSync?: ProviderDescriptor[] }
+  | { t: 'tasks'; opId: string; ok: boolean; log?: string; error?: string }
   | { t: 'maps'; maps: MapInfo[] }
   | { t: 'op'; op: Op }
   | { t: 'reject'; opId: string; error: string }
@@ -46,6 +49,16 @@ const object = (v: unknown): v is Record<string, unknown> => typeof v === 'objec
 const isUser = (v: unknown): v is User => object(v) && typeof v.id === 'string';
 const isMap = (v: unknown): v is MapInfo => object(v) && typeof v.id === 'string' && typeof v.name === 'string';
 const maps = (v: unknown): MapInfo[] => (v as unknown[]).filter(isMap).map(m => ({ id: m.id, name: m.name, createdAt: m.createdAt, createdBy: m.createdBy }));
+const text = (v: unknown, max = 2000): v is string => typeof v === 'string' && v.length > 0 && v.length <= max;
+const link = (v: unknown): v is string => text(v) && /^https?:\/\//.test(v);
+/** A task service from the welcome, or nothing when it is malformed (links must be http or https). */
+function service(v: unknown): ProviderDescriptor[] {
+  if (!object(v) || !text(v.id, 64) || !text(v.label, 64) || !Array.isArray(v.aliases) || !v.aliases.every(a => text(a, 64)) || !text(v.rootNoun, 64) || !text(v.containerNoun, 64) || typeof v.tokenHelp !== 'string') return [];
+  const urls = v.urls;
+  if (!object(urls) || !link(urls.root) || !link(urls.task) || (urls.container !== undefined && !link(urls.container)) || (v.tokenUrl !== undefined && !link(v.tokenUrl))) return [];
+  return [{ id: v.id, label: v.label, aliases: [...v.aliases as string[]], rootNoun: v.rootNoun, containerNoun: v.containerNoun, tokenHelp: v.tokenHelp.slice(0, 2000),
+    ...(v.tokenUrl !== undefined ? { tokenUrl: v.tokenUrl as string } : {}), urls: { root: urls.root, task: urls.task, ...(urls.container !== undefined ? { container: urls.container as string } : {}) } }];
+}
 export const isOp = (v: unknown): v is Op => object(v) && Number.isSafeInteger(v.seq) && typeof v.opId === 'string' &&
   typeof v.userId === 'string' && typeof v.at === 'string' && object(v.cmd) && typeof v.cmd.verb === 'string' && object(v.cmd.args);
 
@@ -63,8 +76,8 @@ export function parseServerMessage(raw: string): ServerMessage | null {
       if (v.maps !== undefined && !Array.isArray(v.maps)) return null;
       return { t: 'welcome', me: v.me, users: v.users.filter(isUser), seq: v.seq as number, doc: v.doc as Doc | undefined, ops: v.ops as Op[] | undefined,
         map: v.map as string | undefined, maps: v.maps === undefined ? undefined : maps(v.maps), fallback: v.fallback === true ? true : undefined,
-        vikunja: object(v.vikunja) && typeof v.vikunja.url === 'string' && /^https?:\/\//.test(v.vikunja.url) ? { url: v.vikunja.url } : null };
-    case 'vk': return typeof v.opId === 'string' ? { t: 'vk', opId: v.opId, ok: v.ok === true, log: typeof v.log === 'string' ? v.log : undefined, error: typeof v.error === 'string' ? v.error : undefined } : null;
+        taskSync: Array.isArray(v.taskSync) ? v.taskSync.flatMap(service) : [] };
+    case 'tasks': return typeof v.opId === 'string' ? { t: 'tasks', opId: v.opId, ok: v.ok === true, log: typeof v.log === 'string' ? v.log : undefined, error: typeof v.error === 'string' ? v.error : undefined } : null;
     case 'maps': return Array.isArray(v.maps) ? { t: 'maps', maps: maps(v.maps) } : null;
     case 'op': return isOp(v.op) ? { t: 'op', op: v.op } : null;
     case 'reject': return typeof v.opId === 'string' ? { t: 'reject', opId: v.opId, error: typeof v.error === 'string' ? v.error : 'Rejected by server' } : null;

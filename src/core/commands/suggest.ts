@@ -12,7 +12,7 @@ export interface SuggestOptions {
  /** Units this user commanded or selected recently, most recent first. They lead each unit list, so a chain of
   *  commands on one unit needs no typing; then units in that unit's sector, then the most recently changed. */
  recent?:readonly string[];
- /** The task services configured on the server: offer /tasks and their aliases (/vk, /asana) when there is any. */
+ /** The task services configured on the server: offer /tasks and their aliases (each service brings its own) when there is any. */
  providers?:readonly ProviderInfo[];
  /** The shared maps' names, for /map. */
  maps?:readonly string[];
@@ -164,5 +164,7 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
  }
  const query=(previous.length===0?fragment.replace(/^\//,''):fragment).toLowerCase();
  const ranked=candidates.filter(c=>c.insert.toLowerCase().includes(query)||c.label.toLowerCase().includes(query)).sort((a,b)=>Number(!a.insert.toLowerCase().startsWith(query))-Number(!b.insert.toLowerCase().startsWith(query)));
- return {items:ranked,ghost:hint||SYNTAX[verb]||'Type / for commands'};
+ // After an alias the service is named already.
+ const syntax=implied&&verb==='tasks'?SYNTAX.tasks.replace('[‹service›] ',''):SYNTAX[verb];
+ return {items:ranked,ghost:hint||syntax||'Type / for commands'};
 }

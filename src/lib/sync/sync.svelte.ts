@@ -89,7 +89,7 @@ function mirror(): void {
   live.online = engine.presence;
   live.users = Object.fromEntries(engine.users);
   if (engine.maps.length) live.maps = engine.maps;
-  if ((engine.vikunja?.url ?? null) !== (features.vikunja?.url ?? null)) features.vikunja = engine.vikunja;
+  if (JSON.stringify(engine.taskSync) !== JSON.stringify(features.taskSync)) features.taskSync = engine.taskSync;
   if (engine.map && engine.map !== live.mapId) { live.mapId = engine.map; remember(engine.map); }
   live.version++;
 }
@@ -197,8 +197,8 @@ function connect(map: string | undefined): void {
     setView: view => { prefs.view = view as View; write(VIEW_KEY, view); present(); },
     maps: () => live.maps,
     openMap: id => switchMap(id),
-    vk: args => {
-      void engine!.vk(args).then(r => {
+    tasks: args => {
+      void engine!.tasks(args).then(r => {
         if (r.ok) { lastResult.text = r.log; lastResult.ok = true; lastResult.seq++; toast(r.log, 'info'); }
         else { lastResult.text = r.error; lastResult.ok = false; lastResult.seq++; toast(r.error); }
       });

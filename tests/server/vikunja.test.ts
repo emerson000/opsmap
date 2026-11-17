@@ -2,14 +2,15 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { createHmac } from 'node:crypto';
 import { Store } from '../../server/db';
 import { Maps } from '../../server/maps';
-import { AFFILIATION_LABELS, VikunjaSync, htmlToText, taskProviders, textToHtml } from '../../server/vikunja/sync';
+import { AFFILIATION_LABELS, VikunjaSync, htmlToText, textToHtml } from '../../server/vikunja/sync';
+import { ProviderRegistry } from '../../server/tasksync/registry';
 import { parse } from '../../src/core/commands/grammar';
 import { seedDoc } from '../../src/core/model/seed';
 import type { Doc, Unit } from '../../src/core/model/types';
 import { FakeVikunja } from './fake-vikunja';
 /** A remote id in the document (an opaque string) as the fake Vikunja's number. */
 const vkId = (x: { remote?: string } | undefined) => x?.remote === undefined ? undefined : Number(x.remote);
-const providers = taskProviders(true);
+const providers = ProviderRegistry.fromEnv({ VIKUNJA_URL: 'https://todo.example' }).info();
 
 const user = { id: 'u1', email: 'a@dev.local', name: 'Alice', initials: 'AL', color: '#000' };
 let store: Store, maps: Maps, vk: FakeVikunja, sync: VikunjaSync;

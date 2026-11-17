@@ -458,7 +458,7 @@ export const boundElsewhere=(bound:{label:string;title:string})=>`Bound to ${bou
 const article=(word:string)=>/^[aeiou]/i.test(word)?'An':'A';
 /** `/tasks`: the binding and the changes the sync service records. bind, sync and status are requests the server
  *  carries out; it then records `bound`. Pulled changes run as ordinary commands, one log line per task. The log
- *  prefix is the bound service's label (VIKUNJA, ASANA). */
+ *  prefix is the bound service's label, in capitals. */
 function tasks(doc:Doc,cmd:Command,now:Date):MutationResult {
   const a=cmd.args,at=now.toISOString(),action=text(a.action,'task sync action');
   requireThat(!(TASK_REQUESTS as readonly string[]).includes(action),`/tasks ${action} runs on the server`);

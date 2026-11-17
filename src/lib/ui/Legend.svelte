@@ -190,7 +190,7 @@
       <p class="note">Verb first, then the unit by designation, quoted title or #id. Press / anywhere to type. Tab completes.</p>
       <table class="cmds">
         <tbody>
-          {#each VERBS.filter(v => v !== 'tasks' || features.vikunja) as v (v)}<tr><td class="mono verb">/{v}</td><td class="mono">{SYNTAX[v]}</td></tr>{/each}
+          {#each VERBS.filter(v => v !== 'tasks' || features.taskSync.length > 0) as v (v)}<tr><td class="mono verb">/{v}</td><td class="mono">{SYNTAX[v]}</td></tr>{/each}
         </tbody>
       </table>
     {/if}

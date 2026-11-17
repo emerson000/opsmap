@@ -333,4 +333,13 @@ describe('sync engine maps', () => {
     expect(parseServerMessage('{"t":"maps","maps":[{"id":"a","name":"A"},{"id":3}]}')).toEqual({ t: 'maps', maps: [{ id: 'a', name: 'A', createdAt: undefined, createdBy: undefined }] });
     expect(parseServerMessage('{"t":"welcome","me":{"id":"x"},"users":[],"seq":0,"map":7}')).toBeNull();
   });
+
+  it('reads the task services from the welcome and drops malformed ones', () => {
+    const good = { id: 'fake', label: 'Fake', aliases: ['fk'], rootNoun: 'project', containerNoun: 'section', tokenHelp: 'Paste it', tokenUrl: 'https://x.test/t', urls: { root: 'https://x.test/{root}', container: 'https://x.test/{root}/{container}', task: 'https://x.test/{root}/{id}' } };
+    const bad = [{ ...good, id: 'js', urls: { ...good.urls, task: 'javascript:alert(1)' } }, { ...good, id: 'x', tokenUrl: 'data:x' }, { ...good, aliases: [3] }, 'nope'];
+    const msg = parseServerMessage(JSON.stringify({ t: 'welcome', me: { id: 'x' }, users: [], seq: 0, taskSync: [good, ...bad] }));
+    expect(msg).toMatchObject({ t: 'welcome', taskSync: [good] });
+    expect(parseServerMessage('{"t":"welcome","me":{"id":"x"},"users":[],"seq":0}')).toMatchObject({ taskSync: [] });
+    expect(parseServerMessage('{"t":"tasks","opId":"o1","ok":true,"log":"FAKE SYNC"}')).toEqual({ t: 'tasks', opId: 'o1', ok: true, log: 'FAKE SYNC', error: undefined });
+  });
 });

@@ -21,7 +21,7 @@ export interface Remote {
  request(kind:'undo'|'redo'):{ok:true;log:string}|{ok:false;error:string};
  setView(view:string):void;
  /** /tasks bind, sync, status: answered later; the remote shows the answer. */
- vk?(args:Record<string,unknown>):void;
+ tasks?(args:Record<string,unknown>):void;
  /** /map: the server's maps, and opening one (false when it cannot switch now; it says why). */
  maps?():readonly {id:string;name:string}[];
  openMap?(id:string):boolean;
@@ -38,9 +38,9 @@ function dispatchRemote(r:Remote,cmd:Command):DispatchResult {
   r.setView(String(cmd.args.view));emit();return {ok:true,log:`VIEW ${String(cmd.args.view).toUpperCase()}`};
  }
  if(cmd.verb==='tasks'&&(TASK_REQUESTS as readonly string[]).includes(String(cmd.args.action))){
-  if(!r.vk)return {ok:false,error:'No task service is configured on this server'};
+  if(!r.tasks)return {ok:false,error:'No task service is configured on this server'};
   const label=(cmd.args.action==='bind'?taskProviders().find(p=>p.id===cmd.args.provider)?.label:getDoc().settings.taskSync?.label)??'';
-  r.vk(cmd.args);emit();
+  r.tasks(cmd.args);emit();
   return {ok:true,log:`${label.toUpperCase()} ${String(cmd.args.action).toUpperCase()}${cmd.args.name?` ${String(cmd.args.name).toUpperCase()}`:''} — asking ${label}…`};
  }
  if(cmd.verb==='map'){

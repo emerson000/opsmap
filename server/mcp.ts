@@ -2,14 +2,14 @@ import { randomUUID } from 'node:crypto';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { WebStandardStreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js';
 import { z } from 'zod';
-import { aliases, helpText, parse, SYNTAX, VERBS } from '../src/core/commands/grammar';
+import { aliases, helpText, parse, providerNamed, SYNTAX, VERBS, type ProviderInfo } from '../src/core/commands/grammar';
 import { sitrepText } from '../src/core/commands/sitrep';
 import { resolveUnit } from '../src/core/commands/resolve';
 import { ringForRadius } from '../src/core/model/geometry';
 import type { Doc, Unit } from '../src/core/model/types';
 import type { Maps } from './maps';
 import type { User } from './db';
-import { taskProviders, type VikunjaSync } from './vikunja/sync';
+import type { SyncService } from './tasksync/service';
 import { TASK_REQUESTS } from '../src/core/commands/apply';
 /**
  * Verbs the browser shell answers itself instead of sending an op, and what opsmap_command does for each.
@@ -29,7 +29,7 @@ export const CLIENT_ONLY:Readonly<Record<string,string>>={
   redo:'Redoes this token’s last undo.',
 };
 const row=(u:Unit,doc?:Doc)=>({designation:u.designation,title:u.title,affiliation:u.affiliation,fn:u.fn,echelon:u.echelon,lifecycle:u.lifecycle,ring:ringForRadius(u.pos.r),due:u.dueAt,strength:u.strength,sector:u.sectorId,...(u.parentId?{tf:doc?.units.find(x=>x.id===u.parentId)?.designation??u.parentId}:{}),...(u.taskForce?{taskForce:true}:{}),...(u.collapsed?{collapsed:true}:{})});
-export async function mcpRequest(request:Request,maps:Maps,user:User,agent?:{id:string;name:string},vikunja?:VikunjaSync,admin=false):Promise<Response> {
+export async function mcpRequest(request:Request,maps:Maps,user:User,agent?:{id:string;name:string},sync?:SyncService,admin=false,providers:readonly ProviderInfo[]=[]):Promise<Response> {
   const server=new McpServer({name:'opsmap',version:'2.1.0'},{instructions:'There can be several shared maps; opsmap_maps lists them. Every tool takes an optional map (id or name) and uses the default (first) map without one. opsmap_command takes the same text as the command bar; pass selected (a unit) where the bar would have one selected. Use unit designations in commands. Prefer /new pending when identity is uncertain. opsmap_map_create, opsmap_map_rename, opsmap_map_delete (administrator) and opsmap_import (administrator) manage maps as the map switcher does. opsmap_tokens and opsmap_token_revoke list and revoke bearer tokens; create tokens in the browser (Access tokens in the user menu). All writes affect the shared maps and are attributed to your token user.'});
   const result=(value:unknown)=>({content:[{type:'text' as const,text:JSON.stringify(value)}]});
   const map=z.string().max(128).optional().describe('Map id or name; the default map when omitted');
@@ -44,10 +44,10 @@ export async function mcpRequest(request:Request,maps:Maps,user:User,agent?:{id:
     let hub;try{hub=maps.resolve(map);}catch(error){return failure(error);}
     let selectedId:string|undefined;
     if(selected){try{selectedId=resolveUnit(selected,hub.doc).id;}catch(error){return refuse(`Selected unit: ${error instanceof Error?error.message:'unknown'}`);}}
-    const now=new Date(),parsed=parse(text,hub.doc,{now,selectedId,providers:taskProviders(Boolean(vikunja))});if(!parsed.ok)return result(parsed);
+    const now=new Date(),parsed=parse(text,hub.doc,{now,selectedId,providers:[...providers]});if(!parsed.ok)return result(parsed);
     const {verb,args}=parsed.cmd,log=parsed.preview;
     try {
-      if(verb==='tasks'&&vikunja&&(TASK_REQUESTS as readonly string[]).includes(String(args.action)))return result({ok:true,log:await vikunja.request(hub.mapId,args,user,'mcp')});
+      if(verb==='tasks'&&(TASK_REQUESTS as readonly string[]).includes(String(args.action))){if(!sync)return refuse('No task service is configured on this server');return result({ok:true,log:await sync.request(hub.mapId,args,user,'mcp')});}
       switch(verb) {
         case 'find': {
           const doc=hub.doc,des=(id:string)=>doc.units.find(u=>u.id===id)?.designation??id;
@@ -74,13 +74,13 @@ export async function mcpRequest(request:Request,maps:Maps,user:User,agent?:{id:
   server.registerTool('opsmap_sitrep',{description:'Current situation report.',inputSchema:{map}},async q=>{try{return result(sitrepText(maps.resolve(q.map).doc,new Date()));}catch(error){return failure(error);}});
   server.registerTool('opsmap_help',{description:'Strict command grammar: every verb, or one verb (aliases and a leading / are accepted).',inputSchema:{verb:z.string().optional()}},async({verb})=>{
     if(!verb)return result(SYNTAX);
-    const typed=verb.trim().replace(/^\//,'').toLowerCase(),v=aliases[typed]??typed;
+    const typed=verb.trim().replace(/^\//,'').toLowerCase(),v=aliases[typed]??(!(VERBS as readonly string[]).includes(typed)&&providerNamed(typed,providers)?'tasks':typed);
     return result((VERBS as readonly string[]).includes(v)?{verb:v,syntax:SYNTAX[v],help:helpText(v)}:{verb:typed,syntax:'Unknown verb'});
   });
   // Map management, with the HTTP API's rules (POST/PATCH/DELETE /api/maps, POST /api/import).
   server.registerTool('opsmap_map_create',{description:'Create a shared map: empty (five standard sectors), a copy of an existing map (from), or from an exported document (doc). Any user may, as in the map switcher.',inputSchema:{
     name:z.string().max(128).optional().describe('The new map’s name (1–60 characters); with from it defaults to “‹source› copy”'),
-    from:z.string().max(128).optional().describe('Map id or name to duplicate (its Vikunja binding is not copied)'),
+    from:z.string().max(128).optional().describe('Map id or name to duplicate (its task sync binding is not copied)'),
     doc:document.optional().describe('An exported map document to start from')}},async q=>{
     try {
       if(q.from!==undefined&&q.doc!==undefined)throw new Error('Pass from or doc, not both');

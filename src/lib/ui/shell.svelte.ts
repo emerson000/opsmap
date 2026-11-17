@@ -23,8 +23,8 @@ export const ui = $state({
   logOpen: read(LOG_KEY) === 'open' || (read(LOG_KEY) !== 'closed' && (typeof window === 'undefined' || window.innerWidth >= 1440)),
   sitrepOpen: false,
   legendOpen: false,
-  /** The Vikunja account panel (connect an API token). */
-  vikunjaOpen: false,
+  /** The task service whose account panel is open (connect a token), by provider id. */
+  taskAccountOpen: null as string | null,
   /** The access tokens panel (MCP and API bearer tokens). */
   tokensOpen: false,
   legendTab: 'symbols' as 'symbols' | 'commands' | 'gestures' | 'keys',

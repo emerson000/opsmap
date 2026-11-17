@@ -1,6 +1,6 @@
 <script lang="ts">
   // A unit's staff record: header, one constructive primary, then Identity, Place & time, Condition,
-  // Task organization, Orders (with the order composer), Vikunja and History. Every control runs its
+  // Task organization, Orders (with the order composer), task sync and History. Every control runs its
   // command-bar text (runCommand); pickers choose the second unit from a list or on the map.
   import type { Command, Doc, Ring, Unit } from '../../../core/model/types';
   import { ECHELONS } from '../../../core/model/echelon';
@@ -14,7 +14,7 @@
   import { recentIds } from '../../commands/recent.svelte';
   import { miniSymbol } from '../mini';
   import { annotate, initials, color, nameOf } from '../../sync/sync.svelte';
-  import { features } from '../../model/features.svelte';
+  import { features, serviceUrl, taskService } from '../../model/features.svelte';
   import { env, runCommand, toast, ui, type Theme } from '../shell.svelte';
   import { AFFILIATIONS, AFF_LABEL, CONDITIONS, LIFECYCLE_LABEL, RINGS, band, dayMonth, echelonRange, orderLine, ringOf, unitLabel } from '../words';
   import { slotFor, token } from '../verbs';
@@ -40,6 +40,11 @@
   const K = 'unit';
 
   let { doc, unit, now, theme, onfocus }: { doc: Doc; unit: Unit; now: Date; theme: Theme; onfocus: (id: string) => void } = $props();
+  /** The unit's task in the bound service, from the descriptor's URL template. */
+  const taskLink = $derived.by(() => {
+    const bound = doc.settings.taskSync, service = taskService(bound?.provider);
+    return unit.remote && bound && service ? serviceUrl(service.urls.task, { root: bound.root, id: unit.remote }) : null;
+  });
 
   const cmd = (verb: string, args: Record<string, unknown> = {}): Command => ({ verb, args: { unit: unit.id, ...args } });
   /** The command-bar text of this unit's command. */
@@ -178,7 +183,7 @@
     <div class="desig">{unit.designation}</div>
     <div class="ttl">{unit.title}</div>
     <div class="sub">{AFF_LABEL[unit.affiliation]}{unit.cp ? ` · ${unit.cp.toUpperCase()} CP` : unit.fn === 'hq' ? ' · HQ' : ''} · {unit.presence === 'planned' ? 'planned (dashed)' : 'present'} · {LIFECYCLE_LABEL[unit.lifecycle]}</div>
-    {#if unit.remote && features.vikunja}<a class="vk-link" data-testid="vk-link" href="{features.vikunja.url}/tasks/{unit.remote}" target="_blank" rel="noopener noreferrer">Vikunja task #{unit.remote} ↗</a>{/if}
+    {#if taskLink}<a class="task-link" data-testid="tasks-link" href={taskLink} target="_blank" rel="noopener noreferrer">{doc.settings.taskSync?.label} task #{unit.remote} ↗</a>{/if}
   </div>
 </header>
 
@@ -465,15 +470,15 @@
   {/if}
 </Section>
 
-{#if features.vikunja}
-  <Section kind={K} key="vikunja" title="Vikunja" summary={unit.remote ? `task #${unit.remote}` : 'no task'} open={false}>
+{#if features.taskSync.length}
+  <Section kind={K} key="tasks" title={doc.settings.taskSync?.label ?? (features.taskSync.length === 1 ? features.taskSync[0].label : 'Task sync')} summary={unit.remote ? `task #${unit.remote}` : 'no task'} open={false}>
     <Field label="Task" cmd={null}>
-      {#if unit.remote}<a class="vk-link" href="{features.vikunja.url}/tasks/{unit.remote}" target="_blank" rel="noopener noreferrer">Task #{unit.remote} ↗</a>{:else}<span class="muted">Not synced to a task yet.</span>{/if}
+      {#if taskLink}<a class="task-link" href={taskLink} target="_blank" rel="noopener noreferrer">Task #{unit.remote} ↗</a>{:else}<span class="muted">Not synced to a task yet.</span>{/if}
     </Field>
     <Field label="Map sync" entry={slot('tasks', 'sync')} cmd="/tasks sync">
       <div class="pair">
-        <button class="btn" data-testid="vk-sync" title="/tasks sync" use:echoes={'/tasks sync'} onclick={() => runCommand({ verb: 'tasks', args: { action: 'sync' } })}>Sync</button>
-        <button class="btn" data-testid="vk-status" title="/tasks status" use:echoes={'/tasks status'} onclick={() => runCommand({ verb: 'tasks', args: { action: 'status' } })}>Status</button>
+        <button class="btn" data-testid="tasks-sync" title="/tasks sync" use:echoes={'/tasks sync'} onclick={() => runCommand({ verb: 'tasks', args: { action: 'sync' } })}>Sync</button>
+        <button class="btn" data-testid="tasks-status" title="/tasks status" use:echoes={'/tasks status'} onclick={() => runCommand({ verb: 'tasks', args: { action: 'status' } })}>Status</button>
       </div>
       <span class="note">Sync and Status act on the whole map, not only this unit.</span>
     </Field>
@@ -501,7 +506,7 @@
   .desig { font: 700 18px/1.1 var(--font-mono); letter-spacing: 0.04em; }
   .ttl { font-size: 13px; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .sub { color: var(--ink-2); font-size: 12px; }
-  .vk-link { display: inline-block; margin-top: 2px; font-size: 12px; color: var(--ink); }
+  .task-link { display: inline-block; margin-top: 2px; font-size: 12px; color: var(--ink); }
   .actions { display: flex; flex-wrap: wrap; gap: var(--s1); margin-bottom: var(--s2); }
   .actions .btn { flex: 1 1 0; min-width: max-content; justify-content: center; padding: 0 6px; letter-spacing: 0.06em; }
   .btn.primary { background: var(--ink); color: var(--panel); border-color: var(--ink); }

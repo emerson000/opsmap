@@ -20,11 +20,18 @@ import { Store, type User } from '../../server/db';
 import { Maps } from '../../server/maps';
 import { MUTATION_VERBS, type Hub } from '../../server/hub';
 import { CLIENT_ONLY, mcpRequest } from '../../server/mcp';
-import { taskProviders, type VikunjaSync } from '../../server/vikunja/sync';
+import { ProviderRegistry } from '../../server/tasksync/registry';
+import { PROVIDERS } from '../../server/providers';
+import { taskRequestArgs } from '../../server/tasksync/routes';
+import type { SyncService } from '../../server/tasksync/service';
 import { features } from '../../src/lib/model/features.svelte';
 
 const TZ='America/New_York';
-const providers=taskProviders(true);
+/** Vikunja and the fake, as a test server with both configured registers them. */
+const registry=ProviderRegistry.fromEnv({VIKUNJA_URL:'http://vikunja.test',NODE_ENV:'test',OPSMAP_FAKE_PROVIDER:'1'},PROVIDERS);
+const providers=registry.info();
+/** What the server behind the browser's socket has: no task service unless a test sets one. */
+const served:{registry:ProviderRegistry;sync?:SyncService}={registry:new ProviderRegistry([])};
 type Answer={ok:true;log:string;[k:string]:unknown}|{ok:false;error:string;[k:string]:unknown};
 
 describe('verb coverage guard',()=>{
@@ -56,7 +63,12 @@ class HubSocket implements SocketLike {
   send(raw:string) {
     const msg=JSON.parse(raw);
     try {
-      if(msg.t==='hello')this.deliver({t:'welcome',me:{...this.user,admin:true},users:[this.user],seq:this.hub.seq,map:this.hub.mapId,maps:this.maps.list(),vikunja:null,doc:this.hub.doc});
+      if(msg.t==='hello')this.deliver({t:'welcome',me:{...this.user,admin:true},users:[this.user],seq:this.hub.seq,map:this.hub.mapId,maps:this.maps.list(),taskSync:served.registry.descriptors(),doc:this.hub.doc});
+      else if(msg.t==='tasks') {
+        // As server/app.ts answers it: the same argument check, then the sync service.
+        if(!served.sync)throw new Error('No task service is configured on this server');
+        void served.sync.request(this.hub.mapId,taskRequestArgs(msg.args,served.registry),this.user,'web').then(log=>this.deliver({t:'tasks',opId:msg.opId,ok:true,log}),error=>this.deliver({t:'tasks',opId:msg.opId,ok:false,error:(error as Error).message}));
+      }
       else if(msg.t==='op')this.hub.submit(this.user.id,'web',msg.opId,msg.cmd);
       else if(msg.t==='undo'||msg.t==='redo')this.hub.undo(this.user.id,msg.opId,msg.t==='redo');
       else if(msg.t==='ping')this.deliver({t:'pong'});
@@ -66,7 +78,7 @@ class HubSocket implements SocketLike {
 }
 
 describe('opsmap_command matches the command bar',()=>{
-  let dir:string,store:Store,maps:Maps,user:User,bar:Hub,field:Hub,engine:SyncEngine,rejected:string[],opened:string[];
+  let dir:string,store:Store,maps:Maps,user:User,bar:Hub,field:Hub,engine:SyncEngine,rejected:string[],opened:string[],answers:unknown[];
   beforeEach(async()=>{
     vi.useFakeTimers({toFake:['Date']});vi.setSystemTime(new Date('2026-11-10T15:00:00Z'));
     dir=mkdtempSync(join(tmpdir(),'opsmap-parity-'));store=new Store(join(dir,'opsmap.db'));maps=new Maps(store,TZ);
@@ -75,13 +87,14 @@ describe('opsmap_command matches the command bar',()=>{
     rejected=[];opened=[];state.selection.selectedId=null;
     engine=new SyncEngine({connect:()=>new HubSocket(bar,maps,user),uuid:randomUUID,map:bar.mapId,onChange:()=>{state.doc=engine.doc;},onReject:error=>rejected.push(error)});
     // The remote as src/lib/sync/sync.svelte.ts installs it.
-    useRemote({submit:cmd=>engine.submit(cmd),request:kind=>{engine.request(kind);return {ok:true,log:`${kind.toUpperCase()} SENT`};},setView:()=>{},maps:()=>maps.list(),openMap:id=>{opened.push(id);return true;}});
+    answers=[];
+    useRemote({submit:cmd=>engine.submit(cmd),tasks:args=>{void engine.tasks(args).then(r=>answers.push(r));},request:kind=>{engine.request(kind);return {ok:true,log:`${kind.toUpperCase()} SENT`};},setView:()=>{},maps:()=>maps.list(),openMap:id=>{opened.push(id);return true;}});
     state.doc=engine.doc;engine.start();await settle();expect(engine.status).toBe('live');
   });
-  afterEach(()=>{engine.stop();useRemote(null);vi.useRealTimers();store.close();rmSync(dir,{recursive:true,force:true});});
+  afterEach(()=>{engine.stop();useRemote(null);served.registry=new ProviderRegistry([]);served.sync=undefined;features.taskSync=[];vi.useRealTimers();store.close();rmSync(dir,{recursive:true,force:true});});
   const settle=async()=>{for(let i=0;i<100&&(engine.pendingCount||engine.status!=='live');i++)await new Promise(r=>setTimeout(r,2));await new Promise(r=>setTimeout(r,2));};
-  const call=async(name:string,args:Record<string,unknown>,admin=false,vikunja?:VikunjaSync):Promise<any>=>{
-    const response=await mcpRequest(new Request('http://localhost/mcp',{method:'POST',headers:{'content-type':'application/json',accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}})}),maps,user,undefined,vikunja,admin);
+  const call=async(name:string,args:Record<string,unknown>,admin=false,sync?:SyncService):Promise<any>=>{
+    const response=await mcpRequest(new Request('http://localhost/mcp',{method:'POST',headers:{'content-type':'application/json',accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}})}),maps,user,undefined,sync,admin,sync?providers:[]);
     return JSON.parse(((await response.json()) as any).result.content[0].text);
   };
   /** The command bar: select the unit (as a click does), type the text, Enter. Server rejections count as errors. */
@@ -131,22 +144,31 @@ describe('opsmap_command matches the command bar',()=>{
     expect(opened).toEqual([field.mapId]);
   });
   it('gives the same /tasks answers with a task service configured',async()=>{
-    // The browser offers the providers from the welcome frame; MCP from the server's sync. The requests themselves
-    // (bind, sync, status on a bound map) call the service: only their grammar and the core are compared here.
+    // The browser offers the providers from the welcome frame; MCP from the server's registry. Requests (bind, sync,
+    // status) go to the sync service: here a stub that answers with what it was asked.
     const requested:unknown[]=[];
-    const sync={request:async(_map:string,args:unknown)=>{requested.push(args);return 'VIKUNJA: not bound';}} as unknown as VikunjaSync;
-    features.vikunja={url:'http://vikunja.test'};
-    try {
-      for(const text of ['/tasks sync','/vk status','/tasks unbind','/vk unbind','/vk frobnicate','/tasks bind asana "Ops"','/tasks','/vk']) {
-        const b=await viaBar(text),m=await call('opsmap_command',{text,map:'field'},true,sync);
-        if(b.ok)expect(m,text).toMatchObject({ok:true,log:b.log});
-        else expect(m,text).toMatchObject({ok:false,error:b.error,...(b.at!==undefined?{at:b.at}:{})});
-        expect(plain(field.doc),text).toEqual(plain(bar.doc));
-      }
-      expect(await viaBar('/tasks sync')).toEqual({ok:false,error:'This map is not bound to a task service: /tasks bind "‹project›"',at:7});
-      expect(await call('opsmap_command',{text:'/vk bind "Ops"',map:'field'},true,sync)).toEqual({ok:true,log:'VIKUNJA: not bound'});
-      expect(requested).toEqual([{action:'bind',provider:'vikunja',name:'Ops'}]);
-    } finally {features.vikunja=null;}
+    const sync:SyncService={request:async(_map,args)=>{requested.push(args);return `${String(args.provider??'').toUpperCase()} ${String(args.action).toUpperCase()} ${JSON.stringify(args)}`;},webhook:()=>({status:404,trigger:false}),nudge:()=>{},start:()=>{},stop:async()=>{}};
+    served.registry=registry;served.sync=sync;features.taskSync=registry.descriptors();
+    engine.stop();engine.start();await settle();
+    expect(engine.taskSync.map(d=>d.id)).toEqual(['vikunja','fake']);
+    for(const text of ['/tasks status','/tasks sync','/vk status','/fk status','/tasks unbind','/vk unbind','/vk frobnicate','/tasks bind "Ops"','/tasks bind asana "Ops"','/tasks','/vk','/help vk']) {
+      const b=await viaBar(text),m=await call('opsmap_command',{text,map:'field'},true,sync);
+      if(b.ok)expect(m,text).toMatchObject({ok:true,log:b.log});
+      else expect(m,text).toMatchObject({ok:false,error:b.error,...(b.at!==undefined?{at:b.at}:{})});
+      expect(plain(field.doc),text).toEqual(plain(bar.doc));
+    }
+    expect(await viaBar('/tasks sync')).toEqual({ok:false,error:'This map is not bound to a task service: /tasks bind "‹project›"',at:7});
+    expect(requested).toEqual([]);
+    // A bind reaches the service with the same arguments from both: the bar says it is asking, then shows the answer.
+    for(const text of ['/tasks bind fake "Ops"','/vk bind "Ops"']) {
+      answers=[];
+      const b=await viaBar(text);expect(b,text).toMatchObject({ok:true,log:expect.stringMatching(/ — asking (Fake|Vikunja)…$/)});
+      for(let i=0;i<50&&!answers.length;i++)await new Promise(r=>setTimeout(r,2));
+      const m=await call('opsmap_command',{text,map:'field'},true,sync);
+      expect(answers,text).toEqual([{ok:true,log:m.log}]);
+    }
+    expect(requested).toEqual([{action:'bind',provider:'fake',name:'Ops'},{action:'bind',provider:'fake',name:'Ops'},{action:'bind',provider:'vikunja',name:'Ops'},{action:'bind',provider:'vikunja',name:'Ops'}]);
+    expect(await call('opsmap_help',{verb:'/vk'},false,sync)).toEqual({verb:'tasks',syntax:SYNTAX.tasks,help:`/tasks ${SYNTAX.tasks}`});
   });
   it('answers the shell verbs with their content',async()=>{
     await viaMcp('/new friend "Response team" as RSP');

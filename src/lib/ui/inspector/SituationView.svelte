@@ -1,6 +1,6 @@
 <script lang="ts">
   // Nothing selected: create buttons, what needs attention on the whole map, the sectors and control measures,
-  // the AO size, and Vikunja.
+  // the AO size, and task sync.
   import { localDay } from '../../../core/commands/tokenize';
   import type { Doc, Unit } from '../../../core/model/types';
   import { AO_SIZES, aoScale, aoSizeName, ringForRadius, type AoSize } from '../../../core/model/geometry';
@@ -12,7 +12,7 @@
   import { ringOf } from '../words';
   import { token } from '../verbs';
   import CreateForm from './CreateForm.svelte';
-  import VikunjaSection from './VikunjaSection.svelte';
+  import TaskSyncSection from './TaskSyncSection.svelte';
   import { deg, plRingNote, ringLabel } from './place';
   import { echoes, findOf, open, textOf } from './echo';
 
@@ -125,7 +125,7 @@
     {/each}
   </div>
 </section>
-<VikunjaSection {doc} kind="map" />
+<TaskSyncSection {doc} kind="map" />
 {#if env.coarse || env.tier === 'phone'}
   <p class="hint">Tap a symbol to inspect it; double-tap or long-press for every field. Long-press, then drag to move it. Long-press open ground to capture there. Drag the round handle under a selected friendly onto a hostile to attack.</p>
 {:else}

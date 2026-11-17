@@ -1,4 +1,4 @@
-// Secrets at rest (users' Vikunja API tokens): AES-256-GCM with a 32-byte master key kept outside the database,
+// Secrets at rest (users' task service tokens): AES-256-GCM with a 32-byte master key kept outside the database,
 // so a copy of opsmap.db or its nightly backups does not hold usable tokens. Each value is bound to its owner
 // (associated data), so a ciphertext copied to another user's row does not decrypt.
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';

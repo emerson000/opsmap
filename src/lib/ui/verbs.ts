@@ -114,13 +114,13 @@ export const VERB_SLOTS: readonly VerbSlot[] = [
     { verb: v, form: 'rename', kinds: ['area'], slots: ['‹name›', '"‹new name›"'], control: 'measure-name', label: 'Rename…' },
     { verb: v, form: 'remove', kinds: ['area'], slots: ['‹name›'], control: 'manage-remove', label: `Remove ${AREA_WORD[v]}…` },
   ]),
-  // Map-wide verbs that the Situation view (and a sector's Vikunja section) offers
+  // Map-wide verbs that the Situation view (and a sector's task sync section) offers
   { verb: 'intent', kinds: ['map'], slots: ['"‹one line›"'], control: 'situation-intent', label: 'Intent…', menu: 'form' },
   { verb: 'sitrep', kinds: ['map'], slots: ['[copy]'], control: 'situation-sitrep', label: 'SITREP', menu: 'run' },
-  { verb: 'tasks', form: 'bind', kinds: ['map', 'sector'], slots: ['[‹service›]', '"‹project›"'], control: 'vk-bind', label: 'Bind…', menu: 'form' },
-  { verb: 'tasks', form: 'unbind', kinds: ['map', 'sector'], slots: [], control: 'vk-unbind', label: 'Unbind…' },
-  { verb: 'tasks', form: 'sync', kinds: ['map', 'unit', 'sector'], slots: [], control: 'vk-sync', label: 'Sync', menu: 'run' },
-  { verb: 'tasks', form: 'status', kinds: ['map', 'unit', 'sector'], slots: [], control: 'vk-status', label: 'Status', menu: 'run' },
+  { verb: 'tasks', form: 'bind', kinds: ['map', 'sector'], slots: ['[‹service›]', '"‹project›"'], control: 'tasks-bind', label: 'Bind…', menu: 'form' },
+  { verb: 'tasks', form: 'unbind', kinds: ['map', 'sector'], slots: [], control: 'tasks-unbind', label: 'Unbind…' },
+  { verb: 'tasks', form: 'sync', kinds: ['map', 'unit', 'sector'], slots: [], control: 'tasks-sync', label: 'Sync', menu: 'run' },
+  { verb: 'tasks', form: 'status', kinds: ['map', 'unit', 'sector'], slots: [], control: 'tasks-status', label: 'Status', menu: 'run' },
 ];
 
 /**

@@ -1,6 +1,6 @@
 <script lang="ts">
   // A sector: + Unit… and + Area… (create forms with the sector fixed), its name and width, what is in it by ring,
-  // its units and areas, the orders on its HQ, the units beyond PL QUARTER (Pull in), Vikunja, and Manage.
+  // its units and areas, the orders on its HQ, the units beyond PL QUARTER (Pull in), task sync, and Manage.
   import type { Command, Doc, Sector, Unit } from '../../../core/model/types';
   import { isArchived } from '../../map/scene';
   import { parse } from '../../commands/grammar';
@@ -14,7 +14,7 @@
   import Manage from './Manage.svelte';
   import PeekMore from './PeekMore.svelte';
   import CreateForm from './CreateForm.svelte';
-  import VikunjaSection from './VikunjaSection.svelte';
+  import TaskSyncSection from './TaskSyncSection.svelte';
   import { deg, scaledWidths } from './place';
   import { echoes, findOf, open, textOf } from './echo';
 
@@ -170,7 +170,7 @@
   {/each}
 </Section>
 
-<VikunjaSection {doc} kind="sector" sector={s} />
+<TaskSyncSection {doc} kind="sector" sector={s} />
 
 <Manage {doc} label="Remove sector…" cmd={removeCmd} {impact} disabled={why}>
   {#if occupied && others.length}

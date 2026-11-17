@@ -53,7 +53,7 @@ export class Hub {
     for(const value of Object.values(safe.args))if(typeof value==='string'&&value.length>2048)throw new Error('Text exceeds 2048 characters');
     return this.commit(userId,source,opId,safe,now,undefined,undefined,agent);
   }
-  /** Server-side changes (the Vikunja sync): no command-shape gate, attributed to `userId` with `via`. */
+  /** Server-side changes (the task sync): no command-shape gate, attributed to `userId` with `via`. */
   internal(userId:string,source:Op['source'],cmd:Command,via:string,now=new Date()):Op {
     return this.commit(userId,source,randomUUID(),cmd,now,undefined,undefined,undefined,via);
   }

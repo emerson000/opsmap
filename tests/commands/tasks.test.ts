@@ -2,7 +2,7 @@
 // its aliases (/vk, /asana). The document holds settings.taskSync and opaque string remote ids.
 import { describe, expect, it } from 'vitest';
 import { apply, type ApplyResult } from '../../src/core/commands/apply';
-import { parse, type ProviderInfo } from '../../src/core/commands/grammar';
+import { parse, SYNTAX, type ProviderInfo } from '../../src/core/commands/grammar';
 import { suggest } from '../../src/core/commands/suggest';
 import { seedDoc } from '../../src/core/model/seed';
 import type { Command, Doc } from '../../src/core/model/types';
@@ -40,6 +40,20 @@ describe('/tasks in the grammar', () => {
     expect(parse('/tasks sync', seedDoc(now), { now, providers: both })).toMatchObject({ ok: false, error: 'This map is not bound to a task service: /tasks bind "‹project›"' });
     expect(parse('/tasks bind vikunja "Other"', bound('vikunja', 'Vikunja'), { now, providers: both })).toMatchObject({ ok: false, error: 'Bound to Vikunja project Ops: /tasks unbind first' });
     expect(parse('/vk status', bound('vikunja', 'Vikunja'), { now, providers: both })).toMatchObject({ ok: true, preview: 'VIKUNJA STATUS' });
+  });
+  it('refuses an alias of another service than the one the map is bound to', () => {
+    const doc = bound('vikunja', 'Vikunja');
+    for (const text of ['/asana unbind', '/asana sync', '/asana status', '/asana bind "Ops"'])
+      expect(parse(text, doc, { now, providers: both }), text).toMatchObject({ ok: false, error: 'Bound to Vikunja project Ops: /tasks unbind first' });
+    expect(parse('/vk unbind', doc, { now, providers: both })).toMatchObject({ ok: true, preview: 'VIKUNJA UNBOUND FROM OPS' });
+    expect(parse('/tasks unbind', doc, { now, providers: both })).toMatchObject({ ok: true });
+    // Unbound, an alias only picks the service to bind.
+    expect(parse('/asana status', seedDoc(now), { now, providers: both })).toMatchObject({ ok: false, error: 'This map is not bound to a task service: /tasks bind "‹project›"' });
+  });
+  it('resolves provider aliases in /help', () => {
+    expect(parse('/help vk', seedDoc(now), { now, providers: both })).toMatchObject({ ok: true, cmd: { verb: 'help', args: { verb: 'tasks' } }, preview: `/tasks ${SYNTAX.tasks}` });
+    expect(parse('/help /asana', seedDoc(now), { now, providers: both })).toMatchObject({ ok: true, cmd: { args: { verb: 'tasks' } } });
+    expect(parse('/help vk', seedDoc(now), { now })).toMatchObject({ ok: false, error: 'Unknown command: vk' });
   });
   it('parses /tasks unbind as an ordinary command', () => {
     expect(parse('/tasks unbind', bound(), { now, providers: both })).toMatchObject({ ok: true, cmd: { verb: 'tasks', args: { action: 'unbind' } }, preview: 'ASANA UNBOUND FROM OPS' });
@@ -106,5 +120,11 @@ describe('/tasks autocomplete', () => {
     expect(suggest('/', 1, doc, {}).items.map(s => s.insert)).not.toContain('tasks');
     expect(suggest('/', 1, doc, { providers: [asana] }).items.map(s => s.insert)).toContain('tasks');
     expect(suggest('/as', 3, doc, { providers: both }).items.map(s => s.insert)).toContain('asana');
+  });
+  it('leaves the service out of the ghost text after an alias', () => {
+    const doc = seedDoc(now);
+    expect(suggest('/vk ', 4, doc, { providers: both }).ghost).toBe('bind "‹project or URL›" | unbind | sync | status');
+    expect(suggest('/asana ', 7, doc, { providers: both }).ghost).toBe('bind "‹project or URL›" | unbind | sync | status');
+    expect(suggest('/tasks ', 7, doc, { providers: both }).ghost).toBe(SYNTAX.tasks);
   });
 });

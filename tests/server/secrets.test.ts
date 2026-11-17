@@ -5,7 +5,9 @@ import { join } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { SecretBox } from '../../server/secrets';
 import { Store } from '../../server/db';
-import { VkTokens } from '../../server/vikunja/tokens';
+import { Credentials } from '../../server/tasksync/credentials';
+import { ProviderRegistry } from '../../server/tasksync/registry';
+import { vikunjaProvider } from '../../server/providers/vikunja';
 import { VkHttpError } from '../../server/vikunja/api';
 import { FakeVikunja } from './fake-vikunja';
 
@@ -33,27 +35,32 @@ describe('SecretBox', () => {
   });
 });
 
-describe('VkTokens', () => {
+describe('Vikunja tokens', () => {
   const setup = () => {
     const store = new Store(':memory:'), vk = new FakeVikunja();
-    const tokens = new VkTokens(store, SecretBox.fromKey(randomBytes(32)), 'https://todo.example', (_url, token) => {
+    const provider = vikunjaProvider('https://todo.example', (_url, token) => {
       if (!vk.tokens.has(token)) return { ...vk, me: async () => { throw new VkHttpError(401, 'Vikunja GET /user: invalid token'); } } as unknown as FakeVikunja;
       return vk;
     });
-    return { store, tokens };
+    return { store, provider, creds: new Credentials(store, SecretBox.fromKey(randomBytes(32)), new ProviderRegistry([provider])) };
   };
   it('checks the token with Vikunja and stores it sealed; the account shows only the user name', async () => {
-    const { store, tokens } = setup();
-    expect(tokens.account('u1')).toEqual({ connected: false });
-    await expect(tokens.save('u1', 'tk_wrong_token')).rejects.toThrow('Vikunja refused that token');
-    await expect(tokens.save('u1', 'short')).rejects.toThrow(/does not look like/);
-    const saved = await tokens.save('u1', '  tk_good_token  ');
+    const { store, creds } = setup();
+    expect(creds.account('u1', 'vikunja')).toEqual({ connected: false });
+    await expect(creds.save('u1', 'vikunja', 'tk_wrong_token')).rejects.toThrow('Vikunja refused that token');
+    await expect(creds.save('u1', 'vikunja', 'short')).rejects.toThrow('That does not look like a Vikunja token');
+    const saved = await creds.save('u1', 'vikunja', '  tk_good_token  ');
     expect(saved).toMatchObject({ connected: true, username: 'alice' });
-    expect(tokens.account('u1')).toMatchObject({ connected: true, username: 'alice' });
-    expect(JSON.stringify(store.db.prepare('SELECT * FROM vk_tokens').all())).not.toContain('tk_good_token');
-    expect(tokens.api('u1')).toBeDefined();
-    expect(tokens.api('u2')).toBeUndefined();
-    tokens.remove('u1');
-    expect(tokens.api('u1')).toBeUndefined();
+    expect(creds.account('u1', 'vikunja')).toMatchObject({ connected: true, username: 'alice' });
+    expect(JSON.stringify(store.db.prepare('SELECT * FROM ts_tokens').all())).not.toContain('tk_good_token');
+    expect(creds.token('u1', 'vikunja')).toBe('tk_good_token');
+    expect(creds.token('u2', 'vikunja')).toBeUndefined();
+    creds.remove('u1', 'vikunja');
+    expect(creds.token('u1', 'vikunja')).toBeUndefined();
+  });
+  it('says when Vikunja cannot be reached', async () => {
+    const provider = vikunjaProvider('https://todo.example', () => ({ me: async () => { throw new Error('fetch failed'); } }) as unknown as FakeVikunja);
+    const creds = new Credentials(new Store(':memory:'), SecretBox.fromKey(randomBytes(32)), new ProviderRegistry([provider]));
+    await expect(creds.save('u1', 'vikunja', 'tk_good_token')).rejects.toThrow(/^Could not reach Vikunja: fetch failed$/);
   });
 });

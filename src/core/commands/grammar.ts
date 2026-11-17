@@ -159,7 +159,7 @@ export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult 
    case 'view':a.view=take('view').value.toLowerCase();break;
    case 'sidc':subject();a.sidc=take('20-digit SIDC').value;break;
    case 'sitrep':a.copy=eat('copy');break;
-   case 'help':if(peek()){const t=take('command'),typed=t.value.replace(/^\//,'').toLowerCase(),v=aliases[typed]??typed;if(!(VERBS as readonly string[]).includes(v))throw new CommandError(`Unknown command: ${typed}`,t.start);a.verb=v;}break;
+   case 'help':if(peek()){const t=take('command'),typed=t.value.replace(/^\//,'').toLowerCase(),v=aliases[typed]??(!(VERBS as readonly string[]).includes(typed)&&providerNamed(typed,context.providers)?'tasks':typed);if(!(VERBS as readonly string[]).includes(v))throw new CommandError(`Unknown command: ${typed}`,t.start);a.verb=v;}break;
    case 'map':if(peek())a.name=take('map name').value;break;
    case 'turn':case 'undo':case 'redo':case 'export':case 'import':break;
   }
@@ -168,8 +168,11 @@ export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult 
   let canonical=verb;
   if(verb==='moving'&&doc.units.some(u=>u.id===a.target&&(u.affiliation==='hostile'||u.affiliation==='suspect')))canonical='attack';
   const cmd:Command={verb:canonical,args:a,raw:input};
+  if(verb==='tasks'&&a.action==='unbind'&&implied&&doc.settings.taskSync&&doc.settings.taskSync.provider!==implied.id)throw new CommandError(boundElsewhere(doc.settings.taskSync),at);
   if(verb==='tasks'&&(TASK_REQUESTS as readonly string[]).includes(String(a.action))){
    const bound=doc.settings.taskSync;
+   // An alias names its service: on a map bound to another one it is a mistake, not a synonym of /tasks.
+   if(implied&&bound&&bound.provider!==implied.id)throw new CommandError(boundElsewhere(bound),at);
    if(a.action==='bind'&&bound&&(bound.provider!==a.provider||bound.title.toLowerCase()!==String(a.name).toLowerCase()))throw new CommandError(boundElsewhere(bound),at);
    if(a.action!=='bind'&&!bound)throw new CommandError(NOT_BOUND,at);
    const label=(a.action==='bind'?providerNamed(String(a.provider),context.providers)?.label:bound?.label)??'';

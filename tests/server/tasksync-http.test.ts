@@ -1,0 +1,59 @@
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { once } from 'node:events';
+import { startServer } from '../../server/app';
+import type { Config } from '../../server/config';
+import { ProviderRegistry } from '../../server/tasksync/registry';
+import { FakeProvider } from './fake-provider';
+
+// The generic task sync routes, with the in-memory provider.
+describe('/api/tasksync/:provider/account', () => {
+  let dir: string, settings: Config, runtime: ReturnType<typeof startServer>, url: string;
+  const start = async (registry: ProviderRegistry) => {
+    dir = mkdtempSync(join(tmpdir(), 'opsmap-ts-'));
+    const clientDir = join(dir, 'client'); mkdirSync(clientDir); writeFileSync(join(clientDir, 'index.html'), '<!doctype html>');
+    settings = { port: 0, host: '127.0.0.1', publicUrl: 'http://localhost', dataDir: dir, clientDir, devUsers: ['alice'], adminEmails: ['alice@dev.local'], group: 'g', tz: 'UTC' };
+    runtime = startServer(settings, { schedule: false, registry });
+    if (!runtime.server.listening) await once(runtime.server, 'listening');
+    url = `http://127.0.0.1:${(runtime.server.address() as { port: number }).port}`;
+  };
+  beforeEach(() => start(new ProviderRegistry([new FakeProvider()])));
+  afterEach(async () => { await runtime.close(); rmSync(dir, { recursive: true, force: true }); });
+  const login = async () => (await fetch(`${url}/auth/dev-login?user=alice`, { redirect: 'manual' })).headers.get('set-cookie')!.split(';')[0];
+  const account = (cookie: string, method = 'GET', body?: unknown, origin = settings.publicUrl) =>
+    fetch(`${url}/api/tasksync/fake/account`, { method, headers: { cookie, origin, 'content-type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+
+  it('connects, shows and removes a token, never returning it', async () => {
+    const cookie = await login();
+    expect((await fetch(`${url}/api/tasksync/fake/account`)).status).toBe(401);
+    expect(await (await account(cookie)).json()).toEqual({ provider: 'fake', connected: false });
+    const bad = await account(cookie, 'PUT', { token: 'tk_wrong_token' });
+    expect(bad.status).toBe(400);
+    expect(await bad.json()).toEqual({ error: 'Fake refused that token' });
+    expect((await account(cookie, 'PUT', { token: 'fake-alice' }, 'https://evil.invalid')).status).toBe(403);
+    const text = await (await account(cookie, 'PUT', { token: 'fake-alice' })).text();
+    expect(JSON.parse(text)).toEqual({ ok: true, provider: 'fake', connected: true, username: 'alice', savedAt: expect.any(String) });
+    expect(text).not.toContain('fake-alice');
+    expect(await (await account(cookie)).json()).toMatchObject({ provider: 'fake', connected: true, username: 'alice' });
+    expect((await account(cookie, 'DELETE', undefined, 'https://evil.invalid')).status).toBe(403);
+    expect(await (await account(cookie, 'DELETE')).json()).toEqual({ ok: true, provider: 'fake', connected: false });
+    expect(await (await account(cookie)).json()).toEqual({ provider: 'fake', connected: false });
+    expect(existsSync(join(dir, 'secrets', 'master.key'))).toBe(true);
+  });
+
+  it('answers 404 for a service this server does not have', async () => {
+    const cookie = await login();
+    const res = await fetch(`${url}/api/tasksync/nope/account`, { headers: { cookie } });
+    expect(res.status).toBe(404);
+    expect(await res.json()).toEqual({ error: 'Unknown task service: nope' });
+  });
+
+  it('without any task service, makes no secret key and the welcome lists none', async () => {
+    await runtime.close(); rmSync(dir, { recursive: true, force: true });
+    await start(new ProviderRegistry([]));
+    expect(existsSync(join(dir, 'secrets', 'master.key'))).toBe(false);
+    expect((await fetch(`${url}/api/tasksync/fake/account`, { headers: { cookie: await login() } })).status).toBe(404);
+  });
+});

@@ -4,7 +4,7 @@ import type { Command, Doc } from '../../core/model/types';
 import { apply } from '../../core/commands/apply';
 import { cloneDoc } from '../../core/model/clone';
 import { emptyDoc } from '../../core/model/seed';
-import { parseServerMessage, type ClientMessage, type MapInfo, type Op, type OpSource, type PresenceEntry, type ServerMessage, type User } from './protocol';
+import { parseServerMessage, type ClientMessage, type MapInfo, type Op, type ProviderDescriptor, type OpSource, type PresenceEntry, type ServerMessage, type User } from './protocol';
 
 export type Status = 'connecting' | 'live' | 'reconnecting' | 'offline';
 
@@ -89,9 +89,9 @@ export class SyncEngine {
   /** The map this engine is on, once the server has named it. */
   map: string | undefined;
   maps: MapInfo[] = [];
-  /** The server's Vikunja sync, when configured (from the welcome). */
-  vikunja: { url: string } | null = null;
-  private readonly vkWaiting = new Map<string, (r: { ok: true; log: string } | { ok: false; error: string }) => void>();
+  /** The server's task services (from the welcome). */
+  taskSync: ProviderDescriptor[] = [];
+  private readonly taskWaiting = new Map<string, (r: { ok: true; log: string } | { ok: false; error: string }) => void>();
 
   private socket: SocketLike | null = null;
   private attempts = 0;
@@ -162,13 +162,13 @@ export class SyncEngine {
     return item.opId;
   }
 
-  /** A /vk request (bind, sync, status): the server calls Vikunja and answers; resulting ops arrive as usual. */
-  vk(args: Record<string, unknown>): Promise<{ ok: true; log: string } | { ok: false; error: string }> {
-    if (this.status !== 'live') return Promise.resolve({ ok: false, error: 'Offline: /vk needs the server' });
+  /** A /tasks request (bind, sync, status): the server asks the task service and answers; resulting ops arrive as usual. */
+  tasks(args: Record<string, unknown>): Promise<{ ok: true; log: string } | { ok: false; error: string }> {
+    if (this.status !== 'live') return Promise.resolve({ ok: false, error: 'Offline: /tasks needs the server' });
     const opId = this.uuid();
     return new Promise(resolve => {
-      this.vkWaiting.set(opId, resolve);
-      if (!this.send({ t: 'vk', opId, args })) { this.vkWaiting.delete(opId); resolve({ ok: false, error: 'Offline: /vk needs the server' }); }
+      this.taskWaiting.set(opId, resolve);
+      if (!this.send({ t: 'tasks', opId, args })) { this.taskWaiting.delete(opId); resolve({ ok: false, error: 'Offline: /tasks needs the server' }); }
     });
   }
 
@@ -205,8 +205,8 @@ export class SyncEngine {
       this.socket = null;
       this.clearTimers();
       if (!this.welcomed && ++this.earlyCloses >= 2) { this.earlyCloses = 0; this.opts.onAuthSuspect?.(); }
-      for (const done of this.vkWaiting.values()) done({ ok: false, error: 'Connection lost before Vikunja answered: try /vk status' });
-      this.vkWaiting.clear();
+      for (const done of this.taskWaiting.values()) done({ ok: false, error: 'Connection lost before the task service answered: try /tasks status' });
+      this.taskWaiting.clear();
       this.presence = [];
       for (const item of this.outbox) item.sent = false;
       this.scheduleRetry();
@@ -277,8 +277,8 @@ export class SyncEngine {
       case 'welcome': this.welcome(msg); break;
       case 'op': this.incoming(msg.op); break;
       case 'reject': {
-        const vk = this.vkWaiting.get(msg.opId);
-        if (vk) { this.vkWaiting.delete(msg.opId); vk({ ok: false, error: msg.error }); return; }
+        const waiting = this.taskWaiting.get(msg.opId);
+        if (waiting) { this.taskWaiting.delete(msg.opId); waiting({ ok: false, error: msg.error }); return; }
         // A refused hello (our cache is ahead of the server, e.g. a reset database): start from a full doc.
         if (!this.welcomed && !msg.opId) { this.seq = 0; this.resync(true); return; }
         const i = this.outbox.findIndex(o => o.opId === msg.opId);
@@ -291,9 +291,9 @@ export class SyncEngine {
       }
       case 'presence': this.presence = msg.users; this.changed(); break;
       case 'maps': this.maps = msg.maps; this.changed(); break;
-      case 'vk': {
-        const done = this.vkWaiting.get(msg.opId);this.vkWaiting.delete(msg.opId);
-        done?.(msg.ok ? { ok: true, log: msg.log ?? 'VIKUNJA' } : { ok: false, error: msg.error ?? 'Vikunja request failed' });
+      case 'tasks': {
+        const done = this.taskWaiting.get(msg.opId);this.taskWaiting.delete(msg.opId);
+        done?.(msg.ok ? { ok: true, log: msg.log ?? 'TASKS' } : { ok: false, error: msg.error ?? 'Task service request failed' });
         break;
       }
       case 'pong': break;
@@ -303,7 +303,7 @@ export class SyncEngine {
   private welcome(msg: Extract<ServerMessage, { t: 'welcome' }>): void {
     this.me = msg.me;
     if (msg.maps) this.maps = msg.maps;
-    this.vikunja = msg.vikunja ?? null;
+    this.taskSync = msg.taskSync ?? [];
     if (msg.map && msg.map !== this.map) {
       // Asked for a map the server no longer has: what was queued for it cannot go to this one.
       // (A map asked for by name is simply named by its id; that is not a switch.)
