@@ -1,0 +1,110 @@
+// /tasks: the provider-neutral task sync verb. Providers come from the server (ParseContext.providers); each brings
+// its aliases (/vk, /asana). The document holds settings.taskSync and opaque string remote ids.
+import { describe, expect, it } from 'vitest';
+import { apply, type ApplyResult } from '../../src/core/commands/apply';
+import { parse, type ProviderInfo } from '../../src/core/commands/grammar';
+import { suggest } from '../../src/core/commands/suggest';
+import { seedDoc } from '../../src/core/model/seed';
+import type { Command, Doc } from '../../src/core/model/types';
+
+const now = new Date('2026-11-09T17:00:00Z');
+const vikunja: ProviderInfo = { id: 'vikunja', label: 'Vikunja', aliases: ['vk'], rootNoun: 'project' };
+const asana: ProviderInfo = { id: 'asana', label: 'Asana', aliases: ['asana'], rootNoun: 'project' };
+const both = [vikunja, asana];
+const ok = (r: ApplyResult) => { if ('error' in r) throw new Error(r.error); return r; };
+const tasks = (doc: Doc, args: Record<string, unknown>) => apply(doc, { verb: 'tasks', args }, now);
+const bound = (provider = 'asana', label = 'Asana', title = 'Ops') => ok(tasks(seedDoc(now), { action: 'bound', provider, label, root: '1207', title, by: 'u1', containers: { work: 'S1', household: 'S2' } })).doc;
+
+describe('/tasks in the grammar', () => {
+  it('names the provider in /tasks bind', () => {
+    expect(parse('/tasks bind asana "Ops"', seedDoc(now), { now, providers: both })).toMatchObject({ ok: true, cmd: { verb: 'tasks', args: { action: 'bind', provider: 'asana', name: 'Ops' } } });
+  });
+  it('takes the provider from an alias used as the verb', () => {
+    expect(parse('/vk bind "Ops"', seedDoc(now), { now, providers: both })).toMatchObject({ ok: true, cmd: { verb: 'tasks', args: { action: 'bind', provider: 'vikunja', name: 'Ops' } } });
+    const doc = bound();
+    const sync = parse('/asana sync', doc, { now, providers: both });
+    expect(sync).toMatchObject({ ok: true, cmd: { verb: 'tasks' } });
+    if (sync.ok) expect(sync.cmd.args).toEqual({ action: 'sync' });
+  });
+  it('picks the only configured provider', () => {
+    expect(parse('/tasks bind "Ops"', seedDoc(now), { now, providers: [asana] })).toMatchObject({ ok: true, cmd: { args: { action: 'bind', provider: 'asana', name: 'Ops' } }, preview: 'ASANA BIND OPS' });
+  });
+  it('asks which provider when several are configured', () => {
+    expect(parse('/tasks bind "Ops"', seedDoc(now), { now, providers: both })).toMatchObject({ ok: false, error: 'Name the task service: /tasks bind ‹vikunja|asana› "‹project›"' });
+  });
+  it('refuses /tasks without a configured provider', () => {
+    expect(parse('/tasks status', seedDoc(now), { now })).toMatchObject({ ok: false, error: 'No task service is configured on this server' });
+    expect(parse('/tasks bind "Ops"', seedDoc(now), { now, providers: [] })).toMatchObject({ ok: false, error: 'No task service is configured on this server' });
+  });
+  it('gives the generic hints', () => {
+    expect(parse('/tasks sync', seedDoc(now), { now, providers: both })).toMatchObject({ ok: false, error: 'This map is not bound to a task service: /tasks bind "‹project›"' });
+    expect(parse('/tasks bind vikunja "Other"', bound('vikunja', 'Vikunja'), { now, providers: both })).toMatchObject({ ok: false, error: 'Bound to Vikunja project Ops: /tasks unbind first' });
+    expect(parse('/vk status', bound('vikunja', 'Vikunja'), { now, providers: both })).toMatchObject({ ok: true, preview: 'VIKUNJA STATUS' });
+  });
+  it('parses /tasks unbind as an ordinary command', () => {
+    expect(parse('/tasks unbind', bound(), { now, providers: both })).toMatchObject({ ok: true, cmd: { verb: 'tasks', args: { action: 'unbind' } }, preview: 'ASANA UNBOUND FROM OPS' });
+  });
+});
+
+describe('/tasks in apply', () => {
+  it('records the binding and the sector containers', () => {
+    const r = ok(tasks(seedDoc(now), { action: 'bound', provider: 'asana', label: 'Asana', root: '1207', title: 'Ops', by: 'u1', containers: { work: 'S1' } }));
+    expect(r.log).toBe('ASANA BOUND TO OPS');
+    expect(r.doc.settings.taskSync).toEqual({ provider: 'asana', label: 'Asana', root: '1207', title: 'Ops', by: 'u1' });
+    expect(r.doc.sectors.find(s => s.id === 'work')?.remote).toBe('S1');
+  });
+  it('rejects ids that are not plain strings', () => {
+    expect(tasks(seedDoc(now), { action: 'bound', provider: 'asana', label: 'Asana', root: 'a/b', title: 'Ops' })).toMatchObject({ error: expect.stringMatching(/^Invalid/) });
+    expect(tasks(bound(), { action: 'add', task: 12, title: 'X', sectorId: 'work' })).toMatchObject({ error: expect.stringMatching(/^Invalid/) });
+  });
+  it('adds, pulls, links and marks gone tasks with string ids', () => {
+    let doc = bound();
+    const add = ok(tasks(doc, { action: 'add', task: 'T1', title: 'Fix roof', sectorId: 'work', status: 'active' }));
+    doc = add.doc;
+    const fix = doc.units.find(u => u.remote === 'T1')!;expect(fix.lifecycle).toBe('active');
+    expect(add.log).toMatch(new RegExp(`^ASANA NEW ${fix.designation}\\b.*; ${fix.designation} ACTIVE$`));
+    expect(tasks(doc, { action: 'add', task: 'T1', title: 'Again', sectorId: 'work' })).toEqual({ error: 'That Asana task is already linked' });
+    doc = ok(tasks(doc, { action: 'add', task: 'T2', title: 'Gutter', sectorId: 'work' })).doc;
+    const gutter = doc.units.find(u => u.remote === 'T2')!;
+    const tf = ok(apply(doc, { verb: 'reinforce', args: { unit: fix.id } }, now)).doc;
+    const pulled = ok(tasks(tf, { action: 'pull', unit: gutter.id, changes: { title: 'Gutters', parentId: fix.id } }));
+    expect(pulled.log).toMatch(new RegExp(`^ASANA: .*ATTACHED TO TF ${fix.designation}`));
+    expect(pulled.doc.units.find(u => u.id === gutter.id)?.parentId).toBe(fix.id);
+    const links = ok(tasks(pulled.doc, { action: 'links', links: { [gutter.id]: null } }));
+    expect(links.log).toBe('ASANA LINKED 1 UNIT');expect(links.doc.units.find(u => u.id === gutter.id)?.remote).toBeUndefined();
+    expect(tasks(pulled.doc, { action: 'links', links: { [gutter.id]: 'T1' } })).toMatchObject({ error: 'An Asana task links to one unit' });
+    const gone = ok(tasks(pulled.doc, { action: 'gone', unit: fix.id }));
+    expect(gone.log).toMatch(new RegExp(`^ASANA: ${fix.designation} TASK DELETED`));
+    expect(gone.doc.units.find(u => u.id === fix.id)).toMatchObject({ lifecycle: 'dropped' });
+    expect(gone.doc.units.find(u => u.id === fix.id)?.remote).toBeUndefined();
+    const containers = ok(tasks(doc, { action: 'containers', containers: { work: 'S9', household: null } }));
+    expect(containers.log).toBe('ASANA SECTORS WORK, HOUSEHOLD');
+    expect(containers.doc.sectors.find(s => s.id === 'work')?.remote).toBe('S9');expect(containers.doc.sectors.find(s => s.id === 'household')?.remote).toBeUndefined();
+  });
+  it('allows one binding per map', () => {
+    expect(tasks(bound('vikunja', 'Vikunja'), { action: 'bound', provider: 'asana', label: 'Asana', root: '1207', title: 'Ops' })).toEqual({ error: 'Bound to Vikunja project Ops: /tasks unbind first' });
+    expect(tasks(bound('vikunja', 'Vikunja'), { action: 'bound', provider: 'vikunja', label: 'Vikunja', root: '1207', title: 'Ops', containers: { family: 'S3' } })).not.toHaveProperty('error');
+  });
+  it('unbinds and clears every remote id', () => {
+    const doc = ok(tasks(bound(), { action: 'add', task: 'T1', title: 'Fix roof', sectorId: 'work' })).doc;
+    const r = ok(tasks(doc, { action: 'unbind' }));
+    expect(r.log).toBe('ASANA UNBOUND FROM OPS');
+    expect(r.doc.settings.taskSync).toBeUndefined();
+    expect(r.doc.sectors.some(s => s.remote !== undefined) || r.doc.units.some(u => u.remote !== undefined)).toBe(false);
+    expect(tasks(seedDoc(now), { action: 'unbind' })).toEqual({ error: 'This map is not bound to a task service: /tasks bind "‹project›"' });
+  });
+  it('leaves requests to the server', () => {
+    expect(tasks(bound(), { action: 'sync' } as Command['args'])).toEqual({ error: '/tasks sync runs on the server' });
+  });
+});
+
+describe('/tasks autocomplete', () => {
+  it('offers the actions and the provider ids', () => {
+    const doc = seedDoc(now);
+    expect(suggest('/tasks ', 7, doc, { providers: both }).items.map(s => s.insert)).toEqual(['bind', 'unbind', 'sync', 'status']);
+    expect(suggest('/tasks bind ', 12, doc, { providers: both }).items.map(s => s.insert)).toEqual(['vikunja', 'asana']);
+    expect(suggest('/', 1, doc, {}).items.map(s => s.insert)).not.toContain('tasks');
+    expect(suggest('/', 1, doc, { providers: [asana] }).items.map(s => s.insert)).toContain('tasks');
+    expect(suggest('/as', 3, doc, { providers: both }).items.map(s => s.insert)).toContain('asana');
+  });
+});

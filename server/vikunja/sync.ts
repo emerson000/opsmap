@@ -1,10 +1,12 @@
 // Two-way sync between a map and a Vikunja project tree: the map (the A/O) is a project, each sector one of its
 // child projects, each unit a task. Fields merge three ways against the values both sides last agreed on
 // (`vk_links.base`): a field changed on one side is copied across; changed on both, the newer side wins.
-// Pulled changes become ordinary ops (`vk` add, pull, gone) by the system user with via "vikunja".
+// Pulled changes become ordinary ops (`tasks` add, pull, gone) by the system user with via "vikunja". The document
+// holds the ids as opaque strings (`remote`): they are converted to Vikunja's numbers here, at the boundary.
 import { createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { Affiliation, Command, Doc, Order, Unit } from '../../src/core/model/types';
-import type { VkChanges, VkStatus } from '../../src/core/commands/apply';
+import { boundElsewhere, NOT_BOUND, type RemoteChanges as VkChanges, type RemoteStatus as VkStatus } from '../../src/core/commands/apply';
+import type { ProviderInfo } from '../../src/core/commands/grammar';
 import { localDay } from '../../src/core/model/time';
 import type { Maps } from '../maps';
 import type { Hub, Op } from '../hub';
@@ -12,6 +14,11 @@ import type { Store, User } from '../db';
 import type { VkApi, VkLabel, VkProject, VkRelationKind, VkTask } from './api';
 
 export interface VkFields { title: string; due: string | null; note: string; progress: number | null; status: VkStatus | null; sector: string | null; affiliation: Affiliation | null }
+/** The task services the grammar offers, until providers register themselves: Vikunja when it is configured. */
+export const taskProviders = (on: boolean): ProviderInfo[] => on ? [{ id: 'vikunja', label: 'Vikunja', aliases: ['vk'], rootNoun: 'project' }] : [];
+/** A document's remote id (task or sector project) as Vikunja's number. */
+const vkOf = (x: { remote?: string } | undefined): number | undefined => x?.remote === undefined ? undefined : Number(x.remote);
+const ids = (r: Record<string, number>): Record<string, string> => Object.fromEntries(Object.entries(r).map(([k, v]) => [k, String(v)]));
 const FIELDS = ['title', 'due', 'note', 'progress', 'status', 'sector', 'affiliation'] as const;
 
 /** Identity ↔ Vikunja label: the first title is the one created; the others are also read. Colors follow the frames. */
@@ -106,7 +113,7 @@ export class VikunjaSync {
       // A deleted map takes its webhooks with it.
       if (event.kind === 'maps' && event.deleted) { void this.serial(event.deleted, () => this.release(event.deleted!)).catch(() => undefined); return; }
       if (event.kind !== 'op' || !event.mapId || event.op?.via === VIA) return;
-      if (this.maps.get(event.mapId)?.doc.settings.vikunja || this.row(event.mapId)) this.schedule(event.mapId, this.debounceMs);
+      if (this.maps.get(event.mapId)?.doc.settings.taskSync || this.row(event.mapId)) this.schedule(event.mapId, this.debounceMs);
     };
     maps.listeners.add(this.onEvent);
   }
@@ -131,14 +138,14 @@ export class VikunjaSync {
     // The poll is the fallback: every minute, or every 5 minutes while Vikunja's webhooks are being delivered.
     this.poll = setInterval(() => {
       for (const hub of this.maps.hubs.values()) {
-        if (!hub.doc.settings.vikunja) continue;
+        if (!hub.doc.settings.taskSync) continue;
         const last = this.info.get(hub.mapId)?.lastSync;
         if (this.delivering(hub.mapId) && last && Date.now() - Date.parse(last) < 5 * this.pollMs) continue;
         this.schedule(hub.mapId, 0);
       }
     }, this.pollMs);
     this.poll.unref?.();
-    for (const hub of this.maps.hubs.values()) if (hub.doc.settings.vikunja) this.schedule(hub.mapId, 2000);
+    for (const hub of this.maps.hubs.values()) if (hub.doc.settings.taskSync) this.schedule(hub.mapId, 2000);
   }
   async stop(): Promise<void> {
     this.stopped = true;
@@ -152,16 +159,16 @@ export class VikunjaSync {
   async request(mapId: string, args: Record<string, unknown>, user: User, source: Op['source']): Promise<string> {
     const hub = this.hub(mapId), action = String(args.action);
     if (action === 'status') return this.status(hub);
-    if (action === 'sync') { if (!hub.doc.settings.vikunja) throw new Error('This map is not bound to Vikunja'); return `VIKUNJA SYNC — ${await this.run(mapId, true)}`; }
+    if (action === 'sync') { if (!hub.doc.settings.taskSync) throw new Error(NOT_BOUND); return `VIKUNJA SYNC — ${await this.run(mapId, true)}`; }
     if (action !== 'bind') throw new Error(`Unknown /vk action: ${action}`);
     const name = typeof args.name === 'string' ? args.name.replace(/\s+/g, ' ').trim() : '';
     if (!name || name.length > 250) throw new Error('Expected a Vikunja project name');
-    const bound = hub.doc.settings.vikunja;
-    if (bound && bound.title.toLowerCase() !== name.toLowerCase()) throw new Error(`Bound to ${bound.title}: /vk unbind first`);
+    const bound = hub.doc.settings.taskSync;
+    if (bound && (bound.provider !== 'vikunja' || bound.title.toLowerCase() !== name.toLowerCase())) throw new Error(boundElsewhere(bound));
     const api = this.apiFor(user.id);
     const check = () => {
-      const now = this.hub(mapId).doc.settings.vikunja, owner = this.owner(mapId);
-      if (now && now.title.toLowerCase() !== name.toLowerCase()) throw new Error(`Bound to ${now.title}: /vk unbind first`);
+      const now = this.hub(mapId).doc.settings.taskSync, owner = this.owner(mapId);
+      if (now && (now.provider !== 'vikunja' || now.title.toLowerCase() !== name.toLowerCase())) throw new Error(boundElsewhere(now));
       if (now && owner && owner !== user.id) throw new Error(`Bound by ${this.store.user(owner)?.name ?? owner}: they sync it with their Vikunja account`);
     };
     check();
@@ -179,18 +186,18 @@ export class VikunjaSync {
       check();
       this.setOwner(mapId, user.id);
       // Recorded by the system, so a user's /undo cannot strip the binding from under linked units: /vk unbind does that.
-      const op = this.hub(mapId).internal(SYSTEM, 'system', { verb: 'vk', args: { action: 'bound', project: root.id, title: root.title, by: user.id, sectors } }, source === 'mcp' ? 'mcp' : 'web');
+      const op = this.hub(mapId).internal(SYSTEM, 'system', { verb: 'tasks', args: { action: 'bound', provider: 'vikunja', label: 'Vikunja', root: String(root.id), title: root.title, by: user.id, containers: ids(sectors) } }, source === 'mcp' ? 'mcp' : 'web');
       return `${op.log} — ${await this.cycle(mapId, true)}`;
     });
   }
 
   private status(hub: Hub): string {
-    const bound = hub.doc.settings.vikunja;
+    const bound = hub.doc.settings.taskSync;
     if (!bound) return 'VIKUNJA: not bound. /vk bind "‹project›"';
-    const s = this.info.get(hub.mapId), linked = hub.doc.units.filter(u => u.vk !== undefined).length;
+    const s = this.info.get(hub.mapId), linked = hub.doc.units.filter(u => u.remote !== undefined).length;
     const time = (iso?: string) => iso ? new Date(iso).toISOString().slice(11, 19) + 'Z' : 'never';
     const by = this.owner(hub.mapId), owner = by ? this.store.user(by)?.name ?? by : 'nobody on this server (/vk unbind, then /vk bind)', token = !by || this.connect(by) ? '' : ' (no token: connect it in the menu → Vikunja)';
-    return `VIKUNJA: bound to ${bound.title} (${this.url}/projects/${bound.project}) by ${owner}${token} · ${hub.doc.sectors.filter(x => x.vk).length} sectors · ${linked} units linked · ` +
+    return `VIKUNJA: bound to ${bound.title} (${this.url}/projects/${bound.root}) by ${owner}${token} · ${hub.doc.sectors.filter(x => x.remote).length} sectors · ${linked} units linked · ` +
       `${this.hookStatus(hub.mapId)} · last sync ${time(s?.lastSync)}${s?.archived?.length ? ` · not synced, project archived in Vikunja: ${s.archived.join(', ')}` : ''}${s?.lastError ? ` · last error: ${s.lastError}` : ''}`;
   }
   /** Webhook health for /vk status. */
@@ -330,7 +337,7 @@ export class VikunjaSync {
       note: htmlToText(t.description).slice(0, MAX_NOTE).trim(),
       progress: u && threat(u) ? Math.round((t.percent_done ?? 0) * 100) : null,
       status: t.done ? 'done' : t.bucket_id !== undefined && board ? board.statusOf.get(t.bucket_id) ?? null : null,
-      sector: doc.sectors.find(s => s.vk === t.project_id)?.id ?? null,
+      sector: doc.sectors.find(s => vkOf(s) === t.project_id)?.id ?? null,
       // No identity label, or several: no opinion (the unit's identity is written back as the one label).
       affiliation: (() => { const a = affiliationsOf(t); return a.length === 1 ? a[0] : null; })(),
     };
@@ -344,7 +351,7 @@ export class VikunjaSync {
     this.store.db.prepare('INSERT INTO vk_links(map_id,unit_id,task_id,base) VALUES(?,?,?,?) ON CONFLICT(map_id,unit_id) DO UPDATE SET task_id=excluded.task_id,base=excluded.base').run(mapId, unitId, task, JSON.stringify(base));
   }
   private system(mapId: string, args: Record<string, unknown>): Op {
-    const cmd: Command = { verb: 'vk', args };
+    const cmd: Command = { verb: 'tasks', args };
     return this.hub(mapId).internal(SYSTEM, 'system', cmd, VIA);
   }
 
@@ -355,7 +362,7 @@ export class VikunjaSync {
       ...t, title: f.title, description: f.note === htmlToText(t.description) ? t.description : textToHtml(f.note),
       due_date: f.due === null ? null : (u.dueAt ?? t.due_date),
       percent_done: f.progress === null ? t.percent_done : f.progress / 100,
-      done: f.status === 'done', project_id: sector?.vk ?? t.project_id,
+      done: f.status === 'done', project_id: vkOf(sector) ?? t.project_id,
     };
   }
   /** The task carries exactly one identity label, for `a`; the user's other labels are left alone. */
@@ -378,26 +385,26 @@ export class VikunjaSync {
     this.info.set(mapId, info);
     try {
       let hub = this.hub(mapId);
-      const binding = hub.doc.settings.vikunja;
+      const binding = hub.doc.settings.taskSync;
       if (!binding) { await this.release(mapId); return 'not bound'; }
       const owner = this.owner(mapId);
       if (!owner || (binding.by !== undefined && binding.by !== owner)) throw new Error('This map was not bound on this server: /vk unbind, then /vk bind');
       const api = this.apiFor(owner);
       const projects = await api.projects();
-      const root = projects.find(p => p.id === binding.project);
+      const root = projects.find(p => p.id === Number(binding.root));
       if (!root) throw new Error(`Vikunja project ${binding.title} is gone: /vk unbind`);
       // Sectors without a child project (added since, or the project was deleted) get one.
       const missing: Record<string, number> = {};
-      for (const s of hub.doc.sectors) if (!s.vk || !projects.some(p => p.id === s.vk)) missing[s.id] = (await this.child(api, projects, root, s.name)).id;
-      if (Object.keys(missing).length) this.system(mapId, { action: 'sectors', sectors: missing });
+      for (const s of hub.doc.sectors) if (!s.remote || !projects.some(p => p.id === vkOf(s))) missing[s.id] = (await this.child(api, projects, root, s.name)).id;
+      if (Object.keys(missing).length) this.system(mapId, { action: 'containers', containers: ids(missing) });
       hub = this.hub(mapId);
       // A sector whose project is archived in Vikunja is read-only there: it is left out until it is unarchived.
       const boards = new Map<number, Board>(), frozen = new Set<number>();
       for (const s of hub.doc.sectors) {
-        const project = projects.find(p => p.id === s.vk)!;
+        const project = projects.find(p => p.id === vkOf(s))!;
         if (project.is_archived) frozen.add(project.id); else boards.set(project.id, await this.board(api, project));
       }
-      info.archived = hub.doc.sectors.filter(s => frozen.has(s.vk!)).map(s => s.name);
+      info.archived = hub.doc.sectors.filter(s => frozen.has(vkOf(s)!)).map(s => s.name);
       await this.ensureHooks(api, owner, mapId, [...boards.keys()], force);
       const labels = new LabelSet(api, await api.labels());
 
@@ -416,10 +423,10 @@ export class VikunjaSync {
       };
 
       // Linked units: merge field by field.
-      for (const snapshot of hub.doc.units.filter(u => u.vk !== undefined)) {
+      for (const snapshot of hub.doc.units.filter(u => u.remote !== undefined)) {
         const doc = this.hub(mapId).doc, u = doc.units.find(x => x.id === snapshot.id);
-        if (!u || u.vk === undefined) continue;
-        const id = u.vk, sectorProject = doc.sectors.find(s => s.id === u.sectorId)?.vk;
+        if (!u || u.remote === undefined) continue;
+        const id = vkOf(u)!, sectorProject = vkOf(doc.sectors.find(s => s.id === u.sectorId));
         if (sectorProject !== undefined && frozen.has(sectorProject)) continue;
         await guard(u.designation, async () => {
           let t = tasks.get(id);
@@ -447,13 +454,13 @@ export class VikunjaSync {
       // two tasks called "Call" never pair up. Links are recorded even when a later call fails.
       const links: Record<string, number> = {};
       const key = (title: string) => title.trim().toLowerCase();
-      const pending = (doc: Doc) => doc.units.filter(u => u.vk === undefined && syncable(u) && u.lifecycle !== 'done' && u.lifecycle !== 'dropped');
+      const pending = (doc: Doc) => doc.units.filter(u => u.remote === undefined && syncable(u) && u.lifecycle !== 'done' && u.lifecycle !== 'dropped');
       try {
         for (const snapshot of pending(this.hub(mapId).doc)) {
           await guard(snapshot.designation, async () => {
             const doc = this.hub(mapId).doc, u = doc.units.find(x => x.id === snapshot.id);
-            if (!u || u.vk !== undefined || links[u.id] !== undefined) return;
-            const project = doc.sectors.find(s => s.id === u.sectorId)?.vk;
+            if (!u || u.remote !== undefined || links[u.id] !== undefined) return;
+            const project = vkOf(doc.sectors.find(s => s.id === u.sectorId));
             if (!project || frozen.has(project)) return;
             const f = this.unitFields(u, doc);
             const candidates = [...tasks.values()].filter(t => !t.done && t.project_id === project && key(t.title) === key(f.title));
@@ -478,20 +485,20 @@ export class VikunjaSync {
         // Only units that still exist: one undone meanwhile would make the whole batch fail.
         const units = new Set(this.hub(mapId).doc.units.map(u => u.id));
         for (const id of Object.keys(links)) if (!units.has(id)) { await api.deleteTask(links[id]).catch(() => undefined); delete links[id]; }
-        if (Object.keys(links).length) this.system(mapId, { action: 'links', links });
+        if (Object.keys(links).length) this.system(mapId, { action: 'links', links: ids(links) });
       }
 
       // Tasks made in Vikunja: new pending units (open ones only; finished history stays in Vikunja).
       for (const t of tasks.values()) {
         const doc = this.hub(mapId).doc;
-        if (t.done || doc.units.some(u => u.vk === t.id)) continue;
-        const sector = doc.sectors.find(s => s.vk === t.project_id);
+        if (t.done || doc.units.some(u => vkOf(u) === t.id)) continue;
+        const sector = doc.sectors.find(s => vkOf(s) === t.project_id);
         if (!sector) continue;
         await guard(`task #${t.id}`, async () => {
           const f = this.taskFields(t, undefined, doc, boards);
-          this.system(mapId, { action: 'add', task: t.id, title: t.title.slice(0, MAX_TITLE) || 'Untitled task', sectorId: sector.id,
+          this.system(mapId, { action: 'add', task: String(t.id), title: t.title.slice(0, MAX_TITLE) || 'Untitled task', sectorId: sector.id,
             ...(noDate(t.due_date) ? {} : { dueAt: new Date(t.due_date!).toISOString() }), ...(f.note ? { note: f.note.slice(0, MAX_NOTE) } : {}), ...(f.status && f.status !== 'todo' ? { status: f.status } : {}), ...(f.affiliation && f.affiliation !== 'pending' ? { affiliation: f.affiliation } : {}) });
-          const u = this.hub(mapId).doc.units.find(x => x.vk === t.id)!;
+          const u = this.hub(mapId).doc.units.find(x => vkOf(x) === t.id)!;
           this.setBase(mapId, u.id, t.id, this.unitFields(u, this.hub(mapId).doc));
           stats.added++;
         });
@@ -524,8 +531,8 @@ export class VikunjaSync {
   private async relations(api: VkApi, mapId: string, fetched: Map<number, VkTask>, guard: (what: string, fn: () => Promise<void>) => Promise<void>, stats: { pushed: number; pulled: number }): Promise<void> {
     const base = this.relationBase(mapId);
     const doc = () => this.hub(mapId).doc;
-    const byTask = () => new Map(doc().units.filter(u => u.vk !== undefined && fetched.has(u.vk)).map(u => [u.vk!, u]));
-    const seen = (u: Unit | undefined): u is Unit => u?.vk !== undefined && fetched.has(u.vk);
+    const byTask = () => new Map(doc().units.filter(u => u.remote !== undefined && fetched.has(vkOf(u)!)).map(u => [vkOf(u)!, u]));
+    const seen = (u: Unit | undefined): u is Unit => u?.remote !== undefined && fetched.has(vkOf(u)!);
     /** Linked tasks related to `t` under `kind` (relations to tasks outside the A/O are not opsmap's). */
     const related = (t: VkTask, kind: VkRelationKind, units: Map<number, Unit>) => (t.related_tasks?.[kind] ?? []).map(x => x.id).filter(id => units.has(id));
 
@@ -534,8 +541,8 @@ export class VikunjaSync {
     for (const id of doc().units.map(u => u.id)) {
       const units = byTask(), u = doc().units.find(x => x.id === id);
       if (!seen(u)) continue;
-      const t = fetched.get(u.vk!)!, parent = u.parentId ? doc().units.find(x => x.id === u.parentId) : undefined;
-      const ours = !u.parentId ? null : seen(parent) ? parent.vk! : undefined;
+      const t = fetched.get(vkOf(u)!)!, parent = u.parentId ? doc().units.find(x => x.id === u.parentId) : undefined;
+      const ours = !u.parentId ? null : seen(parent) ? vkOf(parent)! : undefined;
       const named = related(t, 'parenttask', units), theirs = named.length === 0 ? null : named.length === 1 ? named[0] : undefined;
       const agreed = base.parents[u.id];
       if (ours === undefined || theirs === undefined) { if (agreed !== undefined) parents[u.id] = agreed; continue; }
@@ -583,10 +590,10 @@ export class VikunjaSync {
         // Removed in Vikunja: the link order goes. New in opsmap: the relation is made.
         await guard(what, async () => {
           if (agreed.has(key)) { for (const o of mine) this.system(mapId, { action: 'unrelate', order: o.id }); stats.pulled++; return; }
-          await api.addRelation(a.vk!, b.vk!, RELATION[kind]); edges.add(key); stats.pushed++;
+          await api.addRelation(vkOf(a)!, vkOf(b)!, RELATION[kind]); edges.add(key); stats.pushed++;
         });
       } else if (agreed.has(key)) {
-        await guard(what, async () => { await api.removeRelation(a.vk!, b.vk!, RELATION[kind]); stats.pushed++; });
+        await guard(what, async () => { await api.removeRelation(vkOf(a)!, vkOf(b)!, RELATION[kind]); stats.pushed++; });
       } else if (refused.has(key)) stillRefused.add(key);
       else {
         // New in Vikunja: a link order. A plain link has no direction, so the other way round is tried too.

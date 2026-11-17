@@ -3,6 +3,7 @@ import type { Doc } from './types';
 import { ECHELONS } from './echelon';
 import { FUNCTION_BY_KEY } from './functions';
 import { orderRing } from './geometry';
+import { stripLegacy } from './legacy';
 const object=(value:unknown):value is Record<string,unknown>=>typeof value==='object' && value!==null && !Array.isArray(value);
 const string=(value:unknown):value is string=>typeof value==='string';
 const finite=(value:unknown):value is number=>typeof value==='number' && Number.isFinite(value);
@@ -12,6 +13,9 @@ function requireValid(valid:unknown,message:string):asserts valid {if(!valid) th
 function optional(obj:Record<string,unknown>,key:string,test:(value:unknown)=>boolean):void {
   requireValid(obj[key]===undefined||test(obj[key]),key);
 }
+/** A task service id (task, container or project): opaque, short, URL-safe. */
+export const REMOTE_ID=/^[A-Za-z0-9_-]{1,64}$/;
+const remoteId=(value:unknown)=>string(value)&&REMOTE_ID.test(value);
 function position(p:unknown):boolean {return object(p)&&finite(p.r)&&p.r>=0&&finite(p.theta);}
 function records(value:unknown,label:string):Record<string,unknown>[] {
   requireValid(Array.isArray(value),label);
@@ -26,13 +30,14 @@ export function importJson(text:string):Doc {
   const value:unknown=JSON.parse(text);
   requireValid(object(value),'object');
   requireValid(value.version===1,'unsupported version');
+  stripLegacy(value);
   const sectors=records(value.sectors,'sectors'),units=records(value.units,'units'),orders=records(value.orders,'orders'),measures=records(value.measures,'measures'),log=records(value.log,'log');
   requireValid(sectors.length>0,'at least one sector');
   const sectorIds=new Set(sectors.map(s=>s.id)),unitIds=new Set(units.map(u=>u.id)),measureIds=new Set(measures.map(m=>m.id));
   for(const s of sectors) {
     requireValid(string(s.name)&&s.name.trim().length>0&&finite(s.startDeg)&&finite(s.widthDeg)&&s.widthDeg>0&&s.widthDeg<=360,'sector');
     optional(s,'color',string);
-    optional(s,'vk',v=>Number.isSafeInteger(v)&&(v as number)>0);
+    optional(s,'remote',remoteId);
   }
   const designations=new Set<string>();
   for(const u of units) {
@@ -49,7 +54,7 @@ export function importJson(text:string):Doc {
     optional(u,'cp',v=>oneOf(v,['main','tac','alt','rear']));
     for(const key of ['note','rating','createdBy','updatedBy']) optional(u,key,string);
     optional(u,'dueAt',date);
-    optional(u,'vk',v=>Number.isSafeInteger(v)&&(v as number)>0);
+    optional(u,'remote',remoteId);
     optional(u,'parentId',v=>string(v)&&unitIds.has(v)&&v!==u.id);
     optional(u,'sidcOverride',v=>string(v)&&/^\d{20}$/.test(v)&&Boolean(new ms.Symbol(v).isValid()));
   }
@@ -75,7 +80,7 @@ export function importJson(text:string):Doc {
   }
   for(const entry of log) {requireValid(date(entry.at)&&string(entry.text),'log entry');optional(entry,'cmd',string);optional(entry,'by',string);optional(entry,'via',string);}
   requireValid(object(value.settings)&&oneOf(value.settings.view,['commander','staff','detail'])&&oneOf(value.settings.theme,['light','dark'])&&typeof value.settings.autoAdvance==='boolean','settings');
-  optional(value.settings,'vikunja',v=>object(v)&&Number.isSafeInteger(v.project)&&(v.project as number)>0&&string(v.title)&&(v.by===undefined||string(v.by)));
+  optional(value.settings,'taskSync',v=>object(v)&&remoteId(v.provider)&&string(v.label)&&v.label.length>0&&remoteId(v.root)&&string(v.title)&&(v.by===undefined||string(v.by)));
   optional(value.settings,'aoSize',v=>typeof v==='number'&&Number.isFinite(v)&&v>=0.5&&v<=3);
   optional(value.settings,'tz',v=>{try {if(!string(v))return false;new Intl.DateTimeFormat('en',{timeZone:v});return true;}catch{return false;}});
   optional(value,'lastTurn',date);

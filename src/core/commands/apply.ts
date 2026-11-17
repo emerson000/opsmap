@@ -4,7 +4,8 @@ import { claimDesignation, designationOfTitle, effectiveCondition, freeDesignati
 import { ECHELONS, echelonIndex } from '../model/echelon';
 import { FUNCTIONS } from '../model/functions';
 import { AO_SIZES, AREA_SIZES, RING_R, RING_ORDER, orderRing, ringIndex, ringName, aoScale, aoSizeName, placementFits, areaShape, freeSpot, polarToXY, resolvePlacement, ringForRadius, normalizeDeg, radiusForDate, sectorAt, snap, xyToPolar, type AreaSize } from '../model/geometry';
-import { importJson } from '../model/json';
+import { importJson, REMOTE_ID } from '../model/json';
+import { LEGACY_VERB, legacyCommand } from '../model/legacy';
 import { cloneDoc } from '../model/clone';
 import { advanceDay, completeRingOrders } from './turn';
 import { CommandError, localDay } from './tokenize';
@@ -228,7 +229,9 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
         if(u.strength===0)delete u.strength;if(u.note==='BYPASSED')delete u.note;
         u.pos=resolvePlacement(doc,u.sectorId,u.pos,u.id);changed(u);log=`${u.designation} REOPENED`;break;
       }
-      case 'vk': return vikunja(doc,cmd,now);
+      case 'tasks': return tasks(doc,cmd,now);
+      // Recorded before /tasks: the journal replays them as the tasks command they mean.
+      case LEGACY_VERB: return tasks(doc,legacyCommand(cmd),now);
       case 'reinforce':case 'reduce': {const u=unit();u.reinforced=cmd.verb==='reinforce'?'+':'-';let left='';if(a.with){const child=item(doc.units,a.with,'unit'),was=child.parentId;left=attach(doc,child,u);changed(child);if(was!==u.id)left+=dissolve(was);}if(a.note!==undefined)u.note=text(a.note,'scope note');changed(u);log=`${u.designation} ${cmd.verb==='reinforce'?'REINFORCED (+)':'REDUCED (-)'}${left}`;break;}
       case 'attach': {const u=unit(),parent=item(doc.units,a.parent,'parent'),was=u.parentId;const ended=attach(doc,u,parent);changed(u);changed(parent);log=`${u.designation} ATTACHED TO TF ${parent.designation}${ended}${was!==parent.id?dissolve(was):''}`;break;}
       case 'collapse':case 'expand': {
@@ -438,54 +441,59 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
   }catch(error){return {error:error instanceof Error?error.message:'Invalid command'};}
 }
 
-/** /vk actions the server carries out (they call Vikunja); parse checks only their form. */
-export const VK_REQUESTS=['bind','sync','status'] as const;
-const positiveId=(value:unknown,label:string):number=>{requireThat(Number.isSafeInteger(value)&&(value as number)>0,`Invalid ${label}`);return value as number;};
+/** /tasks actions the server carries out (they call the task service); parse checks only their form. */
+export const TASK_REQUESTS=['bind','sync','status'] as const;
+const remoteId=(value:unknown,label:string):string=>{requireThat(typeof value==='string'&&REMOTE_ID.test(value),`Invalid ${label}`);return value;};
 const threatOf=(u:Unit)=>u.affiliation==='hostile'||u.affiliation==='suspect';
-/** Unit lifecycle as a Vikunja status: done and dropped are both "done". */
-export type VkStatus='todo'|'active'|'blocked'|'done';
-/** Changes pulled from a Vikunja task, already mapped to opsmap fields. */
-/** `parentId`: the task force the unit is attached to (Vikunja's parent task), or null for none. */
-export interface VkChanges {title?:string;dueAt?:string|null;note?:string;strength?:number;status?:VkStatus;sectorId?:string;affiliation?:Affiliation;parentId?:string|null;}
+/** Unit lifecycle as a remote task status: done and dropped are both "done". */
+export type RemoteStatus='todo'|'active'|'blocked'|'done';
+/** Changes pulled from a remote task, already mapped to opsmap fields. */
+/** `parentId`: the task force the unit is attached to (the remote parent task), or null for none. */
+export interface RemoteChanges {title?:string;dueAt?:string|null;note?:string;strength?:number;status?:RemoteStatus;sectorId?:string;affiliation?:Affiliation;parentId?:string|null;}
 function pushLog(doc:Doc,at:string,text:string,raw?:string):void {
   doc.log.push({id:`log${1+Math.max(0,...doc.log.map(l=>Number(l.id.replace(/^log/,''))||0))}`,at,text,...(raw?{cmd:raw}:{})});
 }
-/** `/vk`: the binding and the changes the sync service records. bind, sync and status are requests the server
- *  carries out; it then records `bound`. Pulled changes run as ordinary commands, one log line per task. */
-function vikunja(doc:Doc,cmd:Command,now:Date):MutationResult {
-  const a=cmd.args,at=now.toISOString(),action=text(a.action,'Vikunja action');
-  requireThat(!(VK_REQUESTS as readonly string[]).includes(action),`/vk ${action} runs on the server`);
-  const bound=doc.settings.vikunja;
+export const NOT_BOUND='This map is not bound to a task service: /tasks bind "‹project›"';
+export const boundElsewhere=(bound:{label:string;title:string})=>`Bound to ${bound.label} project ${bound.title}: /tasks unbind first`;
+const article=(word:string)=>/^[aeiou]/i.test(word)?'An':'A';
+/** `/tasks`: the binding and the changes the sync service records. bind, sync and status are requests the server
+ *  carries out; it then records `bound`. Pulled changes run as ordinary commands, one log line per task. The log
+ *  prefix is the bound service's label (VIKUNJA, ASANA). */
+function tasks(doc:Doc,cmd:Command,now:Date):MutationResult {
+  const a=cmd.args,at=now.toISOString(),action=text(a.action,'task sync action');
+  requireThat(!(TASK_REQUESTS as readonly string[]).includes(action),`/tasks ${action} runs on the server`);
+  const bound=doc.settings.taskSync;
   if(action==='bound'){
-    const project=positiveId(a.project,'Vikunja project'),title=text(a.title,'Vikunja project title');
-    const sectors=(a.sectors??{}) as Record<string,unknown>;requireThat(typeof sectors==='object'&&!Array.isArray(sectors),'Invalid sector projects');
-    requireThat(!bound||bound.project===project,`Bound to ${bound?.title}: /vk unbind first`);
-    doc.settings.vikunja={project,title,...(typeof a.by==='string'&&a.by?{by:a.by}:{})};
-    for(const s of doc.sectors)if(sectors[s.id]!==undefined)s.vk=positiveId(sectors[s.id],'sector project');
-    pushLog(doc,at,`VIKUNJA BOUND TO ${title.toUpperCase()}`,cmd.raw);return {doc,log:`VIKUNJA BOUND TO ${title.toUpperCase()}`};
+    const provider=remoteId(a.provider,'task service'),label=text(a.label,'task service label'),root=remoteId(a.root,`${label} project`),title=text(a.title,`${label} project title`);
+    const containers=(a.containers??{}) as Record<string,unknown>;requireThat(typeof containers==='object'&&!Array.isArray(containers),'Invalid sector projects');
+    requireThat(!bound||bound.provider===provider&&bound.root===root,bound?boundElsewhere(bound):'');
+    doc.settings.taskSync={provider,label,root,title,...(typeof a.by==='string'&&a.by?{by:a.by}:{})};
+    for(const s of doc.sectors)if(containers[s.id]!==undefined)s.remote=remoteId(containers[s.id],'sector project');
+    const log=`${label.toUpperCase()} BOUND TO ${title.toUpperCase()}`;pushLog(doc,at,log,cmd.raw);return {doc,log};
   }
-  requireThat(bound,'This map is not bound to Vikunja');
+  requireThat(bound,NOT_BOUND);
+  const label=bound.label,LABEL=label.toUpperCase();
   let log='';
   if(action==='unbind'){
-    delete doc.settings.vikunja;for(const s of doc.sectors)delete s.vk;for(const u of doc.units)delete u.vk;
-    log=`VIKUNJA UNBOUND FROM ${bound.title.toUpperCase()}`;
-  }else if(action==='sectors'){
-    const sectors=a.sectors as Record<string,unknown>;requireThat(sectors&&typeof sectors==='object','Invalid sector projects');
+    delete doc.settings.taskSync;for(const s of doc.sectors)delete s.remote;for(const u of doc.units)delete u.remote;
+    log=`${LABEL} UNBOUND FROM ${bound.title.toUpperCase()}`;
+  }else if(action==='containers'){
+    const containers=a.containers as Record<string,unknown>;requireThat(containers&&typeof containers==='object','Invalid sector projects');
     const names:string[]=[];
-    for(const [id,project] of Object.entries(sectors)){const s=item(doc.sectors,id,'sector');if(project===null)delete s.vk;else s.vk=positiveId(project,'sector project');names.push(s.name.toUpperCase());}
-    log=`VIKUNJA SECTORS ${names.join(', ')}`;
+    for(const [id,container] of Object.entries(containers)){const s=item(doc.sectors,id,'sector');if(container===null)delete s.remote;else s.remote=remoteId(container,'sector project');names.push(s.name.toUpperCase());}
+    log=`${LABEL} SECTORS ${names.join(', ')}`;
   }else if(action==='links'){
     // Bookkeeping only: linking a unit to its task does not count as changing the unit.
     const links=a.links as Record<string,unknown>;requireThat(links&&typeof links==='object','Invalid links');
-    let n=0;for(const [id,task] of Object.entries(links)){const u=item(doc.units,id,'unit');if(task===null)delete u.vk;else u.vk=positiveId(task,'Vikunja task');n++;}
-    const taken=new Set<number>();for(const u of doc.units)if(u.vk!==undefined){requireThat(!taken.has(u.vk),'A Vikunja task links to one unit');taken.add(u.vk);}
-    log=`VIKUNJA LINKED ${n} UNIT${n===1?'':'S'}`;
+    let n=0;for(const [id,task] of Object.entries(links)){const u=item(doc.units,id,'unit');if(task===null)delete u.remote;else u.remote=remoteId(task,`${label} task`);n++;}
+    const taken=new Set<string>();for(const u of doc.units)if(u.remote!==undefined){requireThat(!taken.has(u.remote),`${article(label)} ${label} task links to one unit`);taken.add(u.remote);}
+    log=`${LABEL} LINKED ${n} UNIT${n===1?'':'S'}`;
   }else{
     // add, pull, gone: ordinary commands in sequence on one working copy, logged as one line.
     let cur=doc;const logs:string[]=[];
     const step=(verb:string,args:Record<string,unknown>)=>{const r=mutate(cur,{verb,args},now);if('error'in r)throw new CommandError(r.error);cur=r.doc;cur.log.pop();if(r.log)logs.push(r.log);};
     const get=(id:string)=>item(cur.units,id,'unit');
-    const settle=(id:string,status:VkStatus|undefined)=>{
+    const settle=(id:string,status:RemoteStatus|undefined)=>{
       if(!status)return;let u=get(id);const closed=u.lifecycle==='done'||u.lifecycle==='dropped';
       if(status==='done'){if(!closed)step('done',{unit:id});return;}
       if(closed){step('reopen',{unit:id});u=get(id);}
@@ -493,16 +501,16 @@ function vikunja(doc:Doc,cmd:Command,now:Date):MutationResult {
       if(status!=='blocked'&&u.lifecycle!==status){u.lifecycle=status;u.updatedAt=at;logs.push(`${u.designation} ${status==='active'?'ACTIVE':'TO DO'}`);}
     };
     if(action==='add'){
-      const task=positiveId(a.task,'Vikunja task');requireThat(!cur.units.some(u=>u.vk===task),'That Vikunja task is already linked');
+      const task=remoteId(a.task,`${label} task`);requireThat(!cur.units.some(u=>u.remote===task),`That ${label} task is already linked`);
       const sector=item(cur.sectors,a.sectorId,'sector');
       // A task title is never refused as a duplicate designation: sync picks a free one.
       const title=text(a.title,'title');step('new',{title,designation:freeDesignationForTitle(title,new Set(cur.units.map(u=>u.designation))),sectorId:sector.id,...(typeof a.dueAt==='string'?{dueAt:a.dueAt}:{}),...(typeof a.affiliation==='string'?{affiliation:a.affiliation}:{})});
-      const u=cur.units.at(-1)!;u.vk=task;
+      const u=cur.units.at(-1)!;u.remote=task;
       if(typeof a.note==='string'&&a.note.trim())u.note=a.note;
-      settle(u.id,a.status as VkStatus|undefined);
-      log=`VIKUNJA NEW ${logs[0]?.replace(/^CAPTURE /,'')??u.designation}${logs.length>1?`; ${logs.slice(1).join('; ')}`:''}`;
+      settle(u.id,a.status as RemoteStatus|undefined);
+      log=`${LABEL} NEW ${logs[0]?.replace(/^CAPTURE /,'')??u.designation}${logs.length>1?`; ${logs.slice(1).join('; ')}`:''}`;
     }else if(action==='pull'){
-      const id=item(cur.units,a.unit,'unit').id,c=(a.changes??{}) as VkChanges;
+      const id=item(cur.units,a.unit,'unit').id,c=(a.changes??{}) as RemoteChanges;
       // Identity first: whether progress maps to BDA depends on it.
       if(c.affiliation!==undefined&&c.affiliation!==get(id).affiliation)step('id',{unit:id,affiliation:c.affiliation});
       if(c.sectorId!==undefined&&c.sectorId!==get(id).sectorId){
@@ -516,21 +524,21 @@ function vikunja(doc:Doc,cmd:Command,now:Date):MutationResult {
       if(c.strength!==undefined&&c.strength!==get(id).strength&&c.status!=='done')step('bda',{unit:id,strength:c.strength});
       settle(id,c.status);
       if(c.parentId!==undefined&&c.parentId!==(get(id).parentId??null)){if(c.parentId===null)step('detach',{unit:id});else step('attach',{unit:id,parent:item(cur.units,c.parentId,'task force').id});}
-      log=`VIKUNJA: ${logs.join('; ')||`${get(id).designation} IN STEP`}`;
+      log=`${LABEL}: ${logs.join('; ')||`${get(id).designation} IN STEP`}`;
     }else if(action==='relate'){
-      // A Vikunja relation between two linked tasks: related, blocked by (dependency) or precedes (handoff).
+      // A relation between two linked tasks: related, blocked by (dependency) or precedes (handoff).
       step('link',{unit:item(cur.units,a.unit,'unit').id,target:item(cur.units,a.target,'unit').id,...(a.kind!==undefined?{kind:a.kind}:{})});
-      log=`VIKUNJA: ${logs.join('; ')}`;
+      log=`${LABEL}: ${logs.join('; ')}`;
     }else if(action==='unrelate'){
       const o=item(cur.orders,a.order,'order');requireThat(o.type==='link','Not a link order');
       step('halt',{unit:o.from,order:o.id});
-      log=`VIKUNJA: ${logs.join('; ')}`;
+      log=`${LABEL}: ${logs.join('; ')}`;
     }else if(action==='gone'){
       const u=item(cur.units,a.unit,'unit');
       if(u.lifecycle!=='done'&&u.lifecycle!=='dropped')step('drop',{unit:u.id});
-      delete get(u.id).vk;
-      log=`VIKUNJA: ${u.designation} TASK DELETED${logs.length?` — ${logs.join('; ')}`:''}`;
-    }else throw new CommandError(`Unknown Vikunja action: ${action}`);
+      delete get(u.id).remote;
+      log=`${LABEL}: ${u.designation} TASK DELETED${logs.length?` — ${logs.join('; ')}`:''}`;
+    }else throw new CommandError(`Unknown ${label} action: ${action}`);
     pushLog(cur,at,log,cmd.raw);return {doc:cur,log};
   }
   pushLog(doc,at,log,cmd.raw);return {doc,log};

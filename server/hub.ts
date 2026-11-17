@@ -10,7 +10,7 @@ export interface Op {seq:number;opId:string;userId:string;source:'web'|'mcp'|'sy
 interface Row {map_id:string;seq:number;op_id:string;user_id:string;source:Op['source'];at:string;cmd:string;log:string;inverse:string;undone_by:number|null;reverts:number|null;principal:string|null;via:string|null;}
 const toOp=(r:Row):Op=>({seq:r.seq,opId:r.op_id,userId:r.user_id,source:r.source,at:r.at,cmd:JSON.parse(r.cmd),log:r.log,...(r.via?{via:r.via}:{})});
 /** Verbs a user (browser or MCP) may submit as an op; the rest are answered by the browser shell or the MCP server. */
-export const MUTATION_VERBS:ReadonlySet<string>=new Set(['new','id','size','fn','rename','move','attack','moving','axis','advancing','withdraw','bda','block','unblock','unpin','reopen','done','drop','reinforce','reduce','attach','detach','collapse','expand','link','due','note','rate','key','cp','halt','support','sector','pl','obj','ea','nai','intent','sidc','vk']);
+export const MUTATION_VERBS:ReadonlySet<string>=new Set(['new','id','size','fn','rename','move','attack','moving','axis','advancing','withdraw','bda','block','unblock','unpin','reopen','done','drop','reinforce','reduce','attach','detach','collapse','expand','link','due','note','rate','key','cp','halt','support','sector','pl','obj','ea','nai','intent','sidc','tasks']);
 function overlaps(a:InversePatch,b:InversePatch):boolean {
   return (['units','orders','measures','sectors'] as const).some(k=>a[k].some(x=>b[k].some(y=>x.id===y.id)))||Object.keys(a.top).some(k=>Object.hasOwn(b.top,k));
 }
@@ -21,6 +21,8 @@ export class Hub {
     this.doc=emptyDoc(tz);
     // New core semantics and attribution require one replay from the authoritative op history.
     if(store.meta('snapshots_v2_reset')!=='1'){store.db.exec('DELETE FROM snapshots');store.setMeta('snapshots_v2_reset','1');}
+    // Task sync fields became provider-neutral: snapshots hold the old ones, the journal replays into the new.
+    if(store.meta('snapshots_tasksync_reset')!=='1'){store.db.exec('DELETE FROM snapshots');store.setMeta('snapshots_tasksync_reset','1');}
     const snap=store.db.prepare('SELECT * FROM snapshots WHERE map_id=? ORDER BY seq DESC LIMIT 1').get(mapId) as {seq:number;doc:string}|undefined;
     if(snap){this.doc=this.zoned(importJson(snap.doc));this.seq=snap.seq;}
     for(const op of this.since(this.seq)) {
@@ -44,8 +46,8 @@ export class Hub {
     if(source!=='system'&&opId.startsWith('turn:'))throw new Error('Reserved operation id');
     const old=this.existing(opId,userId);if(old)return old;
     if(!cmd||typeof cmd.verb!=='string'||!cmd.args||typeof cmd.args!=='object'||Array.isArray(cmd.args)||!(MUTATION_VERBS.has(cmd.verb)||source==='system'&&userId==='system'&&cmd.verb==='turn'))throw new Error('Invalid or privileged command');
-    // Of /vk, users submit only unbind; the sync service records everything else through internal().
-    if(cmd.verb==='vk'&&cmd.args.action!=='unbind')throw new Error('Invalid or privileged command');
+    // Of /tasks, users submit only unbind; the sync service records everything else through internal().
+    if(cmd.verb==='tasks'&&cmd.args.action!=='unbind')throw new Error('Invalid or privileged command');
     const safe={verb:cmd.verb,args:cmd.args,...(typeof cmd.raw==='string'&&cmd.raw.startsWith('/')?{raw:cmd.raw.slice(0,512)}:{})};
     if(JSON.stringify(safe.args).length>16384)throw new Error('Command too large');
     for(const value of Object.values(safe.args))if(typeof value==='string'&&value.length>2048)throw new Error('Text exceeds 2048 characters');
@@ -57,8 +59,8 @@ export class Hub {
   }
   import(userId:string,doc:unknown,now=new Date(),source:Op['source']='web',agent?:{id:string;name:string}):Op {
     const validated=this.zoned(importJson(JSON.stringify(doc)));
-    // A Vikunja binding names whose token syncs it: only /vk bind on this server may set one, never a document.
-    delete validated.settings.vikunja;for(const s of validated.sectors)delete s.vk;for(const u of validated.units)delete u.vk;
+    // A task sync binding names whose token syncs it: only /tasks bind on this server may set one, never a document.
+    delete validated.settings.taskSync;for(const s of validated.sectors)delete s.remote;for(const u of validated.units)delete u.remote;
     return this.commit(userId,source,randomUUID(),{verb:'import',args:{doc:validated}},now,undefined,undefined,agent);
   }
   private commit(userId:string,source:Op['source'],opId:string,cmd:Command,now:Date,reverts?:number,redoOriginal?:number,agent?:{id:string;name:string},viaOverride?:string):Op {

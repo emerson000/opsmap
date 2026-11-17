@@ -17,7 +17,7 @@ import type { MapEvent } from './maps';
 import { VkTokens } from './vikunja/tokens';
 import { SecretBox } from './secrets';
 import { VikunjaSync, isLoopback } from './vikunja/sync';
-import { VK_REQUESTS } from '../src/core/commands/apply';
+import { TASK_REQUESTS } from '../src/core/commands/apply';
 export function createApp(config:Config) {
   const store=new Store(join(config.dataDir,'opsmap.db')),maps=new Maps(store,config.tz),hub=maps.default,auth=new Auth(store,config),app=new Hono();
   // Vikunja sync when configured. Webhooks need a public (non-loopback) origin Vikunja can post to; else it polls.
@@ -182,7 +182,7 @@ export function startServer(config:Config,options:{schedule?:boolean}={}) {
             // /vk bind, sync, status: the server calls Vikunja, then answers this request (ops arrive as usual).
             if(!opId)throw new Error('Request id required');
             if(!vikunja)throw new Error('Vikunja sync is not configured on this server');
-            const args=msg.args;if(!args||typeof args!=='object'||!(VK_REQUESTS as readonly string[]).includes(String(args.action)))throw new Error('Invalid /vk request');
+            const args=msg.args;if(!args||typeof args!=='object'||!(TASK_REQUESTS as readonly string[]).includes(String(args.action)))throw new Error('Invalid /vk request');
             const mapId=client.mapId;
             vikunja.request(mapId,{action:args.action,...(typeof args.name==='string'?{name:args.name.slice(0,250)}:{})},user,'web')
               .then(log=>send(ws,{t:'vk',opId,ok:true,log}),error=>send(ws,{t:'vk',opId,ok:false,error:error instanceof Error?error.message:'Vikunja request failed'}));

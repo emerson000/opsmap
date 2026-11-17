@@ -56,12 +56,12 @@ describe('a designation made from the title follows the same rules as one typed 
 describe('Vikunja tasks', () => {
   it('a task titled like a taken designation still syncs, with a free designation', () => {
     let doc = ok(seedDoc(now), '/new "E1" in Work').doc;
-    const bound = apply(doc, { verb: 'vk', args: { action: 'bound', project: 1, title: 'Main' } }, now);
+    const bound = apply(doc, { verb: 'tasks', args: { action: 'bound', provider: 'vikunja', label: 'Vikunja', root: '1', title: 'Main' } }, now);
     if ('error' in bound) throw new Error(bound.error);
     doc = bound.doc;
-    const r = apply(doc, { verb: 'vk', args: { action: 'add', task: 9001, title: 'E1', sectorId: 'work' } }, now);
+    const r = apply(doc, { verb: 'tasks', args: { action: 'add', task: '9001', title: 'E1', sectorId: 'work' } }, now);
     if ('error' in r) throw new Error(r.error);
-    expect(r.doc.units.find(u => u.vk === 9001)?.designation).toBe('E1-2');
+    expect(r.doc.units.find(u => u.remote === '9001')?.designation).toBe('E1-2');
   });
 });
 

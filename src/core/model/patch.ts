@@ -1,6 +1,7 @@
 import type { Doc, EntityCollection, InversePatch, TopField, Touched } from './types';
 import { cloneDoc } from './clone';
 import { importJson } from './json';
+import { upgradeLegacy } from './legacy';
 
 const collections = ['units','orders','measures','sectors'] as const;
 const topFields = ['version','intent','lastTurn','settings'] as const;
@@ -58,6 +59,8 @@ export function restoreInverse(original:Doc,input:unknown):Doc {
     if(value===null)delete (doc as unknown as Record<string,unknown>)[key];
     else (doc as unknown as Record<string,unknown>)[key]=value;
   }
-  // Validate all references and types, and detach restored values from the inverse object.
-  return importJson(JSON.stringify(doc));
+  // Validate all references and types, and detach restored values from the inverse object. Images recorded before
+  // task sync was provider-neutral carry the old field names.
+  const raw=JSON.parse(JSON.stringify(doc)) as Record<string,unknown>;upgradeLegacy(raw);
+  return importJson(JSON.stringify(raw));
 }

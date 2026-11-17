@@ -76,16 +76,16 @@ function samples(doc: Doc): Record<string, Command[]> {
     ...area('obj'), ...area('ea'), ...area('nai'),
     'intent': [c('intent', { text: 'Finish "the" taxes' })],
     'sitrep': [c('sitrep', { copy: false }), c('sitrep', { copy: true })],
-    'vk bind': [c('vk', { action: 'bind', name: 'Life' })], 'vk unbind': [c('vk', { action: 'unbind' })], 'vk sync': [c('vk', { action: 'sync' })], 'vk status': [c('vk', { action: 'status' })],
+    'tasks bind': [c('tasks', { action: 'bind', provider: 'vikunja', name: 'Life' })], 'tasks unbind': [c('tasks', { action: 'unbind' })], 'tasks sync': [c('tasks', { action: 'sync' })], 'tasks status': [c('tasks', { action: 'status' })],
   };
 }
 const key = (e: VerbSlot) => (e.form ? `${e.verb} ${e.form}` : e.verb);
 
-/** The seed plus what some samples need: a pinned unit with a CP, an empty sector, empty areas, a Vikunja binding and a tz. */
+/** The seed plus what some samples need: a pinned unit with a CP, an empty sector, empty areas, a task sync binding and a tz. */
 function fixture(tz?: string): Doc {
   const doc = seedDoc(now);
   if (tz) doc.settings.tz = tz;
-  doc.settings.vikunja = { project: 1, title: 'Life' };
+  doc.settings.taskSync = { provider: 'vikunja', label: 'Vikunja', root: '1', title: 'Life' };
   doc.units.push({ ...doc.units.find(u => u.id === 'knee')!, id: 'pinned', designation: 'PINNED', title: 'Pinned one', posOverride: true, cp: 'main' });
   doc.sectors.push({ id: 'empty', name: 'Empty one', startDeg: 0, widthDeg: 1 });
   for (const m of doc.measures) if (m.type !== 'pl') m.members = [];
@@ -108,12 +108,12 @@ describe.each([undefined, 'America/New_York'])('parse(format(c)) is c (tz %s)', 
     it(`${name}: ${JSON.stringify(cmd.args)}`, () => {
       const doc = docFor(base, cmd), text = format(cmd, doc);
       expect(text.startsWith(`/${cmd.verb} `) || text === `/${cmd.verb}`, text).toBe(true);
-      const parsed = parse(text, doc, { now, vikunja: true });
+      const parsed = parse(text, doc, { now, providers: [{ id: 'vikunja', label: 'Vikunja', aliases: ['vk'], rootNoun: 'project' }] });
       if (!parsed.ok) throw new Error(`${text}: ${parsed.error}`);
       // /moving onto a hostile becomes an attack; everything else keeps its verb.
       expect(parsed.cmd.verb, text).toBe(cmd.verb);
       expect(parsed.cmd.args, text).toEqual(cmd.args);
-      if (cmd.verb !== 'vk') expect('error' in apply(doc, parsed.cmd, now), text).toBe(false);
+      if (cmd.verb !== 'tasks') expect('error' in apply(doc, parsed.cmd, now), text).toBe(false);
     });
   }
 });

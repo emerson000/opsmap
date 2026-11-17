@@ -20,17 +20,20 @@ import { Store, type User } from '../../server/db';
 import { Maps } from '../../server/maps';
 import { MUTATION_VERBS, type Hub } from '../../server/hub';
 import { CLIENT_ONLY, mcpRequest } from '../../server/mcp';
+import { taskProviders, type VikunjaSync } from '../../server/vikunja/sync';
+import { features } from '../../src/lib/model/features.svelte';
 
 const TZ='America/New_York';
+const providers=taskProviders(true);
 type Answer={ok:true;log:string;[k:string]:unknown}|{ok:false;error:string;[k:string]:unknown};
 
 describe('verb coverage guard',()=>{
   const doc=emptyDoc(TZ);
   it.each([...VERBS])('/%s has syntax, autocomplete and MCP handling',verb=>{
     expect(Object.hasOwn(SYNTAX,verb),'SYNTAX entry').toBe(true);
-    expect(suggest('/',1,doc,{vikunja:true}).items.map(s=>s.insert),'offered after /').toContain(verb);
-    expect(suggest(`/${verb.slice(0,2)}`,3,doc,{vikunja:true}).items.map(s=>s.insert),'offered by prefix').toContain(verb);
-    if(SYNTAX[verb])expect(suggest(`/${verb} `,verb.length+2,doc,{vikunja:true}).ghost,'syntax ghost').toBe(SYNTAX[verb]);
+    expect(suggest('/',1,doc,{providers}).items.map(s=>s.insert),'offered after /').toContain(verb);
+    expect(suggest(`/${verb.slice(0,2)}`,3,doc,{providers}).items.map(s=>s.insert),'offered by prefix').toContain(verb);
+    if(SYNTAX[verb])expect(suggest(`/${verb} `,verb.length+2,doc,{providers}).ghost,'syntax ghost').toBe(SYNTAX[verb]);
     // Exactly one of: an op the hub accepts from users, or a verb the MCP server answers itself (documented).
     expect(MUTATION_VERBS.has(verb)!==Object.hasOwn(CLIENT_ONLY,verb),'op or CLIENT_ONLY, not both').toBe(true);
     if(Object.hasOwn(CLIENT_ONLY,verb))expect(CLIENT_ONLY[verb].length).toBeGreaterThan(10);
@@ -77,8 +80,8 @@ describe('opsmap_command matches the command bar',()=>{
   });
   afterEach(()=>{engine.stop();useRemote(null);vi.useRealTimers();store.close();rmSync(dir,{recursive:true,force:true});});
   const settle=async()=>{for(let i=0;i<100&&(engine.pendingCount||engine.status!=='live');i++)await new Promise(r=>setTimeout(r,2));await new Promise(r=>setTimeout(r,2));};
-  const call=async(name:string,args:Record<string,unknown>,admin=false):Promise<any>=>{
-    const response=await mcpRequest(new Request('http://localhost/mcp',{method:'POST',headers:{'content-type':'application/json',accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}})}),maps,user,undefined,undefined,admin);
+  const call=async(name:string,args:Record<string,unknown>,admin=false,vikunja?:VikunjaSync):Promise<any>=>{
+    const response=await mcpRequest(new Request('http://localhost/mcp',{method:'POST',headers:{'content-type':'application/json',accept:'application/json, text/event-stream'},body:JSON.stringify({jsonrpc:'2.0',id:1,method:'tools/call',params:{name,arguments:args}})}),maps,user,undefined,vikunja,admin);
     return JSON.parse(((await response.json()) as any).result.content[0].text);
   };
   /** The command bar: select the unit (as a click does), type the text, Enter. Server rejections count as errors. */
@@ -104,7 +107,7 @@ describe('opsmap_command matches the command bar',()=>{
     ['/sector add Learning'],['/ea add "BATCH" in Work mid'],['/ea join BATCH GSINK'],['/nai add "WATCH" in Work far'],['/intent "Finish the taxes"'],['/sidc TAX 13031000141211000000'],
     ['/drop GSINK bypassed'],['/reopen GSINK'],['/done SINK'],['/note MISSING "x"'],['/attack TAX GSINK'],
     ['/find RSP'],['/find OBJ "FINAL GOAL"'],['/find pl liftoff'],['/find sector Work'],['/find obj NOWHERE'],['/sitrep'],['/sitrep copy'],['/export'],['/help'],['/help mv'],['/help nonsense'],['/map'],['/map field'],['/map nowhere'],
-    ['/turn'],['/vk status'],['/view staff'],['/import'],['/undo'],['/redo'],['/undo'],
+    ['/turn'],['/tasks status'],['/tasks bind "Ops"'],['/tasks bind asana "Ops"'],['/tasks unbind'],['/view staff'],['/import'],['/undo'],['/redo'],['/undo'],
   ];
   /** Where the two differ by design (see CLIENT_ONLY in server/mcp.ts); everything else must be identical. */
   const DIFFERENT:Record<string,(bar:DispatchResult,mcp:Answer)=>void>={
@@ -126,6 +129,24 @@ describe('opsmap_command matches the command bar',()=>{
     }
     expect([...seen].sort()).toEqual([...VERBS].sort());
     expect(opened).toEqual([field.mapId]);
+  });
+  it('gives the same /tasks answers with a task service configured',async()=>{
+    // The browser offers the providers from the welcome frame; MCP from the server's sync. The requests themselves
+    // (bind, sync, status on a bound map) call the service: only their grammar and the core are compared here.
+    const requested:unknown[]=[];
+    const sync={request:async(_map:string,args:unknown)=>{requested.push(args);return 'VIKUNJA: not bound';}} as unknown as VikunjaSync;
+    features.vikunja={url:'http://vikunja.test'};
+    try {
+      for(const text of ['/tasks sync','/vk status','/tasks unbind','/vk unbind','/vk frobnicate','/tasks bind asana "Ops"','/tasks','/vk']) {
+        const b=await viaBar(text),m=await call('opsmap_command',{text,map:'field'},true,sync);
+        if(b.ok)expect(m,text).toMatchObject({ok:true,log:b.log});
+        else expect(m,text).toMatchObject({ok:false,error:b.error,...(b.at!==undefined?{at:b.at}:{})});
+        expect(plain(field.doc),text).toEqual(plain(bar.doc));
+      }
+      expect(await viaBar('/tasks sync')).toEqual({ok:false,error:'This map is not bound to a task service: /tasks bind "‹project›"',at:7});
+      expect(await call('opsmap_command',{text:'/vk bind "Ops"',map:'field'},true,sync)).toEqual({ok:true,log:'VIKUNJA: not bound'});
+      expect(requested).toEqual([{action:'bind',provider:'vikunja',name:'Ops'}]);
+    } finally {features.vikunja=null;}
   });
   it('answers the shell verbs with their content',async()=>{
     await viaMcp('/new friend "Response team" as RSP');

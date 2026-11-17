@@ -33,8 +33,8 @@ export interface Unit {
   /** Command post type: draws the HQ staff with MAIN, TAC, ALT or REAR inside the frame. */
   cp?: CommandPost;
   sidcOverride?: string;
-  /** Linked Vikunja task id, when the map is bound to a Vikunja project (`/vk bind`). */
-  vk?: number;
+  /** The linked remote task id, when the map is bound to a task service (`/tasks bind`). Opaque to opsmap. */
+  remote?: string;
   createdAt: string;
   updatedAt: string;
   createdBy?: string;
@@ -54,8 +54,8 @@ export interface Order {
   via?: string[];
   createdAt: string;
 }
-/** `vk`: the Vikunja child project this sector syncs with, when the map is bound. */
-export interface Sector { id: string; name: string; startDeg: number; widthDeg: number; color?: string; vk?: number; }
+/** `remote`: the task service container (project, section) this sector syncs with, when the map is bound. */
+export interface Sector { id: string; name: string; startDeg: number; widthDeg: number; color?: string; remote?: string; }
 /** Area measures (OBJ, EA, NAI) have a center, a minimum radius (`size`) and optional member units; the drawn
  *  area is centered on its members and grows to enclose them. A unit belongs to at most one area. */
 export interface ControlMeasure { id: string; type: 'obj'|'ea'|'nai'|'pl'; name: string; sectorId?: string; pos?: {r:number;theta:number}; size?: number; members?: string[]; date?: string; }
@@ -70,7 +70,9 @@ export interface Doc {
   intent?: { date: string; text: string };
   lastTurn?: string;
   settings: { view: 'commander'|'staff'|'detail'; theme: 'light'|'dark'; autoAdvance: boolean; tz?: string; /** `/ao size` scale (AO_SIZES); absent = medium. */ aoSize?: number;
-    /** The Vikunja project this map (the A/O) is bound to; each sector is one of its child projects. */ vikunja?: { project: number; title: string; /** The user whose Vikunja token syncs it. */ by?: string } };
+    /** The task service project this map (the A/O) is bound to (`/tasks bind`); each sector is one of its containers.
+     *  `provider` is the service id, `label` its name in log lines, `root` its project id. */
+    taskSync?: { provider: string; label: string; root: string; title: string; /** The user whose token syncs it. */ by?: string } };
 }
 export type Command = { verb: string; args: Record<string, unknown>; raw?: string };
 export type View = Doc['settings']['view'];

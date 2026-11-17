@@ -8,7 +8,7 @@ import { ORDER_VERBS } from '../../src/lib/ui/compose';
 /** Verbs the shell owns: they act on no map object (the top bar, legend, keys and map switcher reach them). */
 const SHELL = ['turn', 'view', 'undo', 'redo', 'export', 'import', 'map', 'help'];
 /** Verbs whose SYNTAX alternatives start with an action word: each action is its own row below. */
-const ACTIONS = ['sector', 'pl', 'obj', 'ea', 'nai', 'vk'];
+const ACTIONS = ['sector', 'pl', 'obj', 'ea', 'nai', 'tasks'];
 const area = (v: string): Record<string, ObjKind[]> => ({
   [`${v} add`]: ['map', 'sector'], [`${v} move`]: ['area'], [`${v} join`]: ['area', 'unit'], [`${v} leave`]: ['area', 'unit'],
   [`${v} size`]: ['area'], [`${v} rename`]: ['area'], [`${v} remove`]: ['area'],
@@ -24,7 +24,7 @@ const ACTS_ON: Record<string, ObjKind[]> = {
   'sector add': ['map'], 'sector rename': ['sector'], 'sector remove': ['sector'], 'sector width': ['sector'], 'sector size': ['map'],
   'pl add': ['map'], 'pl date': ['pl'], 'pl rename': ['pl'], 'pl remove': ['pl'],
   ...area('obj'), ...area('ea'), ...area('nai'),
-  'vk bind': ['map', 'sector'], 'vk unbind': ['map', 'sector'], 'vk sync': ['map', 'unit', 'sector'], 'vk status': ['map', 'unit', 'sector'],
+  'tasks bind': ['map', 'sector'], 'tasks unbind': ['map', 'sector'], 'tasks sync': ['map', 'unit', 'sector'], 'tasks status': ['map', 'unit', 'sector'],
 };
 const actionsOf = (verb: string) => [...new Set(SYNTAX[verb].split(' | ').map(alt => alt.split(' ')[0]))];
 const rows = VERBS.filter(v => !SHELL.includes(v)).flatMap(v => (ACTIONS.includes(v) ? actionsOf(v).map(a => `${v} ${a}`) : [v]));

@@ -1,7 +1,7 @@
 import type { Command, Doc, Unit } from '../model/types';
-import { apply, functions, identities, sizes, VK_REQUESTS } from './apply';
+import { apply, boundElsewhere, functions, identities, NOT_BOUND, sizes, TASK_REQUESTS } from './apply';
 import { aliases, VERBS } from './syntax';
-export { VK_REQUESTS };
+export { TASK_REQUESTS };
 export { aliases, helpText, SYNTAX, VERBS } from './syntax';
 import { AO_SIZES, AREA_SIZES } from '../model/geometry';
 import { nearestHostile, resolveMeasure, resolveSector, resolveTarget, resolveUnit } from './resolve';
@@ -12,7 +12,12 @@ const rings=['hq','near','mid','far','beyond'];
 export const ringAliases:Record<string,string>={close:'near',deep:'mid',aoi:'far'};
 const ringWord=(v:string)=>ringAliases[v.toLowerCase()]??v.toLowerCase();
 const RING_HELP='hq, near (close), mid (deep), far (aoi) or beyond';
-export interface ParseContext { selectedId?:string|null; now?:Date; /** The server has Vikunja sync configured: /vk is available. */ vikunja?:boolean; }
+/** A task service the server has configured, as the grammar sees it: its aliases work as verbs (`/vk` = `/tasks`
+ *  with that provider), and `/tasks bind ‹id or alias› "‹project›"` names it. */
+export interface ProviderInfo { id:string; label:string; aliases:string[]; rootNoun:string }
+export interface ParseContext { selectedId?:string|null; now?:Date; /** The task services configured on the server: /tasks is available when any is. */ providers?:ProviderInfo[]; }
+/** The provider an id or alias names, if any. */
+export function providerNamed(word:string,providers:readonly ProviderInfo[]=[]):ProviderInfo|undefined {const w=word.toLowerCase();return providers.find(p=>p.id===w||p.aliases.includes(w));}
 
 export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult {
  const now=context.now??new Date();
@@ -21,7 +26,7 @@ export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult 
   if(!input.trimStart().startsWith('/'))throw new CommandError('Start commands with /',0);
   const tokens=tokenize(input);let i=0;
   const first=tokens[i++];if(!first)throw new CommandError('Enter a command',input.length);
-  const typed=first.value.slice(1).toLowerCase(),verb=aliases[typed]??typed;
+  const typed=first.value.slice(1).toLowerCase(),implied=aliases[typed]?undefined:providerNamed(typed,context.providers),verb=aliases[typed]??(implied&&!(VERBS as readonly string[]).includes(typed)?'tasks':typed);
   if(!(VERBS as readonly string[]).includes(verb))throw new CommandError(`Unknown command: ${typed}`,first.start+1);
   const a:Record<string,unknown>={};
   const peek=()=>tokens[i];
@@ -137,10 +142,16 @@ export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult 
     }
     else throw new CommandError(`Expected ${actions}`,at);break;
    }
-   case 'vk': {
-    if(!context.vikunja)throw new CommandError('Vikunja sync is not configured on this server',first.start+1);
+   case 'tasks': {
+    const providers=context.providers??[];
+    if(!providers.length)throw new CommandError('No task service is configured on this server',first.start+1);
     const t=take('bind, unbind, sync or status'),action=t.value.toLowerCase();a.action=action;
-    if(action==='bind')a.name=take('Vikunja project name').value;
+    if(action==='bind'){
+     const named=!implied&&peek()&&!peek().quoted&&tokens[i+1]?providerNamed(peek().value,providers):undefined;if(named)take('task service');
+     const provider=implied??named??(providers.length===1?providers[0]:undefined);
+     if(!provider)throw new CommandError(`Name the task service: /tasks bind ‹${providers.map(p=>p.id).join('|')}› "‹project›"`,peek()?.start??input.length);
+     a.provider=provider.id;a.name=take(`${provider.label} ${provider.rootNoun} name`).value;
+    }
     else if(!['unbind','sync','status'].includes(action))throw new CommandError('Expected bind, unbind, sync or status',t.start);
     break;
    }
@@ -157,10 +168,12 @@ export function parse(input:string,doc:Doc,context:ParseContext={}):ParseResult 
   let canonical=verb;
   if(verb==='moving'&&doc.units.some(u=>u.id===a.target&&(u.affiliation==='hostile'||u.affiliation==='suspect')))canonical='attack';
   const cmd:Command={verb:canonical,args:a,raw:input};
-  if(verb==='vk'&&(VK_REQUESTS as readonly string[]).includes(String(a.action))){
-   if(a.action==='bind'&&doc.settings.vikunja&&doc.settings.vikunja.title.toLowerCase()!==String(a.name).toLowerCase())throw new CommandError(`Bound to ${doc.settings.vikunja.title}: /vk unbind first`,at);
-   if(a.action!=='bind'&&!doc.settings.vikunja)throw new CommandError('This map is not bound to Vikunja: /vk bind "‹project›"',at);
-   return {ok:true,cmd,preview:a.action==='bind'?`VIKUNJA BIND ${String(a.name).toUpperCase()}`:`VIKUNJA ${String(a.action).toUpperCase()}`};
+  if(verb==='tasks'&&(TASK_REQUESTS as readonly string[]).includes(String(a.action))){
+   const bound=doc.settings.taskSync;
+   if(a.action==='bind'&&bound&&(bound.provider!==a.provider||bound.title.toLowerCase()!==String(a.name).toLowerCase()))throw new CommandError(boundElsewhere(bound),at);
+   if(a.action!=='bind'&&!bound)throw new CommandError(NOT_BOUND,at);
+   const label=(a.action==='bind'?providerNamed(String(a.provider),context.providers)?.label:bound?.label)??'';
+   return {ok:true,cmd,preview:a.action==='bind'?`${label.toUpperCase()} BIND ${String(a.name).toUpperCase()}`:`${label.toUpperCase()} ${String(a.action).toUpperCase()}`};
   }
   const validation=apply(doc,cmd,now);
   if('error'in validation)throw new CommandError(validation.error,at);

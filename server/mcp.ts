@@ -9,8 +9,8 @@ import { ringForRadius } from '../src/core/model/geometry';
 import type { Doc, Unit } from '../src/core/model/types';
 import type { Maps } from './maps';
 import type { User } from './db';
-import type { VikunjaSync } from './vikunja/sync';
-import { VK_REQUESTS } from '../src/core/commands/apply';
+import { taskProviders, type VikunjaSync } from './vikunja/sync';
+import { TASK_REQUESTS } from '../src/core/commands/apply';
 /**
  * Verbs the browser shell answers itself instead of sending an op, and what opsmap_command does for each.
  * Every other verb is an op (MUTATION_VERBS in hub.ts) and runs exactly as the command bar sends it.
@@ -44,10 +44,10 @@ export async function mcpRequest(request:Request,maps:Maps,user:User,agent?:{id:
     let hub;try{hub=maps.resolve(map);}catch(error){return failure(error);}
     let selectedId:string|undefined;
     if(selected){try{selectedId=resolveUnit(selected,hub.doc).id;}catch(error){return refuse(`Selected unit: ${error instanceof Error?error.message:'unknown'}`);}}
-    const now=new Date(),parsed=parse(text,hub.doc,{now,selectedId,vikunja:Boolean(vikunja)});if(!parsed.ok)return result(parsed);
+    const now=new Date(),parsed=parse(text,hub.doc,{now,selectedId,providers:taskProviders(Boolean(vikunja))});if(!parsed.ok)return result(parsed);
     const {verb,args}=parsed.cmd,log=parsed.preview;
     try {
-      if(verb==='vk'&&vikunja&&(VK_REQUESTS as readonly string[]).includes(String(args.action)))return result({ok:true,log:await vikunja.request(hub.mapId,args,user,'mcp')});
+      if(verb==='tasks'&&vikunja&&(TASK_REQUESTS as readonly string[]).includes(String(args.action)))return result({ok:true,log:await vikunja.request(hub.mapId,args,user,'mcp')});
       switch(verb) {
         case 'find': {
           const doc=hub.doc,des=(id:string)=>doc.units.find(u=>u.id===id)?.designation??id;

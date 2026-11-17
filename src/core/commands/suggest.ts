@@ -2,7 +2,7 @@ import type { Doc, Unit } from '../model/types';
 import { ECHELONS } from '../model/echelon';
 import { FUNCTIONS } from '../model/functions';
 import { RING_ORDER, ringForRadius, ringIndex, ringName } from '../model/geometry';
-import { aliases, SYNTAX, VERBS } from './grammar';
+import { aliases, providerNamed, SYNTAX, VERBS, type ProviderInfo } from './grammar';
 import { identities as identityTokens, sizes as sizeTokens, functions as functionTokens } from './apply';
 import { unresolved } from './resolve';
 import { tokenize } from './tokenize';
@@ -12,8 +12,8 @@ export interface SuggestOptions {
  /** Units this user commanded or selected recently, most recent first. They lead each unit list, so a chain of
   *  commands on one unit needs no typing; then units in that unit's sector, then the most recently changed. */
  recent?:readonly string[];
- /** The server has Vikunja sync: offer /vk. */
- vikunja?:boolean;
+ /** The task services configured on the server: offer /tasks and their aliases (/vk, /asana) when there is any. */
+ providers?:readonly ProviderInfo[];
  /** The shared maps' names, for /map. */
  maps?:readonly string[];
 }
@@ -24,7 +24,10 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
  const complete=/\s$/.test(prefix),last=tokens.at(-1),fragment=complete?'':last?.value??'';
  const previous=complete?tokens:tokens.slice(0,-1);
  const verbText=tokens[0]?.value.replace(/^\//,'').toLowerCase()??'';
- const verb=aliases[verbText]??verbText;
+ const providers=opts.providers??[],implied=aliases[verbText]||(VERBS as readonly string[]).includes(verbText)?undefined:providerNamed(verbText,providers);
+ const verb=aliases[verbText]??(implied?'tasks':verbText);
+ /** Verbs this server offers: /tasks only with a task service. */
+ const offered=(v:string)=>v!=='tasks'||providers.length>0;
  let candidates:Suggestion[]=[];
  // Unit order: units already named in this command last; the verb's own groups (`group`, lower first), except
  // that the unit just used (clicked or commanded) beats a soft group; then recency, then the most recent unit's
@@ -49,13 +52,14 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
  const ringTargets=(outward:boolean):Suggestion[]=>{const here=source?ringIndex(ringForRadius(source.pos.r)):-1;return RING_ORDER.filter((r,i)=>r!=='hq'&&(here<0||(outward?i>here:i<here))).map(r=>({insert:r,label:r,detail:ringName(r),kind:'keyword' as const}));};
 
  if(previous.length===0){
-  candidates=VERBS.filter(v=>v!=='vk'||opts.vikunja).map(v=>({insert:v,label:`/${v}`,detail:SYNTAX[v],kind:'verb'}));
+  candidates=VERBS.filter(offered).map(v=>({insert:v,label:`/${v}`,detail:SYNTAX[v],kind:'verb'}));
   // An alias the user starts typing (`/ret` → /retreat) shows as itself, naming the verb it runs.
   const typed=fragment.replace(/^\//,'').toLowerCase();
-  if(typed)candidates.push(...Object.entries(aliases).filter(([alias,v])=>/^[a-z]/.test(alias)&&alias.startsWith(typed)&&(v!=='vk'||opts.vikunja)).map(([alias,v])=>({insert:alias,label:`/${alias}`,detail:`/${v} ${SYNTAX[v]??''}`.trim(),kind:'verb' as const})));
+  if(typed)candidates.push(...[...Object.entries(aliases),...providers.flatMap(p=>p.aliases.map(alias=>[alias,'tasks'] as [string,string]))].filter(([alias,v])=>/^[a-z]/.test(alias)&&alias.startsWith(typed)&&offered(v)).map(([alias,v])=>({insert:alias,label:`/${alias}`,detail:`/${v} ${SYNTAX[v]??''}`.trim(),kind:'verb' as const})));
  }
- else if(verb==='vk'&&previous.length===1)candidates=opts.vikunja?['bind','unbind','sync','status'].map(s=>keyword(s)):[];
- else if(verb==='vk')candidates=[];
+ else if(verb==='tasks'&&previous.length===1)candidates=providers.length?['bind','unbind','sync','status'].map(s=>keyword(s)):[];
+ else if(verb==='tasks'&&previous.length===2&&!implied&&providers.length>1&&previous[1]?.value.toLowerCase()==='bind')candidates=providers.map(p=>({insert:p.id,label:p.id,detail:p.label,kind:'keyword' as const}));
+ else if(verb==='tasks')candidates=[];
  else if(before==='due'||(verb==='due'&&previous.length===2)||(verb==='pl'&&previous.length===3&&previous[1]?.value.toLowerCase()==='add'))candidates=dates();
  else if(before==='in'||before==='sector'||(before==='to'&&(verb==='move'||['obj','ea','nai'].includes(verb)))||before==='reassign')candidates=sectors();
  else if(verb==='size'&&previous.length===2)candidates=sizes();
@@ -121,7 +125,7 @@ export function suggest(input:string,cursor:number,doc:Doc,opts:SuggestOptions={
  }
  else if(verb==='sitrep')candidates=[keyword('copy')];
  else if(verb==='map')candidates=previous.length===1?(opts.maps??[]).map(name=>({insert:/\s/.test(name)?JSON.stringify(name):name,label:name,detail:'map',kind:'keyword' as const})):[];
- else if(verb==='help')candidates=previous.length===1?VERBS.filter(v=>v!=='vk'||opts.vikunja).map(v=>({insert:v,label:`/${v}`,detail:SYNTAX[v],kind:'keyword' as const})):[];
+ else if(verb==='help')candidates=previous.length===1?VERBS.filter(offered).map(v=>({insert:v,label:`/${v}`,detail:SYNTAX[v],kind:'keyword' as const})):[];
  else if(verb==='attack'&&previous.length>=3)candidates=['main','support','planned'].map(s=>keyword(s));
  else if(['note','rename','intent'].includes(verb)&&((verb==='intent')||previous.length>=2))candidates=[];
  else if(['turn','undo','redo','export','import'].includes(verb))candidates=[];

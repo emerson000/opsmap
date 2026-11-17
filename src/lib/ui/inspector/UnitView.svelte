@@ -178,7 +178,7 @@
     <div class="desig">{unit.designation}</div>
     <div class="ttl">{unit.title}</div>
     <div class="sub">{AFF_LABEL[unit.affiliation]}{unit.cp ? ` · ${unit.cp.toUpperCase()} CP` : unit.fn === 'hq' ? ' · HQ' : ''} · {unit.presence === 'planned' ? 'planned (dashed)' : 'present'} · {LIFECYCLE_LABEL[unit.lifecycle]}</div>
-    {#if unit.vk && features.vikunja}<a class="vk-link" data-testid="vk-link" href="{features.vikunja.url}/tasks/{unit.vk}" target="_blank" rel="noopener noreferrer">Vikunja task #{unit.vk} ↗</a>{/if}
+    {#if unit.remote && features.vikunja}<a class="vk-link" data-testid="vk-link" href="{features.vikunja.url}/tasks/{unit.remote}" target="_blank" rel="noopener noreferrer">Vikunja task #{unit.remote} ↗</a>{/if}
   </div>
 </header>
 
@@ -466,14 +466,14 @@
 </Section>
 
 {#if features.vikunja}
-  <Section kind={K} key="vikunja" title="Vikunja" summary={unit.vk ? `task #${unit.vk}` : 'no task'} open={false}>
+  <Section kind={K} key="vikunja" title="Vikunja" summary={unit.remote ? `task #${unit.remote}` : 'no task'} open={false}>
     <Field label="Task" cmd={null}>
-      {#if unit.vk}<a class="vk-link" href="{features.vikunja.url}/tasks/{unit.vk}" target="_blank" rel="noopener noreferrer">Task #{unit.vk} ↗</a>{:else}<span class="muted">Not synced to a task yet.</span>{/if}
+      {#if unit.remote}<a class="vk-link" href="{features.vikunja.url}/tasks/{unit.remote}" target="_blank" rel="noopener noreferrer">Task #{unit.remote} ↗</a>{:else}<span class="muted">Not synced to a task yet.</span>{/if}
     </Field>
-    <Field label="Map sync" entry={slot('vk', 'sync')} cmd="/vk sync">
+    <Field label="Map sync" entry={slot('tasks', 'sync')} cmd="/tasks sync">
       <div class="pair">
-        <button class="btn" data-testid="vk-sync" title="/vk sync" use:echoes={'/vk sync'} onclick={() => runCommand({ verb: 'vk', args: { action: 'sync' } })}>Sync</button>
-        <button class="btn" data-testid="vk-status" title="/vk status" use:echoes={'/vk status'} onclick={() => runCommand({ verb: 'vk', args: { action: 'status' } })}>Status</button>
+        <button class="btn" data-testid="vk-sync" title="/tasks sync" use:echoes={'/tasks sync'} onclick={() => runCommand({ verb: 'tasks', args: { action: 'sync' } })}>Sync</button>
+        <button class="btn" data-testid="vk-status" title="/tasks status" use:echoes={'/tasks status'} onclick={() => runCommand({ verb: 'tasks', args: { action: 'status' } })}>Status</button>
       </div>
       <span class="note">Sync and Status act on the whole map, not only this unit.</span>
     </Field>

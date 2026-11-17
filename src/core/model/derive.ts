@@ -33,7 +33,7 @@ export function claimDesignation(wanted: string, taken: ReadonlySet<string>): { 
   return { designation: `${d}${suffix}` };
 }
 /**
- * For callers that must never be refused (tasks from Vikunja): what claimDesignation gives for the title, or,
+ * For callers that must never be refused (tasks pulled from a task service): what claimDesignation gives for the title, or,
  * when it refuses a taken name that ends in a digit, that name with a free hyphen number (E1-2), which it accepts.
  */
 export function freeDesignationForTitle(title: string, taken: ReadonlySet<string>): string {

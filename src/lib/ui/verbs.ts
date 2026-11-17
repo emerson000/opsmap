@@ -117,10 +117,10 @@ export const VERB_SLOTS: readonly VerbSlot[] = [
   // Map-wide verbs that the Situation view (and a sector's Vikunja section) offers
   { verb: 'intent', kinds: ['map'], slots: ['"‹one line›"'], control: 'situation-intent', label: 'Intent…', menu: 'form' },
   { verb: 'sitrep', kinds: ['map'], slots: ['[copy]'], control: 'situation-sitrep', label: 'SITREP', menu: 'run' },
-  { verb: 'vk', form: 'bind', kinds: ['map', 'sector'], slots: ['"‹Vikunja project›"'], control: 'vk-bind', label: 'Bind…', menu: 'form' },
-  { verb: 'vk', form: 'unbind', kinds: ['map', 'sector'], slots: [], control: 'vk-unbind', label: 'Unbind…' },
-  { verb: 'vk', form: 'sync', kinds: ['map', 'unit', 'sector'], slots: [], control: 'vk-sync', label: 'Sync', menu: 'run' },
-  { verb: 'vk', form: 'status', kinds: ['map', 'unit', 'sector'], slots: [], control: 'vk-status', label: 'Status', menu: 'run' },
+  { verb: 'tasks', form: 'bind', kinds: ['map', 'sector'], slots: ['[‹service›]', '"‹project›"'], control: 'vk-bind', label: 'Bind…', menu: 'form' },
+  { verb: 'tasks', form: 'unbind', kinds: ['map', 'sector'], slots: [], control: 'vk-unbind', label: 'Unbind…' },
+  { verb: 'tasks', form: 'sync', kinds: ['map', 'unit', 'sector'], slots: [], control: 'vk-sync', label: 'Sync', menu: 'run' },
+  { verb: 'tasks', form: 'status', kinds: ['map', 'unit', 'sector'], slots: [], control: 'vk-status', label: 'Status', menu: 'run' },
 ];
 
 /**
@@ -282,7 +282,7 @@ export function format(cmd: Command, doc: Doc): string {
       }
       break;
     }
-    case 'vk': add(String(a.action), a.action === 'bind' && text(a.name)); break;
+    case 'tasks': add(String(a.action), a.action === 'bind' && String(a.provider), a.action === 'bind' && text(a.name)); break;
     case 'intent': add(text(a.text)); break;
     case 'view': add(String(a.view)); break;
     case 'sitrep': add(a.copy === true && 'copy'); break;
