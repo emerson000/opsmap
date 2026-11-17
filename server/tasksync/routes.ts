@@ -69,8 +69,8 @@ export function taskSyncRoutes(app:Hono,{config,auth,registry,credentials,sync,l
     // Under forged traffic, read nothing unless the URL alone checks out against the map's stored state.
     if(keys(c,provider).some(spent)&&!sync.preverify?.(provider,c.req.param('map')??'',c.req.url)){c.header('Retry-After','1');return c.json({error:'Too many requests'},429);}
     try {
-      // Task services send small event payloads, well under 64 KiB.
-      const text=await boundedText(c.req.raw,64*1024),result=sync.webhook(provider,c.req.param('map')??'',c.req.raw.headers,text,c.req.url);
+      // A delivery can carry a whole task with a long description: at most 256 KiB.
+      const text=await boundedText(c.req.raw,256*1024),result=sync.webhook(provider,c.req.param('map')??'',c.req.raw.headers,text,c.req.url);
       if(result.status>=300)return refuse(c,provider,result.status===401?401:404,result.status===401?'Invalid signature':'Not found');
       for(const [name,value] of Object.entries(result.headers??{}))c.header(name,value);
       return c.json({ok:true},result.status as 200);

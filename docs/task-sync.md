@@ -71,7 +71,7 @@ Polling always runs, and sync is correct without any webhook. Webhooks only brin
 ### The webhook endpoint
 
 - Deliveries post to `PUBLIC_URL/api/tasksync/‹service›/hook/‹map›` (Vikunja keeps its older path, see its page). Each map has its own secret, and each service signs its deliveries; an unsigned or wrongly signed delivery gets 401 and changes nothing. A delivery to a map that is not bound to that service gets 401 too.
-- A request body is at most 64 KiB.
+- A request body is at most 256 KiB.
 - Refused requests are limited, per map (60 at once, then 5 a second) and per client address (200 at once, then 20 a second). Accepted deliveries are never counted. Once a limit is used up, the server answers 429 without reading the body, unless the request's URL already shows it is genuine (Asana's per-webhook nonce). Vikunja's URLs carry no such proof, so during a flood of forged requests Vikunja's real deliveries get 429 as well, and its changes arrive by polling until the flood stops. Behind a reverse proxy the per-address limit sees the proxy's address, so it works as one limit for the whole server.
 
 ## Commands and hints

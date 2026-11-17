@@ -12,7 +12,7 @@ const rings=['hq','near','mid','far','beyond'];
 export const ringAliases:Record<string,string>={close:'near',deep:'mid',aoi:'far'};
 const ringWord=(v:string)=>ringAliases[v.toLowerCase()]??v.toLowerCase();
 const RING_HELP='hq, near (close), mid (deep), far (aoi) or beyond';
-/** A task service the server has configured, as the grammar sees it: its aliases work as verbs (`/vk` = `/tasks`
+/** A task service the server has configured, as the grammar sees it: its aliases work as verbs (`/‹alias›` = `/tasks`
  *  with that provider), and `/tasks bind ‹id or alias› "‹project›"` names it. */
 export interface ProviderInfo { id:string; label:string; aliases:string[]; rootNoun:string }
 export interface ParseContext { selectedId?:string|null; now?:Date; /** The task services configured on the server: /tasks is available when any is. */ providers?:ProviderInfo[]; }

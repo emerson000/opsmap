@@ -50,11 +50,11 @@ describe('webhook route: the limiter bounds work', () => {
     expect((await t.post({ 'x-ok': '1' }, w.body)).status).toBe(429);
     expect(w.pulled).toBe(false);
   });
-  it('before any refusal nothing is preverified, and bodies over 64 KiB are refused', async () => {
+  it('before any refusal nothing is preverified, and bodies over 256 KiB are refused (a full task with a long description fits)', async () => {
     const t = setup(() => false);
     expect((await t.post({ 'x-ok': '1' })).status).toBe(200);
     expect(t.checked).toEqual([]);
-    expect((await t.post({ 'x-ok': '1' }, 'x'.repeat(64 * 1024))).status).toBe(200);
-    expect((await t.post({ 'x-ok': '1' }, 'x'.repeat(64 * 1024 + 1))).status).toBe(400);
+    expect((await t.post({ 'x-ok': '1' }, 'x'.repeat(256 * 1024))).status).toBe(200);
+    expect((await t.post({ 'x-ok': '1' }, 'x'.repeat(256 * 1024 + 1))).status).toBe(400);
   });
 });
