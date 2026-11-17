@@ -1,3 +1,4 @@
+import { inspect } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createServer, type IncomingMessage, type Server } from 'node:http';
 import { HttpAsApi, AsHttpError, TASK_FIELDS } from '../../../server/providers/asana/api';
@@ -82,6 +83,26 @@ describe('HttpAsApi over HTTP', () => {
       'DELETE /tasks/10 ',
       'POST /webhooks {"data":{"resource":"5","target":"https://x.example/h"}}',
     ]);
+  });
+
+  it('fails loudly when pages never end or the offset sticks, instead of returning partial rows', async () => {
+    let n = 0; reply = () => ({ json: { data: [{ gid: String(n++) }], next_page: { offset: `o${n}` } } });
+    await expect(new HttpAsApi('t', base).tasks('50')).rejects.toThrow('Asana GET /tasks: more than 200 pages');
+    reply = () => ({ json: { data: [{ gid: '1' }], next_page: { offset: 'same' } } }); seen.length = 0;
+    await expect(new HttpAsApi('t', base).tasks('50')).rejects.toThrow(/same page offset/);
+    expect(seen).toHaveLength(2);
+  });
+
+  it('does not expose the token to inspect or JSON.stringify', () => {
+    const api = new HttpAsApi('secret-tok-xyz', base);
+    expect(inspect(api, { depth: 5 })).not.toContain('secret-tok-xyz'); expect(JSON.stringify(api)).not.toContain('secret-tok-xyz');
+  });
+
+  it('a subtask body carries neither projects nor workspace, and gids are URL-encoded', async () => {
+    reply = () => ({ json: { data: { gid: '1' } } });
+    const api = new HttpAsApi('t', base);
+    await api.createTask({ name: 'x', parent: '4', projects: ['5'], workspace: '2' }); await api.task('a/b?c');
+    expect(seen[0].body).toBe('{"data":{"name":"x"}}'); expect(seen[1].url.split('?')[0]).toBe('/tasks/a%2Fb%3Fc');
   });
 
   it('times out', async () => {

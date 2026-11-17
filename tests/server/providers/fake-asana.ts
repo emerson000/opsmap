@@ -108,10 +108,10 @@ export class FakeAsana implements AsApi {
   }
   async tags(workspace: string) { this.enter('tags', workspace); return [...this.tagsById.values()].filter(t => t.workspace === workspace).map(t => ({ gid: t.gid, name: t.name })); }
   async createTag(workspace: string, name: string) {
-    this.enter('createTag', workspace, name); if (!workspace) throw new AsHttpError(400, 'Asana POST /tags: You should specify one of workspace');
+    this.enter('createTag', workspace, name); if (!workspace || !this.workspaces.has(workspace)) throw new AsHttpError(400, 'Asana POST /tags: You should specify one of workspace');
     const t = { gid: this.id(), name, workspace }; this.tagsById.set(t.gid, t); return { gid: t.gid, name };
   }
-  async addTag(task: string, tag: string) { this.enter('addTag', task, tag); const r = this.rec(task, 'POST', `/tasks/${task}/addTag`); if (!r.tags.includes(tag)) r.tags.push(tag); this.touch(r); }
+  async addTag(task: string, tag: string) { this.enter('addTag', task, tag); const r = this.rec(task, 'POST', `/tasks/${task}/addTag`); if (!this.tagsById.has(tag)) throw notFound('POST', `/tasks/${task}/addTag`, 'tag: Not a recognized ID'); if (!r.tags.includes(tag)) r.tags.push(tag); this.touch(r); }
   async removeTag(task: string, tag: string) { this.enter('removeTag', task, tag); const r = this.rec(task, 'POST', `/tasks/${task}/removeTag`); r.tags = r.tags.filter(t => t !== tag); this.touch(r); }
   async webhooks(workspace: string, resource?: string) { this.enter('webhooks', workspace); return [...this.hooks.values()].filter(h => h.workspace === workspace && (!resource || h.resource?.gid === resource)).map(({ workspace: _w, ...h }) => structuredClone(h)); }
   async createWebhook(resource: string, target: string) {

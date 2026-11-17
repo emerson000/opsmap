@@ -52,6 +52,7 @@ export interface AsApi {
   deleteWebhook(gid: string): Promise<void>;
 }
 
+const e = encodeURIComponent;
 export class AsHttpError extends Error {
   constructor(readonly status: number, message: string, readonly retryAfterS?: number) { super(message); }
 }
@@ -59,11 +60,12 @@ export class AsHttpError extends Error {
 export class HttpAsApi implements AsApi {
   private readonly base: string;
   /** The token is only held here and sent as a Bearer header; it is never logged or put in an error. */
-  constructor(private readonly token: string, base = 'https://app.asana.com/api/1.0', private readonly timeoutMs = 15000) { this.base = base.replace(/\/+$/, ''); }
+  #token: string;
+  constructor(token: string, base = 'https://app.asana.com/api/1.0', private readonly timeoutMs = 15000) { this.#token = token; this.base = base.replace(/\/+$/, ''); }
   private async call<T>(method: string, path: string, body?: unknown): Promise<{ data: T; next: string | null }> {
     const res = await fetch(this.base + path, {
       method,
-      headers: { Authorization: `Bearer ${this.token}`, Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
+      headers: { Authorization: `Bearer ${this.#token}`, Accept: 'application/json', ...(body === undefined ? {} : { 'Content-Type': 'application/json' }) },
       body: body === undefined ? undefined : JSON.stringify({ data: body }),
       signal: AbortSignal.timeout(this.timeoutMs),
     });
@@ -77,39 +79,42 @@ export class HttpAsApi implements AsApi {
     return { data: json.data as T, next: json.next_page?.offset ?? null };
   }
   private async list<T>(path: string): Promise<T[]> {
-    const out: T[] = [];
-    for (let offset: string | null = null, i = 0; i < 200; i++) {
+    const out: T[] = [], max = 200;
+    for (let offset: string | null = null, i = 0; ; i++) {
+      if (i >= max) throw new Error(`Asana GET ${path.split('?')[0]}: more than ${max} pages`);
       const { data, next }: { data: T[]; next: string | null } = await this.call<T[]>('GET', `${path}${path.includes('?') ? '&' : '?'}limit=100${offset ? `&offset=${encodeURIComponent(offset)}` : ''}`);
-      out.push(...(data ?? [])); if (!(offset = next)) break;
+      out.push(...(data ?? []));
+      if (!next) return out;
+      if (next === offset) throw new Error(`Asana GET ${path.split('?')[0]}: the same page offset came back twice`);
+      offset = next;
     }
-    return out;
   }
   private q(params: Record<string, string | undefined>) { return new URLSearchParams(Object.entries(params).filter(([, v]) => v !== undefined) as [string, string][]).toString(); }
   me() { return this.call<AsUser>('GET', `/users/me?${this.q({ opt_fields: 'name,workspaces.name' })}`).then(r => r.data); }
   projects(workspace: string) { return this.list<AsProject>(`/projects?${this.q({ workspace, opt_fields: 'name,archived,workspace.name' })}`); }
-  project(gid: string) { return this.call<AsProject>('GET', `/projects/${gid}?${this.q({ opt_fields: 'name,archived,workspace.name' })}`).then(r => r.data); }
+  project(gid: string) { return this.call<AsProject>('GET', `/projects/${e(gid)}?${this.q({ opt_fields: 'name,archived,workspace.name' })}`).then(r => r.data); }
   createProject(workspace: string, name: string) { return this.call<AsProject>('POST', '/projects', { name, workspace }).then(r => r.data); }
-  sections(project: string) { return this.list<AsSection>(`/projects/${project}/sections?${this.q({ opt_fields: 'name' })}`); }
-  createSection(project: string, name: string) { return this.call<AsSection>('POST', `/projects/${project}/sections`, { name }).then(r => r.data); }
-  renameSection(gid: string, name: string) { return this.call<AsSection>('PUT', `/sections/${gid}`, { name }).then(r => r.data); }
+  sections(project: string) { return this.list<AsSection>(`/projects/${e(project)}/sections?${this.q({ opt_fields: 'name' })}`); }
+  createSection(project: string, name: string) { return this.call<AsSection>('POST', `/projects/${e(project)}/sections`, { name }).then(r => r.data); }
+  renameSection(gid: string, name: string) { return this.call<AsSection>('PUT', `/sections/${e(gid)}`, { name }).then(r => r.data); }
   tasks(project: string, completedSince?: string) { return this.list<AsTask>(`/tasks?${this.q({ project, completed_since: completedSince, opt_fields: TASK_FIELDS })}`); }
-  subtasks(parent: string, completedSince?: string) { return this.list<AsTask>(`/tasks/${parent}/subtasks?${this.q({ completed_since: completedSince, opt_fields: TASK_FIELDS })}`); }
+  subtasks(parent: string, completedSince?: string) { return this.list<AsTask>(`/tasks/${e(parent)}/subtasks?${this.q({ completed_since: completedSince, opt_fields: TASK_FIELDS })}`); }
   async task(gid: string) {
-    try { return (await this.call<AsTask>('GET', `/tasks/${gid}?${this.q({ opt_fields: TASK_FIELDS })}`)).data; }
+    try { return (await this.call<AsTask>('GET', `/tasks/${e(gid)}?${this.q({ opt_fields: TASK_FIELDS })}`)).data; }
     catch (error) { if (error instanceof AsHttpError && error.status === 404) return null; throw error; }
   }
-  createTask({ parent, ...fields }: AsNewTask) { return this.call<AsTask>('POST', parent ? `/tasks/${parent}/subtasks?${this.q({ opt_fields: TASK_FIELDS })}` : `/tasks?${this.q({ opt_fields: TASK_FIELDS })}`, fields).then(r => r.data); }
-  updateTask(gid: string, fields: AsTaskFields) { return this.call<AsTask>('PUT', `/tasks/${gid}?${this.q({ opt_fields: TASK_FIELDS })}`, fields).then(r => r.data); }
-  async deleteTask(gid: string) { await this.call('DELETE', `/tasks/${gid}`); }
-  async addToSection(section: string, task: string) { await this.call('POST', `/sections/${section}/addTask`, { task }); }
-  async addProject(task: string, project: string, section?: string) { await this.call('POST', `/tasks/${task}/addProject`, { project, ...(section ? { section } : {}) }); }
-  async removeProject(task: string, project: string) { await this.call('POST', `/tasks/${task}/removeProject`, { project }); }
-  async setParent(task: string, parent: string | null) { await this.call('POST', `/tasks/${task}/setParent`, { parent }); }
+  createTask({ parent, projects, workspace, ...fields }: AsNewTask) { return this.call<AsTask>('POST', parent ? `/tasks/${e(parent)}/subtasks?${this.q({ opt_fields: TASK_FIELDS })}` : `/tasks?${this.q({ opt_fields: TASK_FIELDS })}`, parent ? fields : { ...fields, ...(projects ? { projects } : {}), ...(workspace ? { workspace } : {}) }).then(r => r.data); }
+  updateTask(gid: string, fields: AsTaskFields) { return this.call<AsTask>('PUT', `/tasks/${e(gid)}?${this.q({ opt_fields: TASK_FIELDS })}`, fields).then(r => r.data); }
+  async deleteTask(gid: string) { await this.call('DELETE', `/tasks/${e(gid)}`); }
+  async addToSection(section: string, task: string) { await this.call('POST', `/sections/${e(section)}/addTask`, { task }); }
+  async addProject(task: string, project: string, section?: string) { await this.call('POST', `/tasks/${e(task)}/addProject`, { project, ...(section ? { section } : {}) }); }
+  async removeProject(task: string, project: string) { await this.call('POST', `/tasks/${e(task)}/removeProject`, { project }); }
+  async setParent(task: string, parent: string | null) { await this.call('POST', `/tasks/${e(task)}/setParent`, { parent }); }
   tags(workspace: string) { return this.list<AsTag>(`/tags?${this.q({ workspace, opt_fields: 'name' })}`); }
   createTag(workspace: string, name: string) { return this.call<AsTag>('POST', '/tags', { name, workspace }).then(r => r.data); }
-  async addTag(task: string, tag: string) { await this.call('POST', `/tasks/${task}/addTag`, { tag }); }
-  async removeTag(task: string, tag: string) { await this.call('POST', `/tasks/${task}/removeTag`, { tag }); }
+  async addTag(task: string, tag: string) { await this.call('POST', `/tasks/${e(task)}/addTag`, { tag }); }
+  async removeTag(task: string, tag: string) { await this.call('POST', `/tasks/${e(task)}/removeTag`, { tag }); }
   webhooks(workspace: string, resource?: string) { return this.list<AsWebhook>(`/webhooks?${this.q({ workspace, resource, opt_fields: 'target,active,resource.name' })}`); }
   createWebhook(resource: string, target: string) { return this.call<AsWebhook>('POST', '/webhooks', { resource, target }).then(r => r.data); }
-  async deleteWebhook(gid: string) { await this.call('DELETE', `/webhooks/${gid}`); }
+  async deleteWebhook(gid: string) { await this.call('DELETE', `/webhooks/${e(gid)}`); }
 }

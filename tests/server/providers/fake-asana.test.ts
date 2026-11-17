@@ -50,8 +50,10 @@ describe('FakeAsana (spike behavior)', () => {
   it('tag creation needs a workspace; tags add and remove, also on subtasks', async () => {
     const { a, ws, p } = await setup();
     expect(await a.createTag('', 'x').catch(e => e)).toMatchObject({ status: 400, message: expect.stringContaining('workspace') });
+    expect(await a.createTag('9999', 'x').catch(e => e)).toMatchObject({ status: 400 });
     const tag = await a.createTag(ws, 'doing'); expect((await a.tags(ws)).map(t => t.name)).toEqual(['doing']);
     const top = await a.createTask({ name: 'P', projects: [p.gid] }), kid = await a.createTask({ name: 'C', parent: top.gid });
+    expect(await a.addTag(kid.gid, 'nope').catch(e => e)).toMatchObject({ status: 404 });
     await a.addTag(kid.gid, tag.gid); expect((await a.task(kid.gid))!.tags.map(t => t.name)).toEqual(['doing']);
     await a.removeTag(kid.gid, tag.gid); expect((await a.task(kid.gid))!.tags).toEqual([]);
   });
