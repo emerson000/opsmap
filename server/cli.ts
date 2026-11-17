@@ -20,9 +20,9 @@ try {
     for(const line of taskSyncSummary(store))console.log(line);
     if(!args.includes('--dry-run')) {
       const keyFile=process.env.OPSMAP_SECRET_KEY_FILE||join(dataDir,'secrets','master.key');
-      if(existsSync(keyFile))migrateTokens(store,SecretBox.fromFile(keyFile));
+      if(existsSync(keyFile))migrateTokens(store,SecretBox.fromFile(keyFile),line=>console.log(line));
       else console.log(`No secret key at ${keyFile}: tokens are copied when the server starts with it`);
-      migrateTaskSync(store);
+      migrateTaskSync(store,line=>console.log(line));
       console.log('migrated');
     }
   }else throw new Error(USAGE);

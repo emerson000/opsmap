@@ -111,6 +111,23 @@ describe('D8 migration', () => {
     expect(tables(store)).not.toContain('vk_tokens');
   });
 
+  it('keeps vk_tokens when the key cannot open them (a new key), says how many, and copies them on a start with the right key', () => {
+    const store = oldStore(), lines: string[] = [];
+    migrateTokens(store, SecretBox.fromKey(Buffer.alloc(32, 9)), line => lines.push(line));
+    expect(lines).toEqual(['Task sync: 1 Vikunja token could not be opened with this secret key; it stays in vk_tokens until a start with the right key']);
+    expect(lines.join()).not.toContain('tk_old_token');
+    expect(store.meta('ts_tokens_from_vk')).toBeUndefined();
+    migrateTaskSync(store);
+    expect(tables(store)).toContain('vk_tokens');
+    expect(store.db.prepare('SELECT COUNT(*) AS n FROM ts_tokens').get()).toEqual({ n: 0 });
+    const registry = new ProviderRegistry([new FakeProvider({ id: 'vikunja', label: 'Vikunja' })]);
+    const credentials = new Credentials(store, box, registry);
+    expect(credentials.token('u1', 'vikunja')).toBe('tk_old_token');
+    expect(store.meta('ts_tokens_from_vk')).toBe('1');
+    migrateTaskSync(store);
+    expect(tables(store)).not.toContain('vk_tokens');
+  });
+
   it('runs as the CLI does it, without the server: tokens first, then the rest', () => {
     const store = oldStore();
     migrateTokens(store, box);
@@ -206,6 +223,17 @@ describe('D8 migration on a journal that cannot be replayed from empty', () => {
     expect(JSON.stringify(snapshots(store))).toBe(before);
     expect(store.meta('tasksync_v1')).toBeUndefined();
     expect(store.db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE name='vk_links'").get()).toEqual({ n: 1 });
+  });
+
+  it('deletes an older snapshot that does not upgrade, reports it, and migrates from the latest', () => {
+    const store = unreplayableStore(), lines: string[] = [];
+    store.db.prepare('INSERT INTO snapshots(map_id,seq,doc,at) VALUES(?,?,?,?)').run('main', 5, '{"stale":true}', '2026-11-01T12:00:00.000Z');
+    expect(taskSyncSummary(store)[0]).toMatch(/^map main: snapshots 5 fails, deleted on migrate \(Invalid document: unsupported version\), 6 ok;/);
+    migrateTaskSync(store, line => lines.push(line));
+    expect(lines).toEqual(['Task sync: deleted snapshot of map main at seq 5, an older one that does not upgrade (Invalid document: unsupported version); the map starts from seq 6']);
+    expect(snapshots(store).map(r => r.seq)).toEqual([6]);
+    expect(store.meta('tasksync_v1')).toBe('1');
+    expect(new Maps(store, 'UTC').get('main')!.doc.settings.taskSync).toMatchObject({ provider: 'vikunja', root: '39' });
   });
 
   it('upgrades the snapshots of a server where D8 already ran without them (its own meta key)', () => {

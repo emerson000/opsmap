@@ -8,20 +8,24 @@ import { importStored } from '../../src/core/model/json';
 import { TASK_SYNC_TABLES } from './links';
 /** The owner a token is sealed for: a sealed value opens only for its user and provider. */
 export const tokenOwner=(userId:string,provider:string)=>`${provider}:${userId}`;
-/** Vikunja tokens (vk_tokens, sealed for the user alone) → ts_tokens, sealed for the user and provider `vikunja`.
- *  vk_tokens stays until the full migration drops it; a token that no longer opens is not copied. */
+/** Vikunja tokens (vk_tokens, sealed for the user alone) → ts_tokens, sealed for the user and provider `vikunja`. Each
+ *  copied row leaves vk_tokens; a row this key cannot open (a key file lost or replaced) stays there, with one line saying
+ *  how many, until a start with the right key. Only once none is left (meta ts_tokens_from_vk) may vk_tokens be dropped. */
 export const TOKENS_TABLE='CREATE TABLE IF NOT EXISTS ts_tokens(user_id TEXT NOT NULL,provider TEXT NOT NULL,sealed TEXT NOT NULL,username TEXT NOT NULL,saved_at TEXT NOT NULL,PRIMARY KEY(user_id,provider))';
-export function migrateTokens(store:Store,box:SecretBox):void {
+export function migrateTokens(store:Store,box:SecretBox,report:(line:string)=>void=console.warn):void {
   store.db.exec(TOKENS_TABLE);
   if(store.meta('ts_tokens_from_vk')==='1')return;
   const has=store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='vk_tokens'").get();
   const rows=has?store.db.prepare('SELECT user_id,sealed,username,saved_at FROM vk_tokens').all() as {user_id:string;sealed:string;username:string;saved_at:string}[]:[];
-  const put=store.db.prepare("INSERT OR IGNORE INTO ts_tokens(user_id,provider,sealed,username,saved_at) VALUES(?,'vikunja',?,?,?)");
+  const put=store.db.prepare("INSERT OR IGNORE INTO ts_tokens(user_id,provider,sealed,username,saved_at) VALUES(?,'vikunja',?,?,?)"),done=has?store.db.prepare('DELETE FROM vk_tokens WHERE user_id=?'):undefined;
+  let closed=0;
   store.db.exec('BEGIN IMMEDIATE');
   try {
-    for(const r of rows){let token:string;try{token=box.open(r.sealed,r.user_id);}catch{continue;}put.run(r.user_id,box.seal(token,tokenOwner(r.user_id,'vikunja')),r.username,r.saved_at);}
-    store.setMeta('ts_tokens_from_vk','1');store.db.exec('COMMIT');
+    for(const r of rows){let token:string;try{token=box.open(r.sealed,r.user_id);}catch{closed++;continue;}put.run(r.user_id,box.seal(token,tokenOwner(r.user_id,'vikunja')),r.username,r.saved_at);done!.run(r.user_id);}
+    if(!closed)store.setMeta('ts_tokens_from_vk','1');
+    store.db.exec('COMMIT');
   }catch(error){store.db.exec('ROLLBACK');throw error;}
+  if(closed)report(`Task sync: ${closed} Vikunja token${closed===1?'':'s'} could not be opened with this secret key; ${closed===1?'it stays':'they stay'} in vk_tokens until a start with the right key`);
 }
 const hasTable=(store:Store,name:string)=>Boolean(store.db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name));
 const count=(store:Store,sql:string,...args:string[])=>(store.db.prepare(sql).get(...args) as {n:number}).n;
@@ -32,20 +36,29 @@ function upgradeSnapshot(row:SnapshotRow):Doc {
   try{return importStored(row.doc);}catch(error){throw new Error(`Snapshot of map ${row.map_id} at seq ${row.seq} does not upgrade: ${error instanceof Error?error.message:String(error)}`);}
 }
 /** Every stored snapshot rewritten in the neutral shape, once (meta tasksync_snapshots_v1). Snapshots are never cleared:
- *  an old journal may not replay from empty (rules changed after its ops), so they are the only reliable state. */
-function upgradeSnapshots(store:Store):void {
+ *  an old journal may not replay from empty (rules changed after its ops), so they are the only reliable state. Each
+ *  map's latest snapshot must upgrade; an older one that does not is deleted (the hub boots only from the latest), and reported. */
+function upgradeSnapshots(store:Store,notes:string[]):void {
   if(store.meta('tasksync_snapshots_v1')==='1')return;
-  const put=store.db.prepare('UPDATE snapshots SET doc=? WHERE map_id=? AND seq=?');
-  for(const row of snapshotRows(store))put.run(JSON.stringify(upgradeSnapshot(row)),row.map_id,row.seq);
+  const put=store.db.prepare('UPDATE snapshots SET doc=? WHERE map_id=? AND seq=?'),drop=store.db.prepare('DELETE FROM snapshots WHERE map_id=? AND seq=?');
+  const rows=snapshotRows(store),latest=new Map(rows.map(r=>[r.map_id,r.seq]));
+  for(const row of rows) {
+    if(row.seq===latest.get(row.map_id)){put.run(JSON.stringify(upgradeSnapshot(row)),row.map_id,row.seq);continue;}
+    let doc:Doc;try{doc=upgradeSnapshot(row);}catch(error){drop.run(row.map_id,row.seq);notes.push(`Task sync: deleted snapshot of map ${row.map_id} at seq ${row.seq}, an older one that does not upgrade (${reason(error)}); the map starts from seq ${latest.get(row.map_id)}`);continue;}
+    put.run(JSON.stringify(doc),row.map_id,row.seq);
+  }
   store.setMeta('tasksync_snapshots_v1','1');
 }
+const reason=(error:unknown)=>(error instanceof Error?error.message:String(error)).replace(/^.*does not upgrade: /,'');
 /** D8: the Vikunja sync's links (vk_links) and per-map state (vk_maps) → ts_links and ts_maps, once (meta tasksync_v1),
  *  and every snapshot upgraded in place (upgradeSnapshots), in one transaction; a row or snapshot that does not fit rolls
- *  it all back. Task ids become strings; the agreed values keep their field names. vk_tokens goes once its copy into
- *  ts_tokens has run (migrateTokens, which needs the secret key), so a token removed since never comes back. */
-export function migrateTaskSync(store:Store):void {
+ *  it all back (an older snapshot that does not upgrade is deleted instead, and `report`ed). Task ids become strings; the
+ *  agreed values keep their field names. vk_tokens goes once every token in it was copied into ts_tokens (migrateTokens,
+ *  which needs the secret key), so a token removed since never comes back. */
+export function migrateTaskSync(store:Store,report:(line:string)=>void=console.warn):void {
   store.db.exec(TASK_SYNC_TABLES);
   if(store.meta('tasksync_v1')!=='1'||store.meta('tasksync_snapshots_v1')!=='1') {
+    const notes:string[]=[];
     store.db.exec('BEGIN IMMEDIATE');
     try {
       if(store.meta('tasksync_v1')!=='1') {
@@ -63,9 +76,10 @@ export function migrateTaskSync(store:Store):void {
         store.db.exec('DROP TABLE IF EXISTS vk_links; DROP TABLE IF EXISTS vk_maps;');
         store.setMeta('tasksync_v1','1');
       }
-      upgradeSnapshots(store);
+      upgradeSnapshots(store,notes);
       store.db.exec('COMMIT');
     }catch(error){store.db.exec('ROLLBACK');throw error;}
+    for(const line of notes)report(line);
   }
   if(store.meta('ts_tokens_from_vk')==='1'&&hasTable(store,'vk_tokens'))store.db.exec('DROP TABLE vk_tokens');
 }
@@ -89,7 +103,7 @@ export function taskSyncSummary(store:Store):string[] {
   const tokens=hasTable(store,'vk_tokens')?count(store,'SELECT COUNT(*) AS n FROM vk_tokens'):hasTable(store,'ts_tokens')?count(store,"SELECT COUNT(*) AS n FROM ts_tokens WHERE provider='vikunja'"):0;
   const ids=[...new Set([...(vkMaps?(store.db.prepare('SELECT map_id FROM vk_maps').all() as {map_id:string}[]).map(r=>r.map_id):[]),...snaps.map(r=>r.map_id)])].sort();
   return ids.map(id=>{
-    const mine=snaps.filter(r=>r.map_id===id),status=mine.map(r=>{try{upgradeSnapshot(r);return `${r.seq} ok`;}catch(error){return `${r.seq} fails (${(error as Error).message.replace(/^.*does not upgrade: /,'')})`;}});
+    const mine=snaps.filter(r=>r.map_id===id),status=mine.map((r,i)=>{try{upgradeSnapshot(r);return `${r.seq} ok`;}catch(error){return `${r.seq} fails${i<mine.length-1?', deleted on migrate':''} (${reason(error)})`;}});
     let bound:string,linked='';
     try {
       const doc=boot(store,id,mine.at(-1)),ts=doc.settings.taskSync;
