@@ -127,6 +127,32 @@ describe('task sync engine: capabilities', () => {
     expect(await t.engine.run(t.mapId)).toMatch(/^0 pushed, 0 pulled/);
   });
 
+  it('a new task force and its new member: the parent task is made first, and the member is made under it', async () => {
+    const t = await setup();
+    await t.bind();
+    t.run('/new "Plan the party" in Family near as PARTY');
+    t.run('/new "Order the cake" in Family near as CAKE');
+    t.run('/attach CAKE to PARTY');
+    t.fake.calls.length = 0;
+    await t.engine.run(t.mapId);
+    const made = t.calls('createTask').map(c => c.args[1] as { title: string; parent?: string });
+    expect(made.map(f => f.title)).toEqual(['Plan the party', 'Order the cake']);
+    expect(made[1].parent).toBe(t.unit('PARTY').remote);
+    expect(made[0].parent).toBeUndefined();
+    expect(t.calls('updateTask')).toEqual([]);
+    expect(await t.engine.run(t.mapId)).toMatch(/^0 pushed, 0 pulled/);
+  });
+  it('a member kept only under its parent is detached into its sector’s container in the same write', async () => {
+    const t = await setup();
+    await t.bind();
+    const packing = t.unit('PACKING'), container = t.doc().sectors.find(s => s.id === packing.sectorId)!.remote!;
+    expect(t.fake.tasks.get(packing.remote!)).toMatchObject({ parent: t.unit('MOVE').remote, container: null });
+    t.run('/detach PACKING');
+    t.fake.calls.length = 0;
+    await t.engine.run(t.mapId);
+    expect(t.calls('updateTask').map(c => c.args[2])).toEqual([{ parent: null, container }]);
+    expect(t.fake.tasks.get(packing.remote!)).toMatchObject({ parent: null, container });
+  });
   it('pulled ops carry the provider id as via', async () => {
     const t = await setup();
     await t.bind();

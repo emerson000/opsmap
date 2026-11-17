@@ -366,3 +366,208 @@ describe('Asana identity switch (D21)', () => {
     expect(tagsOf(made.gid)).toEqual(['hostile']);
   });
 });
+
+describe('Asana subtasks', () => {
+  const root = () => doc().settings.taskSync!.root;
+  const sectionOf = (d: string) => doc().sectors.find(s => s.id === unit(d).sectorId)!.remote!;
+  const parentWrites = () => as.calls.filter(c => /^(setParent|removeProject|addProject) /.test(c));
+  it('binding pushes existing attachments as subtasks: the parent is the task force’s task, with no project membership', async () => {
+    await bind();
+    const move = taskOf('MOVE');
+    expect(move.memberships).toEqual([{ project: root(), section: sectionOf('MOVE') }]);
+    for (const d of ['PACKING', 'MOVERS']) {
+      expect(taskOf(d)).toMatchObject({ parent: move.gid, memberships: [] });
+      expect(as.calls).toContain(`createTask ${unit(d).title} under ${move.gid}`);
+      expect(as.calls).not.toContain(`createTask ${unit(d).title}`);
+    }
+    expect(parentWrites()).toEqual([]);
+    as.calls.length = 0;
+    expect(await sync.run(hub().mapId)).toMatch(/^0 pushed, 0 pulled/);
+    expect(writes()).toEqual([]);
+  });
+  it('binding again after /tasks unbind links the subtasks by title under their parent, with no duplicates', async () => {
+    await bind();
+    const before = as.tasksById.size, packing = unit('PACKING').remote;
+    run('/tasks unbind');
+    expect(unit('PACKING').remote).toBeUndefined();
+    await bind();
+    expect(as.tasksById.size).toBe(before);
+    expect(unit('PACKING').remote).toBe(packing);
+    expect(await sync.run(hub().mapId)).toMatch(/^0 pushed, 0 pulled, 0 tasks created, 0 new units$/);
+  });
+  it('a new task force with a new member in one cycle: the parent is made first, then the child only as its subtask', async () => {
+    await bind();
+    run('/new "Plan the party" in Family near as PARTY');
+    run('/new "Order the cake" in Family near as CAKE');
+    run('/attach CAKE to PARTY');
+    as.calls.length = 0;
+    await sync.run(hub().mapId);
+    const party = taskOf('PARTY'), cake = taskOf('CAKE');
+    const made = as.calls.filter(c => c.startsWith('createTask '));
+    expect(made).toEqual(['createTask Plan the party', `createTask Order the cake under ${party.gid}`]);
+    expect(cake).toMatchObject({ parent: party.gid, memberships: [] });
+    expect(parentWrites()).toEqual([]);
+    expect(await sync.run(hub().mapId)).toMatch(/^0 pushed, 0 pulled/);
+  });
+  it('/attach makes the task a subtask; /detach puts it back in its sector’s section in the same cycle', async () => {
+    await bind();
+    run('/attach TOOLS to MOVE');
+    await sync.run(hub().mapId);
+    expect(taskOf('TOOLS')).toMatchObject({ parent: unit('MOVE').remote, memberships: [] });
+    expect(as.calls).toContain(`removeProject ${unit('TOOLS').remote} ${root()}`);
+    expect(await sync.run(hub().mapId)).toMatch(/^0 pushed, 0 pulled/);
+    run('/detach TOOLS');
+    await sync.run(hub().mapId);
+    expect(taskOf('TOOLS')).toMatchObject({ parent: null, memberships: [{ project: root(), section: sectionOf('TOOLS') }] });
+    as.calls.length = 0;
+    expect(await sync.run(hub().mapId)).toMatch(/^0 pushed, 0 pulled/);
+    expect(writes()).toEqual([]);
+  });
+  it('a subtask made in Asana under a linked task arrives attached, in the parent unit’s sector', async () => {
+    await bind();
+    const kid = await as.createTask({ name: 'Book the van', parent: unit('MOVE').remote! });
+    const before = doc().log.length;
+    await sync.run(hub().mapId);
+    expect(byTask(kid.gid)).toMatchObject({ title: 'Book the van', sectorId: unit('MOVE').sectorId, parentId: unit('MOVE').id });
+    const logs = doc().log.slice(before).map(l => l.text).join('\n');
+    expect(logs).toMatch(new RegExp(`^ASANA NEW ${byTask(kid.gid)!.designation}`, 'm'));
+    expect(logs).toMatch(new RegExp(`ATTACHED TO TF MOVE`));
+    // It stays a plain subtask.
+    await sync.run(hub().mapId);
+    expect(as.tasksById.get(kid.gid)!.memberships).toEqual([]);
+    expect(parentWrites().filter(c => c.includes(kid.gid))).toEqual([]);
+  });
+  it('a new parent in Asana re-attaches the unit; made top-level, it is detached and put back in its section', async () => {
+    await bind();
+    const packing = unit('PACKING').remote!;
+    await as.setParent(packing, unit('TOOLS').remote!);
+    await sync.run(hub().mapId);
+    expect(unit('PACKING').parentId).toBe(unit('TOOLS').id);
+    // Top-level again: Asana leaves it in no project.
+    await as.setParent(packing, null);
+    await sync.run(hub().mapId);
+    expect(unit('PACKING').parentId).toBeUndefined();
+    expect(taskOf('PACKING').memberships).toEqual([{ project: root(), section: sectionOf('PACKING') }]);
+    expect(await sync.run(hub().mapId)).toMatch(/^0 pushed, 0 pulled/);
+  });
+  it('nested subtasks become nested task forces, 5 levels down at most, each read once', async () => {
+    await bind();
+    const chain: string[] = [];
+    let parent = unit('LEAK').remote!;
+    for (let i = 1; i <= 7; i++) { const t = await as.createTask({ name: `Level ${i}`, parent }); chain.push(t.gid); parent = t.gid; }
+    as.calls.length = 0;
+    await sync.run(hub().mapId);
+    let up = unit('LEAK');
+    for (const gid of chain.slice(0, 5)) { const u = byTask(gid)!; expect(u).toMatchObject({ parentId: up.id, sectorId: 'household' }); up = u; }
+    for (const gid of chain.slice(0, 4)) expect(byTask(gid)!.taskForce).toBe(true);
+    expect(byTask(chain[5])).toBeUndefined();
+    expect(byTask(chain[6])).toBeUndefined();
+    const reads = as.calls.filter(c => c.startsWith('subtasks '));
+    expect(new Set(reads).size).toBe(reads.length);
+    expect(reads).not.toContain(`subtasks ${chain[4]}`);
+  });
+  it('a subtask under a task outside the project, or under an unlinked task, is ignored', async () => {
+    await bind();
+    const other = await as.createProject(WS, 'Elsewhere'), outside = as.add(other.gid, { name: 'Outside' });
+    const stray = await as.createTask({ name: 'Stray', parent: outside.gid });
+    await as.addProject(stray.gid, root(), sector('Work').remote);   // multi-homed into this project
+    const home = await as.createSection(root(), 'Home'), unlinked = as.add(root(), { name: 'Chores', section: home.gid });
+    await as.createTask({ name: 'Unlinked child', parent: unlinked.gid });
+    as.calls.length = 0;
+    await sync.run(hub().mapId);
+    expect(doc().units.some(u => u.title === 'Stray' || u.title === 'Unlinked child' || u.title === 'Chores')).toBe(false);
+    expect(as.calls).not.toContain(`subtasks ${stray.gid}`);
+    expect(writes()).toEqual([]);
+  });
+  it('completing the parent finishes the task force; the child stays attached and open (Review Focus 2)', async () => {
+    await bind();
+    const before = unit('PACKING').lifecycle;
+    await as.updateTask(unit('MOVE').remote!, { completed: true });
+    await sync.run(hub().mapId);
+    expect(unit('MOVE').lifecycle).toBe('done');
+    expect(unit('PACKING')).toMatchObject({ parentId: 'move', lifecycle: before });
+    expect(taskOf('PACKING')).toMatchObject({ completed: false, parent: unit('MOVE').remote });
+    expect(await sync.run(hub().mapId)).toMatch(/^0 pushed, 0 pulled/);
+  });
+  it('deleting the parent drops the task force; children that survive stay attached, open and back in their section', async () => {
+    await bind();
+    as.onParentDelete = 'orphan';
+    const packing = unit('PACKING').remote!, before = unit('PACKING').lifecycle;
+    await as.deleteTask(unit('MOVE').remote!);
+    as.calls.length = 0;
+    await sync.run(hub().mapId);
+    expect(unit('MOVE')).toMatchObject({ lifecycle: 'dropped' });
+    expect(unit('MOVE').remote).toBeUndefined();
+    expect(as.calls).toContain(`task ${packing}`);
+    expect(unit('PACKING')).toMatchObject({ parentId: 'move', lifecycle: before, remote: packing });
+    expect(as.tasksById.get(packing)).toMatchObject({ parent: null, completed: false, memberships: [{ project: root(), section: sectionOf('PACKING') }] });
+    expect(await sync.run(hub().mapId)).toMatch(/^0 pushed, 0 pulled/);
+  });
+  it('deleting the parent with its subtasks: each child is read again, and only one that is gone is dropped', async () => {
+    await bind();
+    as.onParentDelete = 'cascade';
+    const packing = unit('PACKING').remote!, movers = unit('MOVERS').remote!;
+    await as.deleteTask(unit('MOVE').remote!);
+    as.calls.length = 0;
+    await sync.run(hub().mapId);
+    for (const gid of [packing, movers]) expect(as.calls).toContain(`task ${gid}`);
+    for (const d of ['MOVE', 'PACKING', 'MOVERS']) { expect(unit(d).lifecycle).toBe('dropped'); expect(unit(d).remote).toBeUndefined(); }
+    expect(unit('LEAK').remote).toBeDefined();
+  });
+  it('a multi-homed subtask is read as a subtask and stays in the project (Review Focus 3)', async () => {
+    await bind();
+    const tools = unit('TOOLS').remote!, move = unit('MOVE').remote!;
+    // Made a subtask in Asana: it keeps its section, so it is in the project list and under MOVE.
+    await as.setParent(tools, move);
+    as.calls.length = 0;
+    await sync.run(hub().mapId);
+    expect(unit('TOOLS').parentId).toBe('move');
+    expect(doc().units.filter(u => u.remote === tools)).toHaveLength(1);
+    expect(as.calls.filter(c => c === `subtasks ${move}`)).toHaveLength(1);
+    run('/rename TOOLS "Review the new tool"');
+    await sync.run(hub().mapId);
+    expect(as.tasksById.get(tools)).toMatchObject({ name: 'Review the new tool', parent: move });
+    expect(as.tasksById.get(tools)!.memberships.map(m => m.project)).toEqual([root()]);
+    expect(as.calls.filter(c => c.startsWith('removeProject'))).toEqual([]);
+    // Moved to another task force from opsmap: still the user's multi-homing, so it stays in the project.
+    run('/attach TOOLS to LEAK');
+    await sync.run(hub().mapId);
+    expect(as.tasksById.get(tools)).toMatchObject({ parent: unit('LEAK').remote });
+    expect(as.tasksById.get(tools)!.memberships.map(m => m.project)).toEqual([root()]);
+  });
+  it('a parent or section write returns the task as Asana has it now, with a fresh modified_at', async () => {
+    const s = new AsanaProvider(() => as).connect(TOKEN), root = await s.resolveRoot('Ops');
+    const c = await s.ensureContainers(root, [{ sectorId: 'w', name: 'Work' }], {});
+    const parent = await s.createTask(root, { title: 'Parent', container: c.w }, 'UTC'), child = await s.createTask(root, { title: 'Child', container: c.w }, 'UTC');
+    as.tick(60_000);
+    const attached = await s.updateTask(root, child, { parent: parent.id }, 'UTC');
+    expect(attached).toMatchObject({ parent: parent.id, container: null, updatedAt: new Date(as.tasksById.get(child.id)!.modified).toISOString() });
+    expect(Date.parse(attached.updatedAt)).toBeGreaterThan(Date.parse(child.updatedAt));
+    as.tick(60_000);
+    const detached = await s.updateTask(root, attached, { parent: null, container: c.w }, 'UTC');
+    expect(detached).toMatchObject({ parent: null, container: c.w, updatedAt: new Date(as.tasksById.get(child.id)!.modified).toISOString() });
+    expect(Date.parse(detached.updatedAt)).toBeGreaterThan(Date.parse(attached.updatedAt));
+  });
+  it('an attachment opsmap refuses (a cycle) is reported once by /tasks sync and left in Asana', async () => {
+    await bind();
+    // TOOLS → LANDLORD (a person, not synced) → FILES in opsmap; then in Asana FILES becomes a subtask of TOOLS.
+    run('/attach TOOLS to LANDLORD');
+    run('/attach LANDLORD to FILES');
+    await sync.run(hub().mapId);
+    const files = unit('FILES').remote!, tools = unit('TOOLS').remote!;
+    await as.setParent(files, tools);
+    const first = await sync.request(hub().mapId, { action: 'sync' }, user, 'web');
+    expect(first).toMatch(/1 failed: FILES: Attachment would create a cycle/);
+    as.calls.length = 0;
+    const second = await sync.request(hub().mapId, { action: 'sync' }, user, 'web');
+    expect(second).not.toMatch(/failed/);
+    expect(await status()).not.toMatch(/last error/);
+    expect(as.tasksById.get(files)!.parent).toBe(tools);
+    expect(parentWrites()).toEqual([]);
+    expect(unit('FILES').parentId).toBeUndefined();
+    // The cycle gone in opsmap: the next cycle attaches it.
+    run('/detach LANDLORD');
+    await sync.run(hub().mapId);
+    expect(unit('FILES').parentId).toBe('tools');
+  });
+});

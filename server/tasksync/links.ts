@@ -8,7 +8,7 @@ import type { Field, Fields } from './merge';
 export const TASK_SYNC_TABLES=`CREATE TABLE IF NOT EXISTS ts_links(map_id TEXT NOT NULL,unit_id TEXT NOT NULL,remote_id TEXT NOT NULL,base TEXT NOT NULL,PRIMARY KEY(map_id,unit_id));
   CREATE TABLE IF NOT EXISTS ts_maps(map_id TEXT PRIMARY KEY,provider TEXT NOT NULL,secret TEXT NOT NULL,hooks TEXT,owner TEXT,hooks_checked TEXT,last_delivery TEXT,state TEXT,relations TEXT,delivery TEXT);`;
 /** The relations both sides last agreed on: each unit's parent task, and the relations between open units (edge keys).
- *  `refused`: relations made remotely that opsmap would not take (a link across sectors), not tried again. */
+ *  `refused`: relations made remotely that opsmap would not take (a link across sectors), not tried again; and parent tasks opsmap refused (`["parent",unit,task]`: a cycle), tried again but reported once. */
 /** The values both sides last agreed on for one link, and the fields switched off when they were recorded (D21): a
  *  field off then and on now is re-based; identity off now but not then still has its remote identity to remove, but
  *  only when opsmap wrote it (`idPushed`). A base from before D21 has no `idPushed`. */

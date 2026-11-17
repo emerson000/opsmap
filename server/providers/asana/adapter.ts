@@ -107,9 +107,12 @@ export class AsanaSession implements ProviderSession {
   async snapshot(root: RemoteRoot, containers: Record<string, string>, tz: string): Promise<Snapshot> {
     const since = new Date(Date.now() - RECENT_MS).toISOString(), top = await this.api.tasks(root.id, since), seen = new Map<string, AsTask>();
     for (const t of top) seen.set(t.gid, t);
-    // The project's list leaves out plain subtasks: read them under each parent, a level at a time.
+    // The project's list leaves out plain subtasks: read them under each parent, a level at a time, at most DEPTH levels
+    // below a top-level task. Only tasks in the list are read (open, or done in the last 7 days: the contract does not
+    // say which tasks have linked children); a linked child under an older parent is read by the engine with getTask.
+    // A multi-homed subtask is also in the list, but it is read under its parent, so the depth counts from the top.
     const expanded = new Set<string>();
-    let level = top.filter(t => t.num_subtasks > 0);
+    let level = top.filter(t => t.parent === null && t.num_subtasks > 0);
     for (let depth = 0; depth < DEPTH && level.length; depth++) {
       const next: AsTask[] = [];
       for (const p of level) {
@@ -162,20 +165,17 @@ export class AsanaSession implements ProviderSession {
     const add = a !== null && !keep.length ? [await this.tag(root, IDENTITY_NAMES[a], IDENTITY_COLORS[a])] : [];
     return this.retag(t, add, current.filter(x => !keep.includes(x)));
   }
-  /** Makes the task a subtask of `parent` (out of the project, D13), or top-level again in the project. */
-  private async setParent(root: RemoteRoot, t: AsTask, parent: string | null, section: string | undefined): Promise<AsTask> {
+  /** Makes the task a subtask of `parent`, or top-level again in the project, in `section` (D13). A top-level task that
+   *  opsmap makes a subtask leaves the project; a subtask the user also keeps in the project (multi-homed) stays there. */
+  private async setParent(root: RemoteRoot, t: AsTask, parent: string | null, section: string | undefined): Promise<void> {
     await this.api.setParent(t.gid, parent);
-    const others = t.memberships.filter(m => m.project?.gid !== root.id);
-    if (parent !== null) {
-      if (others.length !== t.memberships.length) await this.api.removeProject(t.gid, root.id);
-      return { ...t, parent: { gid: parent }, memberships: others };
-    }
-    await this.api.addProject(t.gid, root.id, section);
-    return { ...t, parent: null, memberships: [...others, { project: { gid: root.id }, ...(section ? { section: { gid: section } } : {}) }] };
+    const inRoot = t.memberships.some(m => m.project?.gid === root.id);
+    if (parent !== null) { if (t.parent === null && inRoot) await this.api.removeProject(t.gid, root.id); }
+    else if (section !== undefined || !inRoot) await this.api.addProject(t.gid, root.id, section);
   }
-  private async moveTo(root: RemoteRoot, t: AsTask, section: string): Promise<AsTask> {
-    await this.api.addToSection(section, t.gid);
-    return { ...t, memberships: [...t.memberships.filter(m => m.project?.gid !== root.id), { project: { gid: root.id }, section: { gid: section } }] };
+  /** Into the section; a task in no project (made top-level in Asana) is put back in the project there. */
+  private async moveTo(root: RemoteRoot, t: AsTask, section: string): Promise<void> {
+    if (t.memberships.some(m => m.project?.gid === root.id)) await this.api.addToSection(section, t.gid); else await this.api.addProject(t.gid, root.id, section);
   }
   async createTask(root: RemoteRoot, fields: TaskWrite & { title: string; container: string }, tz: string): Promise<RemoteTask> {
     const body: AsNewTask = { name: fields.title, ...(fields.note ? { notes: fields.note } : {}), ...(fields.due ? { due_on: fields.due } : {}), ...(fields.status === 'done' ? { completed: true } : {}) };
@@ -202,9 +202,11 @@ export class AsanaSession implements ProviderSession {
     if (Object.keys(f).length) t = await this.api.updateTask(t.gid, f);
     t = await this.setState(root, t, changes.status);
     if (changes.affiliation !== undefined) t = await this.setIdentity(root, t, changes.affiliation);
-    if (changes.parent !== undefined && changes.parent !== (t.parent?.gid ?? null)) t = await this.setParent(root, t, changes.parent, changes.container ?? undefined);
+    // Parent and section writes return nothing: the task is read again, so its modified_at is Asana's (the engine's
+    // newer-wins check compares it).
+    if (changes.parent !== undefined && changes.parent !== (t.parent?.gid ?? null)) { await this.setParent(root, t, changes.parent, changes.container ?? undefined); t = await this.api.task(t.gid) ?? t; }
     // A subtask stays under its parent: its section is not opsmap's.
-    if (changes.container && t.parent === null && sectionIn(t, root.id) !== changes.container) t = await this.moveTo(root, t, changes.container);
+    if (changes.container && t.parent === null && sectionIn(t, root.id) !== changes.container) { await this.moveTo(root, t, changes.container); t = await this.api.task(t.gid) ?? t; }
     this.raw.set(t.gid, t);
     return this.toRemote(t, root, tz);
   }

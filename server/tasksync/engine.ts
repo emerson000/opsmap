@@ -356,29 +356,32 @@ export class TaskSyncEngine implements SyncService {
   /** Units without a task get one (not ones already finished: their history stays on the map). An open, unlinked
    *  task with the same title in the same container is the same item (a rebind, or one typed on both sides): it is
    *  linked instead of duplicated, but only when that title is unique on both sides. Links are recorded even when a
-   *  later call fails. */
+   *  later call fails. A task force's task is made before its members', and a member is made under it (D13). */
   private async create(c:Cycle,tasks:Map<string,RemoteTask>,fetched:Map<string,RemoteTask>,frozen:Set<string>,guard:Guard):Promise<void> {
     const {mapId,session,root,tz,limits,declared}=c,links:Record<string,string>={};
     const key=(title:string)=>title.trim().toLowerCase();
     const pending=(doc:Doc)=>doc.units.filter(u=>u.remote===undefined&&syncable(u)&&u.lifecycle!=='done'&&u.lifecycle!=='dropped');
+    const nesting=c.provider.capabilities.fields.has('parent'),start=this.hub(mapId).doc;
+    const depth=(u:Unit)=>{let n=0;const seen=new Set<string>();for(let at=u.parentId;at&&!seen.has(at);at=start.units.find(x=>x.id===at)?.parentId){seen.add(at);n++;}return n;};
     try {
-      for(const snapshot of pending(this.hub(mapId).doc)) {
+      for(const snapshot of pending(start).map(u=>({u,d:depth(u)})).sort((a,b)=>a.d-b.d).map(x=>x.u)) {
         await guard(snapshot.designation,async()=>{
           const doc=this.hub(mapId).doc,u=doc.units.find(x=>x.id===snapshot.id);
           if(!u||u.remote!==undefined||links[u.id]!==undefined)return;
           const container=doc.sectors.find(s=>s.id===u.sectorId)?.remote;
           if(!container||frozen.has(container))return;
-          const f=unitFields(u,doc,limits);
-          const candidates=[...tasks.values()].filter(t=>t.status!=='done'&&t.container===container&&key(t.title)===key(f.title));
+          const f=unitFields(u,doc,limits),tf=nesting&&u.parentId?doc.units.find(x=>x.id===u.parentId):undefined,parent=tf?tf.remote??links[tf.id]:undefined;
+          // A member's twin may be kept only under the task force's task, in no container.
+          const candidates=[...tasks.values()].filter(t=>t.status!=='done'&&(t.container===container||parent!==undefined&&t.container===null&&t.parent===parent)&&key(t.title)===key(f.title));
           const namesakes=pending(doc).filter(x=>x.sectorId===u.sectorId&&key(x.title.slice(0,limits.maxTitle))===key(f.title));
           const twin=candidates.length===1&&namesakes.length===1?candidates[0]:undefined;
           if(twin){tasks.delete(twin.id);links[u.id]=twin.id;c.stats.pushed+=await this.merge(c,u,twin);return;}
           const has=(k:Field)=>declared.has(k);
-          const made=await session.createTask(root,{title:f.title,container,...(has('note')?{note:f.note}:{}),...(has('due')?{due:f.due,dueAt:u.dueAt??null}:{}),
+          const made=await session.createTask(root,{title:f.title,container,...(parent!==undefined?{parent}:{}),...(has('note')?{note:f.note}:{}),...(has('due')?{due:f.due,dueAt:u.dueAt??null}:{}),
             ...(has('status')&&f.status?{status:f.status}:{}),...(has('progress')?{progress:(f.progress??0)/100}:{}),...(has('affiliation')?{affiliation:u.affiliation}:{})},tz);
           // The unit went away while the service answered (an undo of its capture): take the new task back.
           if(!this.hub(mapId).doc.units.some(x=>x.id===u.id)){await session.deleteTask?.(root,made.id).catch(()=>undefined);return;}
-          links[u.id]=made.id;this.tables.setBase(mapId,u.id,made.id,this.record(c,f,has('affiliation')));c.stats.created++;fetched.set(made.id,{...made,parent:null,parents:[],relations:[]});
+          links[u.id]=made.id;this.tables.setBase(mapId,u.id,made.id,this.record(c,f,has('affiliation')));c.stats.created++;fetched.set(made.id,{...made,parent:parent??null,parents:parent!==undefined?[parent]:[],relations:[]});
         });
       }
     }finally{
@@ -471,6 +474,9 @@ export class TaskSyncEngine implements SyncService {
     const byTask=()=>new Map(doc().units.filter(u=>u.remote!==undefined&&fetched.has(u.remote)).map(u=>[u.remote!,u]));
     const seen=(u:Unit|undefined):u is Unit=>u?.remote!==undefined&&fetched.has(u.remote);
     const unit=(id:string)=>doc().units.find(u=>u.id===id);
+    // A parent task opsmap refused (a cycle) is tried again each cycle, but reported only the first time (D13).
+    const parentKey=(unitId:string,task:string)=>JSON.stringify(['parent',unitId,task]),isParentKey=(k:string)=>k.startsWith('["parent",');
+    const refusedParents=new Set(base.refused.filter(isParentKey)),stillRefusedParents=new Set<string>();
     // Parent task ↔ task force: a unit is attached to at most one, so a task with several parents has no opinion.
     const parents:Record<string,string|null>={};
     if(p.capabilities.fields.has('parent')) {
@@ -486,10 +492,17 @@ export class TaskSyncEngine implements SyncService {
         if(ours===theirs){parents[u.id]=ours;continue;}
         const newer=Date.parse(u.updatedAt)>=Date.parse(t.updatedAt)?'ours':'theirs';
         const take=agreed!==undefined?(ours===agreed?'theirs':theirs===agreed?'ours':newer):(ours===null)!==(theirs===null)?(ours===null?'theirs':'ours'):newer;
-        await guard(u.designation,async()=>{
-          if(take==='ours'){await session.updateTask(root,{...t,parent:named[0]??null,parents:named},{parent:ours},tz);parents[u.id]=ours;stats.pushed++;}
-          else{this.system(mapId,p,{action:'pull',unit:u.id,changes:{parentId:theirs===null?null:units.get(theirs)!.id}});parents[u.id]=theirs;stats.pulled++;}
-        });
+        // A task kept only under its parent goes back into its unit's sector's container when it is detached.
+        const container=ours===null&&t.container===null&&p.capabilities.fields.has('container')?doc().sectors.find(s=>s.id===u.sectorId)?.remote:undefined;
+        if(take==='ours'){await guard(u.designation,async()=>{await session.updateTask(root,{...t,parent:named[0]??null,parents:named},{parent:ours,...(container!==undefined?{container}:{})},tz);parents[u.id]=ours;stats.pushed++;});continue;}
+        const key=theirs===null?undefined:parentKey(u.id,theirs);
+        try{this.system(mapId,p,{action:'pull',unit:u.id,changes:{parentId:theirs===null?null:units.get(theirs)!.id}});parents[u.id]=theirs;stats.pulled++;}
+        catch(error){
+          // Left as it is in the service; the agreed parent stays, so the next cycle tries the service's again.
+          if(agreed!==undefined)parents[u.id]=agreed;
+          if(key===undefined)await guard(u.designation,async()=>{throw error;});
+          else{stillRefusedParents.add(key);if(!refusedParents.has(key))await guard(u.designation,async()=>{throw error;});}
+        }
       }
     }else Object.assign(parents,base.parents);
     const live=new Set(doc().units.map(u=>u.id));
@@ -497,7 +510,7 @@ export class TaskSyncEngine implements SyncService {
     // Link orders ↔ the relations the provider has, between open units only: /done ends a unit's orders, but its task
     // keeps its relations.
     const kinds=p.capabilities.relations;
-    if(!kinds.size||!session.relate){this.tables.setRelations(mapId,{parents,edges:base.edges,refused:base.refused});return;}
+    if(!kinds.size||!session.relate){this.tables.setRelations(mapId,{parents,edges:base.edges,refused:[...base.refused.filter(k=>!isParentKey(k)),...stillRefusedParents]});return;}
     const relate=session.relate.bind(session);
     const units=byTask(),open=(u:Unit|undefined):u is Unit=>seen(u)&&u.lifecycle!=='done'&&u.lifecycle!=='dropped';
     const ours=new Map<string,Order[]>();
@@ -511,7 +524,7 @@ export class TaskSyncEngine implements SyncService {
       const u=units.get(id);if(!open(u))continue;
       for(const r of t.relations??[]){const other=units.get(r.to);if(kinds.has(r.kind)&&open(other)&&other.id!==u.id)theirs.set(edgeKey(r.kind,u.id,other.id),{kind:r.kind,from:u.id,to:other.id});}
     }
-    const agreed=new Set(base.edges),refused=new Set(base.refused),edges=new Set<string>(),stillRefused=new Set<string>();
+    const agreed=new Set(base.edges),refused=new Set(base.refused.filter(k=>!isParentKey(k))),edges=new Set<string>(),stillRefused=new Set<string>();
     for(const key of new Set([...ours.keys(),...theirs.keys()])) {
       const mine=ours.get(key),remote=theirs.get(key);
       if(mine&&remote){edges.add(key);continue;}
@@ -534,6 +547,6 @@ export class TaskSyncEngine implements SyncService {
         if(error!==undefined){stillRefused.add(key);await guard(`relation ${what}`,async()=>{throw error;});}
       }
     }
-    this.tables.setRelations(mapId,{parents,edges:[...edges],refused:[...stillRefused]});
+    this.tables.setRelations(mapId,{parents,edges:[...edges],refused:[...stillRefused,...stillRefusedParents]});
   }
 }

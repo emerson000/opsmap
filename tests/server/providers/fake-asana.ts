@@ -2,7 +2,8 @@
 // project task lists omit plain subtasks, and a plain subtask has no memberships (until `addProject` multi-homes it);
 // `setParent` keeps memberships, `setParent(null)` leaves none until `addProject`; completing a parent leaves its children open;
 // a deleted task reads 404 (`task()` gives null); a tag needs a workspace; `completed_since` keeps open tasks and those completed at or after it.
-// Not probed, so not modeled: deleting a parent does not delete its children here.
+// Not probed: whether deleting a parent deletes its subtasks. `onParentDelete` picks: 'orphan' (the default; the children
+// stay, top-level, in no project unless they were multi-homed) or 'cascade' (the children, and theirs, are deleted too).
 // `tick()` advances the clock that stamps `modified_at`. `failNext` and `rateLimit` make the next call to a method fail.
 import { AsHttpError } from '../../../server/providers/asana/api';
 import type { AsApi, AsMembership, AsNewTask, AsProject, AsSection, AsTag, AsTask, AsTaskFields, AsUser, AsWebhook } from '../../../server/providers/asana/api';
@@ -20,6 +21,8 @@ export class FakeAsana implements AsApi {
   tagsById = new Map<string, AsTag & { workspace: string; color?: string }>();
   hooks = new Map<string, AsWebhook & { workspace: string }>();
   calls: string[] = [];
+  /** What deleting a task does to its subtasks (not probed against Asana). */
+  onParentDelete: 'orphan' | 'cascade' = 'orphan';
   private nextId = 5000;
   private clock = Date.now();
   private failures: { method: string; error: Error }[] = [];
@@ -88,7 +91,7 @@ export class FakeAsana implements AsApi {
     this.tasksById.set(r.gid, r); this.apply(r, rest); return this.view(r);
   }
   async createTask({ parent, projects, memberships, workspace: _w, ...fields }: AsNewTask) {
-    this.enter('createTask', fields.name); if (parent && !this.tasksById.has(parent)) throw notFound('POST', `/tasks/${parent}/subtasks`);
+    this.enter('createTask', fields.name, ...(parent ? ['under', parent] : [])); if (parent && !this.tasksById.has(parent)) throw notFound('POST', `/tasks/${parent}/subtasks`);
     // Live probe 2026-11-17: memberships alone are refused; projects (or workspace) must come with them.
     if (!parent && !projects?.length && !_w) throw new AsHttpError(400, 'Asana POST /tasks: You should specify one of workspace, parent, projects');
     const r: Rec = { gid: this.id(), name: '', notes: '', completed: false, completedAt: null, due_on: null, due_at: null, modified: this.clock, parent: parent ?? null, memberships: parent ? [] : [...(projects ?? []).filter(project => !memberships?.some(m => m.project === project)).map(project => ({ project })), ...(memberships ?? []).map(m => ({ project: m.project, ...(m.section ? { section: m.section } : {}) }))], tags: [] };
@@ -96,7 +99,11 @@ export class FakeAsana implements AsApi {
     this.tasksById.set(r.gid, r); this.apply(r, fields); return this.view(r);
   }
   async updateTask(gid: string, fields: AsTaskFields) { this.enter('updateTask', gid); const r = this.rec(gid, 'PUT', `/tasks/${gid}`); this.apply(r, fields); return this.view(r); }
-  async deleteTask(gid: string) { this.enter('deleteTask', gid); if (!this.tasksById.delete(gid)) throw notFound('DELETE', `/tasks/${gid}`, 'Unknown object'); }
+  async deleteTask(gid: string) { this.enter('deleteTask', gid); if (!this.tasksById.has(gid)) throw notFound('DELETE', `/tasks/${gid}`, 'Unknown object'); this.remove(gid); }
+  private remove(gid: string) {
+    this.tasksById.delete(gid);
+    for (const r of [...this.tasksById.values()].filter(t => t.parent === gid)) { if (this.onParentDelete === 'cascade') this.remove(r.gid); else { r.parent = null; this.touch(r); } }
+  }
   async addToSection(section: string, task: string) {
     this.enter('addToSection', section, task); const s = this.sectionsById.get(section); if (!s) throw notFound('POST', `/sections/${section}/addTask`);
     const r = this.rec(task, 'POST', `/sections/${section}/addTask`), m = r.memberships.find(x => x.project === s.project);
