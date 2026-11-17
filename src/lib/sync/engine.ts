@@ -4,7 +4,9 @@ import type { Command, Doc } from '../../core/model/types';
 import { apply } from '../../core/commands/apply';
 import { cloneDoc } from '../../core/model/clone';
 import { emptyDoc } from '../../core/model/seed';
-import { parseServerMessage, type ClientMessage, type MapInfo, type Op, type ProviderDescriptor, type OpSource, type PresenceEntry, type ServerMessage, type User } from './protocol';
+import { parseServerMessage, type ClientMessage, type MapInfo, type Op, type ProviderDescriptor, type OpSource, type PresenceEntry, type ServerMessage, type TaskDelivery, type User } from './protocol';
+/** The server's answer to a /tasks request; a status answer also carries the delivery mode. */
+export type TaskAnswer = { ok: true; log: string; delivery?: TaskDelivery } | { ok: false; error: string };
 
 export type Status = 'connecting' | 'live' | 'reconnecting' | 'offline';
 
@@ -91,7 +93,7 @@ export class SyncEngine {
   maps: MapInfo[] = [];
   /** The server's task services (from the welcome). */
   taskSync: ProviderDescriptor[] = [];
-  private readonly taskWaiting = new Map<string, (r: { ok: true; log: string } | { ok: false; error: string }) => void>();
+  private readonly taskWaiting = new Map<string, (r: TaskAnswer) => void>();
 
   private socket: SocketLike | null = null;
   private attempts = 0;
@@ -163,13 +165,18 @@ export class SyncEngine {
   }
 
   /** A /tasks request (bind, sync, status): the server asks the task service and answers; resulting ops arrive as usual. */
-  tasks(args: Record<string, unknown>): Promise<{ ok: true; log: string } | { ok: false; error: string }> {
+  tasks(args: Record<string, unknown>): Promise<TaskAnswer> {
     if (this.status !== 'live') return Promise.resolve({ ok: false, error: 'Offline: /tasks needs the server' });
     const opId = this.uuid();
     return new Promise(resolve => {
       this.taskWaiting.set(opId, resolve);
       if (!this.send({ t: 'tasks', opId, args })) { this.taskWaiting.delete(opId); resolve({ ok: false, error: 'Offline: /tasks needs the server' }); }
     });
+  }
+
+  /** The tab became visible again: ask the server to pull from the task service soon (D20). Only for a bound map. */
+  nudgeTasks(): void {
+    if (this.status === 'live' && this.doc.settings.taskSync) this.send({ t: 'tasks-nudge' });
   }
 
   setSelection(selectedId: string | null): void {
@@ -293,7 +300,7 @@ export class SyncEngine {
       case 'maps': this.maps = msg.maps; this.changed(); break;
       case 'tasks': {
         const done = this.taskWaiting.get(msg.opId);this.taskWaiting.delete(msg.opId);
-        done?.(msg.ok ? { ok: true, log: msg.log ?? 'TASKS' } : { ok: false, error: msg.error ?? 'Task service request failed' });
+        done?.(msg.ok ? { ok: true, log: msg.log ?? 'TASKS', ...(msg.delivery ? { delivery: msg.delivery } : {}) } : { ok: false, error: msg.error ?? 'Task service request failed' });
         break;
       }
       case 'pong': break;

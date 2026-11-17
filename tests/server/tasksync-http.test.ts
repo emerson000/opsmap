@@ -1,4 +1,6 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import WebSocket from 'ws';
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -41,6 +43,40 @@ describe('/api/tasksync/:provider/account', () => {
     expect(await (await account(cookie, 'DELETE')).json()).toEqual({ ok: true, provider: 'fake', connected: false });
     expect(await (await account(cookie)).json()).toEqual({ provider: 'fake', connected: false });
     expect(existsSync(join(dir, 'secrets', 'master.key'))).toBe(true);
+  });
+
+  it('over the socket: the welcome lists the field switches, status carries the delivery mode, and tasks-nudge nudges', async () => {
+    const cookie = await login();
+    await account(cookie, 'PUT', { token: 'fake-alice' });
+    const nudge = vi.spyOn(runtime.sync!, 'nudge');
+    const ws = new WebSocket(`${url.replace('http', 'ws')}/ws`, { headers: { Cookie: cookie, Origin: settings.publicUrl } });
+    const messages: Record<string, any>[] = [];
+    ws.on('message', raw => messages.push(JSON.parse(raw.toString())));
+    await once(ws, 'open');
+    const next = async (t: string) => { for (let i = 0; i < 300; i++) { const m = messages.find(x => x.t === t); if (m) { messages.splice(messages.indexOf(m), 1); return m; } await new Promise(r => setTimeout(r, 10)); } throw new Error(`no ${t}`); };
+    ws.send(JSON.stringify({ t: 'hello', since: 0 }));
+    expect((await next('welcome')).taskSync).toEqual([expect.objectContaining({ id: 'fake', fields: ['identity', 'state', 'due', 'note', 'progress'] })]);
+    expect(nudge).toHaveBeenCalledTimes(1);
+    // Not bound: no delivery mode.
+    ws.send(JSON.stringify({ t: 'tasks', opId: randomUUID(), args: { action: 'status' } }));
+    expect((await next('tasks')).delivery).toBeUndefined();
+    ws.send(JSON.stringify({ t: 'tasks', opId: randomUUID(), args: { action: 'bind', provider: 'fake', name: 'Ops' } }));
+    expect(await next('tasks')).toMatchObject({ ok: true, log: expect.stringMatching(/^FAKE BOUND TO OPS/) });
+    expect(messages.find(m => m.t === 'tasks')).toBeUndefined();
+    // PUBLIC_URL is localhost: polling every minute, webhooks off; the full reason for the tooltip.
+    ws.send(JSON.stringify({ t: 'tasks', opId: randomUUID(), args: { action: 'status' } }));
+    const status = await next('tasks');
+    expect(status).toMatchObject({ ok: true, log: expect.stringMatching(/^FAKE: bound to Ops/) });
+    expect(status.delivery).toEqual({ mode: 'off', summary: 'Checking every 1 min: webhooks off on a private address', reason: 'webhooks need PUBLIC_URL to be an address Fake can reach' });
+    // Sync answers carry none.
+    ws.send(JSON.stringify({ t: 'tasks', opId: randomUUID(), args: { action: 'sync' } }));
+    expect((await next('tasks')).delivery).toBeUndefined();
+    ws.send(JSON.stringify({ t: 'tasks-nudge' }));
+    ws.send(JSON.stringify({ t: 'ping' }));
+    await next('pong');
+    expect(nudge).toHaveBeenCalledTimes(2);
+    expect(nudge).toHaveBeenLastCalledWith(runtime.hub.mapId);
+    ws.terminate();
   });
 
   it('answers 404 for a service this server does not have', async () => {

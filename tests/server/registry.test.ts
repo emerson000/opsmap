@@ -11,7 +11,11 @@ describe('ProviderRegistry', () => {
     expect(r.list()).toEqual([a, b]);
     expect(r.get('other')).toBe(b);
     expect(r.get('nope')).toBeUndefined();
-    expect(r.descriptors()).toEqual([a.descriptor, b.descriptor]);
+    const all = ['identity', 'state', 'due', 'note', 'progress'];
+    expect(r.descriptors()).toEqual([{ ...a.descriptor, fields: all }, { ...b.descriptor, fields: all }]);
+    // The browser gets the field switches the service syncs (D21): identity→affiliation, state→status.
+    const some = new FakeProvider({ id: 'some', aliases: [], fields: ['title', 'due', 'note', 'status', 'container', 'affiliation'] });
+    expect(new ProviderRegistry([some]).descriptors()[0].fields).toEqual(['identity', 'state', 'due', 'note']);
     expect(r.info()).toEqual([{ id: 'fake', label: 'Fake', aliases: ['fk'], rootNoun: 'project' }, { id: 'other', label: 'Other', aliases: ['ot'], rootNoun: 'project' }]);
     expect(ProviderRegistry.fromEnv({}, [env => env.X ? a : undefined]).list()).toEqual([]);
   });
@@ -23,7 +27,7 @@ describe('ProviderRegistry', () => {
     expect(ProviderRegistry.fromEnv({}, PROVIDERS).list()).toEqual([]);
     const vk = ProviderRegistry.fromEnv({ VIKUNJA_URL: 'https://todo.example/some/path' }, PROVIDERS);
     expect(vk.descriptors()).toEqual([{ id: 'vikunja', label: 'Vikunja', aliases: ['vk'], rootNoun: 'project', containerNoun: 'project', tokenHelp: expect.stringContaining('Settings → API Tokens'),
-      tokenUrl: 'https://todo.example/user/settings/api-tokens', urls: { root: 'https://todo.example/projects/{root}', container: 'https://todo.example/projects/{container}', task: 'https://todo.example/tasks/{id}' } }]);
+      tokenUrl: 'https://todo.example/user/settings/api-tokens', urls: { root: 'https://todo.example/projects/{root}', container: 'https://todo.example/projects/{container}', task: 'https://todo.example/tasks/{id}' }, fields: ['identity', 'state', 'due', 'note', 'progress'] }]);
     expect(() => ProviderRegistry.fromEnv({ VIKUNJA_URL: 'ftp://todo.example' }, PROVIDERS)).toThrow('VIKUNJA_URL must be http(s)');
     expect(ProviderRegistry.fromEnv({ NODE_ENV: 'test', OPSMAP_FAKE_PROVIDER: '1' }, PROVIDERS).info().map(p => p.id)).toEqual(['fake']);
     expect(ProviderRegistry.fromEnv({ NODE_ENV: 'production', OPSMAP_FAKE_PROVIDER: '1' }, PROVIDERS).list()).toEqual([]);

@@ -1,5 +1,5 @@
 // Wire protocol for WebSocket /ws. The client copy of the types; the server owns validation.
-import type { Command, Doc } from '../../core/model/types';
+import { SYNC_FIELDS, type Command, type Doc, type SyncField } from '../../core/model/types';
 
 export type OpSource = 'web' | 'mcp' | 'system';
 export interface User {
@@ -23,8 +23,11 @@ export interface Op {
 export interface PresenceEntry { userId: string; selectedId: string | null }
 /** A shared map. The first one in the server's list is the default. */
 /** A task service the server has (server/tasksync/contract.ts ProviderDescriptor): its names, nouns and URL templates
- *  ({root} {container} {id}), so the UI can show it without naming any service. */
-export interface ProviderDescriptor { id: string; label: string; aliases: string[]; rootNoun: string; containerNoun: string; tokenHelp: string; tokenUrl?: string; urls: { root: string; container?: string; task: string } }
+ *  ({root} {container} {id}), so the UI can show it without naming any service. `fields`: the field switches (D21) the
+ *  service syncs, in SYNC_FIELDS order. */
+export interface ProviderDescriptor { id: string; label: string; aliases: string[]; rootNoun: string; containerNoun: string; tokenHelp: string; tokenUrl?: string; urls: { root: string; container?: string; task: string }; fields: SyncField[] }
+/** How a bound map learns of remote changes, as the /tasks status answer gives it: one line, and the full reason. */
+export interface TaskDelivery { mode: 'off' | 'pending' | 'live' | 'failed'; summary: string; reason: string }
 export interface MapInfo { id: string; name: string; createdAt?: string; createdBy?: string | null }
 
 export type ClientMessage =
@@ -34,11 +37,12 @@ export type ClientMessage =
   | { t: 'redo'; opId: string }
   | { t: 'presence'; selectedId: string | null }
   | { t: 'tasks'; opId: string; args: Record<string, unknown> }
+  | { t: 'tasks-nudge' }
   | { t: 'ping' };
 
 export type ServerMessage =
   | { t: 'welcome'; me: User; users: User[]; seq: number; doc?: Doc; ops?: Op[]; map?: string; maps?: MapInfo[]; fallback?: boolean; taskSync?: ProviderDescriptor[] }
-  | { t: 'tasks'; opId: string; ok: boolean; log?: string; error?: string }
+  | { t: 'tasks'; opId: string; ok: boolean; log?: string; error?: string; delivery?: TaskDelivery }
   | { t: 'maps'; maps: MapInfo[] }
   | { t: 'op'; op: Op }
   | { t: 'reject'; opId: string; error: string }
@@ -57,7 +61,12 @@ function service(v: unknown): ProviderDescriptor[] {
   const urls = v.urls;
   if (!object(urls) || !link(urls.root) || !link(urls.task) || (urls.container !== undefined && !link(urls.container)) || (v.tokenUrl !== undefined && !link(v.tokenUrl))) return [];
   return [{ id: v.id, label: v.label, aliases: [...v.aliases as string[]], rootNoun: v.rootNoun, containerNoun: v.containerNoun, tokenHelp: v.tokenHelp.slice(0, 2000),
-    ...(v.tokenUrl !== undefined ? { tokenUrl: v.tokenUrl as string } : {}), urls: { root: urls.root, task: urls.task, ...(urls.container !== undefined ? { container: urls.container as string } : {}) } }];
+    ...(v.tokenUrl !== undefined ? { tokenUrl: v.tokenUrl as string } : {}), urls: { root: urls.root, task: urls.task, ...(urls.container !== undefined ? { container: urls.container as string } : {}) },
+    fields: SYNC_FIELDS.filter(f => Array.isArray(v.fields) && v.fields.includes(f)) }];
+}
+const MODES = ['off', 'pending', 'live', 'failed'];
+function delivery(v: unknown): TaskDelivery | undefined {
+  return object(v) && MODES.includes(v.mode as string) && text(v.summary, 200) && typeof v.reason === 'string' ? { mode: v.mode as TaskDelivery['mode'], summary: v.summary, reason: v.reason.slice(0, 2000) } : undefined;
 }
 export const isOp = (v: unknown): v is Op => object(v) && Number.isSafeInteger(v.seq) && typeof v.opId === 'string' &&
   typeof v.userId === 'string' && typeof v.at === 'string' && object(v.cmd) && typeof v.cmd.verb === 'string' && object(v.cmd.args);
@@ -77,7 +86,7 @@ export function parseServerMessage(raw: string): ServerMessage | null {
       return { t: 'welcome', me: v.me, users: v.users.filter(isUser), seq: v.seq as number, doc: v.doc as Doc | undefined, ops: v.ops as Op[] | undefined,
         map: v.map as string | undefined, maps: v.maps === undefined ? undefined : maps(v.maps), fallback: v.fallback === true ? true : undefined,
         taskSync: Array.isArray(v.taskSync) ? v.taskSync.flatMap(service) : [] };
-    case 'tasks': return typeof v.opId === 'string' ? { t: 'tasks', opId: v.opId, ok: v.ok === true, log: typeof v.log === 'string' ? v.log : undefined, error: typeof v.error === 'string' ? v.error : undefined } : null;
+    case 'tasks': return typeof v.opId === 'string' ? { t: 'tasks', opId: v.opId, ok: v.ok === true, log: typeof v.log === 'string' ? v.log : undefined, error: typeof v.error === 'string' ? v.error : undefined, ...(delivery(v.delivery) ? { delivery: delivery(v.delivery) } : {}) } : null;
     case 'maps': return Array.isArray(v.maps) ? { t: 'maps', maps: maps(v.maps) } : null;
     case 'op': return isOp(v.op) ? { t: 'op', op: v.op } : null;
     case 'reject': return typeof v.opId === 'string' ? { t: 'reject', opId: v.opId, error: typeof v.error === 'string' ? v.error : 'Rejected by server' } : null;

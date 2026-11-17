@@ -9,7 +9,7 @@ import { clearRecent } from '../commands/recent.svelte';
 import { STORAGE_KEY as V1_KEY } from '../model/persist';
 import { lastResult, toast } from '../ui/shell.svelte';
 import { SyncEngine, type Cache, type OpMeta, type SocketLike, type Status } from './engine';
-import { colorOf, initialsOf, type MapInfo, type Op, type PresenceEntry, type User } from './protocol';
+import { colorOf, initialsOf, type MapInfo, type Op, type PresenceEntry, type TaskDelivery, type User } from './protocol';
 
 export interface Me extends User { isAdmin?: boolean }
 export const isAdmin = (me: Me | null): boolean => Boolean(me && (me.isAdmin || me.admin));
@@ -49,6 +49,8 @@ export const live = $state({
   maps: [] as MapInfo[],
   /** The open map ('' until the server names it). */
   mapId: '',
+  /** How the open map learns of task service changes, from the last /tasks status answer (null until one comes). */
+  taskDelivery: null as TaskDelivery | null,
 });
 
 const initialView = read(VIEW_KEY);
@@ -90,7 +92,7 @@ function mirror(): void {
   live.users = Object.fromEntries(engine.users);
   if (engine.maps.length) live.maps = engine.maps;
   if (JSON.stringify(engine.taskSync) !== JSON.stringify(features.taskSync)) features.taskSync = engine.taskSync;
-  if (engine.map && engine.map !== live.mapId) { live.mapId = engine.map; remember(engine.map); }
+  if (engine.map && engine.map !== live.mapId) { live.mapId = engine.map; live.taskDelivery = null; remember(engine.map); }
   live.version++;
 }
 
@@ -199,6 +201,7 @@ function connect(map: string | undefined): void {
     openMap: id => switchMap(id),
     tasks: args => {
       void engine!.tasks(args).then(r => {
+        if (r.ok && r.delivery) live.taskDelivery = r.delivery;
         if (r.ok) { lastResult.text = r.log; lastResult.ok = true; lastResult.seq++; toast(r.log, 'info'); }
         else { lastResult.text = r.error; lastResult.ok = false; lastResult.seq++; toast(r.error); }
       });
@@ -331,3 +334,10 @@ export function logout(): void {
 }
 
 if (typeof window !== 'undefined') window.addEventListener('pagehide', saveCache);
+// Back on a tab whose map is bound to a task service: the server pulls soon (D20).
+if (typeof document !== 'undefined') document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') engine?.nudgeTasks(); });
+
+/** Ask for the open map's /tasks status without showing it, for the task sync section's delivery summary. */
+export function checkTaskDelivery(): void {
+  void engine?.tasks({ action: 'status' }).then(r => { if (r.ok && r.delivery) live.taskDelivery = r.delivery; });
+}

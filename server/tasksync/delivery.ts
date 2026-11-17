@@ -23,20 +23,23 @@ export function pollIntervals(caps:Capabilities,override?:number):{ pollMs:numbe
   const pollMs=override!==undefined?Math.max(MIN_POLL_MS,override):caps.pollMs;
   return {pollMs,idlePollMs:Math.max(caps.idlePollMs,pollMs)};
 }
-/** Why this map gets no webhooks, or undefined when it may have them. `reach` is undefined until PUBLIC_URL is checked. */
-export function webhooksBlocked(setting:WebhookSetting,publicUrl:string|undefined,reach:Reachability|undefined,caps:Capabilities,label:string):string|undefined {
-  if(setting==='off')return 'webhooks are off (TASKSYNC_WEBHOOKS=off)';
-  if(!caps.webhooks)return `${label} has no webhooks`;
+/** Why this map gets no webhooks, or undefined when it may have them, with a short note for the sidebar's summary.
+ *  `reach` is undefined until PUBLIC_URL is checked. */
+export function webhooksBlockedWhy(setting:WebhookSetting,publicUrl:string|undefined,reach:Reachability|undefined,caps:Capabilities,label:string):{ reason:string; note:string }|undefined {
+  if(setting==='off')return {reason:'webhooks are off (TASKSYNC_WEBHOOKS=off)',note:'webhooks off'};
+  if(!caps.webhooks)return {reason:`${label} has no webhooks`,note:`${label} has no webhooks`};
   const unreachable=`webhooks need PUBLIC_URL to be an address ${label} can reach`;
-  if(!publicUrl)return unreachable;
+  if(!publicUrl)return {reason:unreachable,note:'webhooks off without PUBLIC_URL'};
   if(setting==='on')return undefined;
-  if(!reach)return 'PUBLIC_URL is not checked yet';
-  if(reach.loopback)return unreachable;
+  if(!reach)return {reason:'PUBLIC_URL is not checked yet',note:'checking PUBLIC_URL'};
+  if(reach.loopback)return {reason:unreachable,note:PRIVATE_NOTE};
   const needs=`${label} needs a public${caps.webhooks.https?' HTTPS':''} address`;
-  if(caps.webhooks.publicAddress&&!reach.publicAddress)return `${reach.reason??'PUBLIC_URL is not public'}: ${needs}`;
-  if(caps.webhooks.https&&!reach.https)return `PUBLIC_URL is not HTTPS: ${needs}`;
+  if(caps.webhooks.publicAddress&&!reach.publicAddress)return {reason:`${reach.reason??'PUBLIC_URL is not public'}: ${needs}`,note:PRIVATE_NOTE};
+  if(caps.webhooks.https&&!reach.https)return {reason:`PUBLIC_URL is not HTTPS: ${needs}`,note:'webhooks off without HTTPS'};
   return undefined;
 }
+const PRIVATE_NOTE='webhooks off on a private address';
+export const webhooksBlocked=(setting:WebhookSetting,publicUrl:string|undefined,reach:Reachability|undefined,caps:Capabilities,label:string):string|undefined=>webhooksBlockedWhy(setting,publicUrl,reach,caps,label)?.reason;
 /** Registered, but the provider's handshake did not come within its timeout. */
 export function handshakeMissing(caps:Capabilities,rec:DeliveryRecord,now:number):boolean {
   const timeout=caps.webhooks?caps.webhooks.handshakeTimeoutMs:undefined;
@@ -75,4 +78,15 @@ export function deliveryStatus(d:Delivery,count:number,hint?:string):string {
   if(!count)return `no webhooks yet (next sync registers them), ${polling}`;
   if(d.lastDelivery)return `${count} webhooks · last delivery ${clock(d.lastDelivery)} · ${polling}`;
   return `${count} webhooks, none delivered yet${hint?`: ${hint}`:''} · ${polling}`;
+}
+/** The delivery mode as the sidebar shows it: one line, with the full reason for its tooltip. */
+export interface DeliverySummary { mode:Delivery['mode']; summary:string; reason:string }
+/** "1 min", "2 min", "15 s". */
+export const shortEvery=(ms:number)=>ms%60_000===0?`${ms/60_000} min`:`${Math.round(ms/1000)} s`;
+/** "Live updates", "Checking every 2 min", "Checking every 2 min: webhooks off on a private address". `count`: webhooks
+ *  registered; `note`: why webhooks are off. */
+export function deliverySummary(d:Delivery,count:number,note?:string):DeliverySummary {
+  const checking=`Checking every ${shortEvery(d.nextPollMs)}`;
+  const summary=d.mode==='live'?'Live updates':d.mode==='off'?(note?`${checking}: ${note}`:checking):d.mode==='failed'?`${checking}: webhooks failed`:count?`${checking}: webhooks not delivering yet`:checking;
+  return {mode:d.mode,summary,reason:d.reason};
 }

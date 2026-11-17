@@ -149,10 +149,11 @@ test('every button in each sidebar view shows its command', async ({ browser, ba
   const page = await userPage(browser, 'alice', baseURL!, true);
   await openMap(page);
   const inspector = page.getByTestId('inspector');
+  // A button that only opens a panel (data-opens, such as a task service's account panel) runs no command.
   const silent = () => page.locator('[data-testid="inspector"] > .body').evaluate(body => {
     const has = (t: string | null) => /(^|[\s(:])\/[a-z]/.test(t ?? '');
     return [...body.querySelectorAll('button')]
-      .filter(b => b.checkVisibility() && !b.hasAttribute('aria-controls') && !b.closest('.field-row')?.querySelector('.code'))
+      .filter(b => b.checkVisibility() && !b.hasAttribute('aria-controls') && !b.hasAttribute('data-opens') && !b.closest('.field-row')?.querySelector('.code'))
       .filter(b => !has(b.title) && !has(b.getAttribute('aria-description')) && !has(b.textContent))
       .map(b => (b.getAttribute('aria-label') || b.textContent || '').trim());
   });

@@ -160,8 +160,12 @@ export function startServer(config:Config,options:{schedule?:boolean}&AppOptions
             if(!opId)throw new Error('Request id required');
             if(!sync)throw new Error('No task service is configured on this server');
             const args=taskRequestArgs(msg.args,registry),mapId=client.mapId;
+            // A status answer also carries the delivery mode as one line, for the sidebar's summary.
             sync.request(mapId,args,user,'web')
-              .then(log=>send(ws,{t:'tasks',opId,ok:true,log}),error=>send(ws,{t:'tasks',opId,ok:false,error:error instanceof Error?error.message:'Task service request failed'}));
+              .then(async log=>{const delivery=args.action==='status'?await sync.deliveryInfo?.(mapId).catch(()=>undefined):undefined;send(ws,{t:'tasks',opId,ok:true,log,...(delivery?{delivery}:{})});},error=>send(ws,{t:'tasks',opId,ok:false,error:error instanceof Error?error.message:'Task service request failed'}));
+          }else if(msg.t==='tasks-nudge') {
+            // The tab became visible again: pull soon when webhooks are not live (the engine rate-limits).
+            sync?.nudge(client.mapId);
           }else if(msg.t==='op'||msg.t==='undo'||msg.t==='redo') {
             if(!opId)throw new Error('Operation id required');
             const hub=maps.get(client.mapId);if(!hub)throw new Error('Map deleted');

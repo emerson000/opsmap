@@ -16,7 +16,7 @@ import { SyncTables, type Base } from './links';
 import { migrateTaskSync } from './migrate';
 import { classifyPublicUrl, lookupAll, type Reachability } from './reachability';
 import { FIELD_KEY, FIELDS, NOTE_LIMIT, SWITCHED, dayInstant, mergeFields, sectorOf, syncable, taskFields, unitFields, type Field, type Fields, type Limits } from './merge';
-import { checkDue, deliveryMode, type DeliveryRecord, deliveryStatus, handshakeMissing, handshakeReason, NUDGE_DELAY_MS, NUDGE_EVERY_MS, pollIntervals, REACH_MS, retryDelay, webhooksBlocked, type WebhookSetting } from './delivery';
+import { checkDue, deliveryMode, type DeliveryRecord, deliveryStatus, handshakeMissing, handshakeReason, NUDGE_DELAY_MS, NUDGE_EVERY_MS, pollIntervals, REACH_MS, retryDelay, webhooksBlocked, webhooksBlockedWhy, deliverySummary, type DeliverySummary, type WebhookSetting } from './delivery';
 
 export interface Timers { set(fn:()=>void,ms:number):unknown; clear(handle:unknown):void }
 export interface EngineOptions {
@@ -190,6 +190,12 @@ export class TaskSyncEngine implements SyncService {
     if(!p)return {mode:'off',reason:'not bound',nextPollMs:0};
     const {pollMs,idlePollMs}=pollIntervals(p.capabilities,this.pollOverrideMs);
     return deliveryMode({blocked:this.blocked(p),caps:p.capabilities,label:p.descriptor.label,rec:this.tables.delivery(mapId),checkedAt:this.tables.row(mapId)?.hooks_checked,lastDelivery:this.tables.row(mapId)?.last_delivery,now:this.now(),pollMs,idlePollMs,count:this.hookCount(mapId)});
+  }
+  /** The delivery mode as the sidebar shows it (sent with the /tasks status answer), or undefined when the map is not bound. */
+  async deliveryInfo(mapId:string):Promise<DeliverySummary|undefined> {
+    const bound=this.maps.get(mapId)?.doc.settings.taskSync,p=bound&&this.registry.get(bound.provider);if(!p)return undefined;
+    await this.reachability();
+    return deliverySummary(this.delivery(mapId),this.hookCount(mapId),webhooksBlockedWhy(this.setting,this.hookBase,this.reach?.value,p.capabilities,p.descriptor.label)?.note);
   }
   /** Registered webhooks, as the provider counts its state, else one per watched container. */
   private hookCount(mapId:string):number {

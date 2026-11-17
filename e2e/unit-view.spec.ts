@@ -42,7 +42,7 @@ test('unit view: near, attach and detach, reinforce with, scope cut, halt by kin
   await page.context().close();
 });
 
-test('unit view: function confirm inline, a map pick for Near, and the Vikunja-free view', async ({ browser, baseURL }) => {
+test('unit view: function confirm inline, a map pick for Near, with no task service', async ({ browser, baseURL }) => {
   const page = await userPage(browser, 'alice', baseURL!, true);
   await openMap(page);
   const inspector = page.getByTestId('inspector');

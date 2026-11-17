@@ -189,6 +189,17 @@ describe('opsmap_command matches the command bar',()=>{
     expect(bar.doc.log.at(-1)?.text).toBe('VIKUNJA UNBOUND FROM OPS');
     expect(bar.doc.settings.taskSync).toBeUndefined();
   });
+  it('nudges the task sync from opsmap_command and the read tools on a map (D20)',async()=>{
+    const nudged:string[]=[];
+    const sync:SyncService={request:async()=>'not asked',webhook:()=>({status:404,trigger:false}),nudge:id=>{nudged.push(id);},start:()=>{},stop:async()=>{}};
+    await call('opsmap_command',{text:'/sitrep',map:'field'},false,sync);
+    await call('opsmap_query',{map:'field'},false,sync);
+    await call('opsmap_sitrep',{map:'field'},false,sync);
+    expect(nudged).toEqual([field.mapId,field.mapId,field.mapId]);
+    // An unknown map nudges nothing.
+    await call('opsmap_query',{map:'nope'},false,sync);
+    expect(nudged).toHaveLength(3);
+  });
   it('switches a field off and on the same way from both',async()=>{
     const sync:SyncService={request:async()=>'not asked',webhook:()=>({status:404,trigger:false}),nudge:()=>{},start:()=>{},stop:async()=>{}};
     served.registry=registry;served.sync=sync;features.taskSync=registry.descriptors();

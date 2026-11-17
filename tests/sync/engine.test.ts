@@ -338,8 +338,31 @@ describe('sync engine maps', () => {
     const good = { id: 'fake', label: 'Fake', aliases: ['fk'], rootNoun: 'project', containerNoun: 'section', tokenHelp: 'Paste it', tokenUrl: 'https://x.test/t', urls: { root: 'https://x.test/{root}', container: 'https://x.test/{root}/{container}', task: 'https://x.test/{root}/{id}' } };
     const bad = [{ ...good, id: 'js', urls: { ...good.urls, task: 'javascript:alert(1)' } }, { ...good, id: 'x', tokenUrl: 'data:x' }, { ...good, aliases: [3] }, 'nope'];
     const msg = parseServerMessage(JSON.stringify({ t: 'welcome', me: { id: 'x' }, users: [], seq: 0, taskSync: [good, ...bad] }));
-    expect(msg).toMatchObject({ t: 'welcome', taskSync: [good] });
+    expect(msg).toMatchObject({ t: 'welcome', taskSync: [{ ...good, fields: [] }] });
+    // The field switches the service syncs: SYNC_FIELDS names only, in that order.
+    const fields = parseServerMessage(JSON.stringify({ t: 'welcome', me: { id: 'x' }, users: [], seq: 0, taskSync: [{ ...good, fields: ['note', 'bogus', 'identity'] }] }));
+    expect(fields).toMatchObject({ taskSync: [{ fields: ['identity', 'note'] }] });
     expect(parseServerMessage('{"t":"welcome","me":{"id":"x"},"users":[],"seq":0}')).toMatchObject({ taskSync: [] });
     expect(parseServerMessage('{"t":"tasks","opId":"o1","ok":true,"log":"FAKE SYNC"}')).toEqual({ t: 'tasks', opId: 'o1', ok: true, log: 'FAKE SYNC', error: undefined });
+    const delivery = { mode: 'off', summary: 'Checking every 1 min', reason: 'webhooks are off (TASKSYNC_WEBHOOKS=off)' };
+    expect(parseServerMessage(JSON.stringify({ t: 'tasks', opId: 'o2', ok: true, log: 'FAKE: bound', delivery }))).toMatchObject({ delivery });
+    expect(parseServerMessage(JSON.stringify({ t: 'tasks', opId: 'o3', ok: true, log: 'x', delivery: { ...delivery, mode: 'loud' } }))).not.toHaveProperty('delivery');
+  });
+
+  it('nudges the task sync when the tab is visible again, only on a bound map', async () => {
+    const sent: ClientMessage[] = [];
+    const bound = { ...emptyDoc(), settings: { ...emptyDoc().settings, taskSync: { provider: 'fake', label: 'Fake', root: 'R1', title: 'Ops' } } };
+    for (const [doc, expected] of [[emptyDoc(), 0], [bound, 1]] as const) {
+      sent.length = 0;
+      const s = scripted(() => ({ t: 'welcome', me, users: [me], seq: 0, doc }));
+      const send = s.socket.send.bind(s.socket);
+      s.socket.send = (data: string) => { sent.push(JSON.parse(data)); send(data); };
+      const engine = new SyncEngine({ connect: s.open });
+      engine.nudgeTasks();
+      engine.start(); await flush();
+      engine.nudgeTasks();
+      expect(sent.filter(m => m.t === 'tasks-nudge')).toHaveLength(expected);
+      engine.stop();
+    }
   });
 });

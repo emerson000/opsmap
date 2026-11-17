@@ -120,7 +120,7 @@ export const VERB_SLOTS: readonly VerbSlot[] = [
   { verb: 'tasks', form: 'bind', kinds: ['map', 'sector'], slots: ['[‹service›]', '"‹project›"', '[without ‹field›[,‹field›…]]'], control: 'tasks-bind', label: 'Bind…', menu: 'form' },
   { verb: 'tasks', form: 'unbind', kinds: ['map', 'sector'], slots: [], control: 'tasks-unbind', label: 'Unbind…' },
   { verb: 'tasks', form: 'sync', kinds: ['map', 'unit', 'sector'], slots: [], control: 'tasks-sync', label: 'Sync', menu: 'run' },
-  // The switches themselves come with the task sync section's field toggles (Task 5); the row declares the form.
+  // The task sync section renders one switch per field the bound service syncs (descriptor `fields`).
   { verb: 'tasks', form: 'field', kinds: ['map', 'sector'], slots: ['‹identity|state|due|note|progress›', 'on|off'], control: 'tasks-field', label: 'Sync fields' },
   { verb: 'tasks', form: 'status', kinds: ['map', 'unit', 'sector'], slots: [], control: 'tasks-status', label: 'Status', menu: 'run' },
 ];

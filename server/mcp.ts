@@ -42,6 +42,8 @@ export async function mcpRequest(request:Request,maps:Maps,user:User,agent?:{id:
   server.registerTool('opsmap_command',{description:'Execute a slash command on a shared map, exactly as typed in the command bar.',inputSchema:{text:z.string().min(1).max(16384),map,
     selected:z.string().max(128).optional().describe('A unit (designation, title or id) to treat as selected, as in the command bar: an unclear unit name prefers its sector, and /new without in ‹sector› uses its sector')}},async({text,map,selected})=>{
     let hub;try{hub=maps.resolve(map);}catch(error){return failure(error);}
+    // An agent is working on the map: pull soon when the task service's webhooks are not live (D20).
+    sync?.nudge(hub.mapId);
     let selectedId:string|undefined;
     if(selected){try{selectedId=resolveUnit(selected,hub.doc).id;}catch(error){return refuse(`Selected unit: ${error instanceof Error?error.message:'unknown'}`);}}
     const now=new Date(),parsed=parse(text,hub.doc,{now,selectedId,providers:[...providers]});if(!parsed.ok)return result(parsed);
@@ -70,8 +72,8 @@ export async function mcpRequest(request:Request,maps:Maps,user:User,agent?:{id:
       return result({ok:true,log:op.log,preview:parsed.preview});
     }catch(error){return failure(error);}
   });
-  server.registerTool('opsmap_query',{description:'Query units with optional filters.',inputSchema:{map,sector:z.string().optional(),affiliation:z.string().optional(),lifecycle:z.string().optional(),ring:z.string().optional(),text:z.string().optional()}},async q=>{let hub;try{hub=maps.resolve(q.map);}catch(error){return failure(error);}return result(hub.doc.units.filter(u=>(!q.sector||u.sectorId===q.sector||hub.doc.sectors.find(s=>s.id===u.sectorId)?.name.toLowerCase()===q.sector.toLowerCase())&&(!q.affiliation||u.affiliation===q.affiliation)&&(!q.lifecycle||u.lifecycle===q.lifecycle)&&(!q.ring||ringForRadius(u.pos.r)===q.ring)&&(!q.text||`${u.designation} ${u.title} ${u.note??''}`.toLowerCase().includes(q.text.toLowerCase()))).map(u=>row(u,hub.doc)));});
-  server.registerTool('opsmap_sitrep',{description:'Current situation report.',inputSchema:{map}},async q=>{try{return result(sitrepText(maps.resolve(q.map).doc,new Date()));}catch(error){return failure(error);}});
+  server.registerTool('opsmap_query',{description:'Query units with optional filters.',inputSchema:{map,sector:z.string().optional(),affiliation:z.string().optional(),lifecycle:z.string().optional(),ring:z.string().optional(),text:z.string().optional()}},async q=>{let hub;try{hub=maps.resolve(q.map);}catch(error){return failure(error);}sync?.nudge(hub.mapId);return result(hub.doc.units.filter(u=>(!q.sector||u.sectorId===q.sector||hub.doc.sectors.find(s=>s.id===u.sectorId)?.name.toLowerCase()===q.sector.toLowerCase())&&(!q.affiliation||u.affiliation===q.affiliation)&&(!q.lifecycle||u.lifecycle===q.lifecycle)&&(!q.ring||ringForRadius(u.pos.r)===q.ring)&&(!q.text||`${u.designation} ${u.title} ${u.note??''}`.toLowerCase().includes(q.text.toLowerCase()))).map(u=>row(u,hub.doc)));});
+  server.registerTool('opsmap_sitrep',{description:'Current situation report.',inputSchema:{map}},async q=>{try{const hub=maps.resolve(q.map);sync?.nudge(hub.mapId);return result(sitrepText(hub.doc,new Date()));}catch(error){return failure(error);}});
   server.registerTool('opsmap_help',{description:'Strict command grammar: every verb, or one verb (aliases and a leading / are accepted).',inputSchema:{verb:z.string().optional()}},async({verb})=>{
     if(!verb)return result(SYNTAX);
     const typed=verb.trim().replace(/^\//,'').toLowerCase(),v=aliases[typed]??(!(VERBS as readonly string[]).includes(typed)&&providerNamed(typed,providers)?'tasks':typed);

@@ -14,7 +14,8 @@
   import { recentIds } from '../../commands/recent.svelte';
   import { miniSymbol } from '../mini';
   import { annotate, initials, color, nameOf } from '../../sync/sync.svelte';
-  import { features, serviceUrl, taskService } from '../../model/features.svelte';
+  import { features, taskService } from '../../model/features.svelte';
+  import { taskUrl } from '../taskUrls';
   import { env, runCommand, toast, ui, type Theme } from '../shell.svelte';
   import { AFFILIATIONS, AFF_LABEL, CONDITIONS, LIFECYCLE_LABEL, RINGS, band, dayMonth, echelonRange, orderLine, ringOf, unitLabel } from '../words';
   import { slotFor, token } from '../verbs';
@@ -43,7 +44,7 @@
   /** The unit's task in the bound service, from the descriptor's URL template. */
   const taskLink = $derived.by(() => {
     const bound = doc.settings.taskSync, service = taskService(bound?.provider);
-    return unit.remote && bound && service ? serviceUrl(service.urls.task, { root: bound.root, id: unit.remote }) : null;
+    return unit.remote && bound && service ? taskUrl(service, bound.root, unit.remote) : null;
   });
 
   const cmd = (verb: string, args: Record<string, unknown> = {}): Command => ({ verb, args: { unit: unit.id, ...args } });
@@ -183,7 +184,7 @@
     <div class="desig">{unit.designation}</div>
     <div class="ttl">{unit.title}</div>
     <div class="sub">{AFF_LABEL[unit.affiliation]}{unit.cp ? ` · ${unit.cp.toUpperCase()} CP` : unit.fn === 'hq' ? ' · HQ' : ''} · {unit.presence === 'planned' ? 'planned (dashed)' : 'present'} · {LIFECYCLE_LABEL[unit.lifecycle]}</div>
-    {#if taskLink}<a class="task-link" data-testid="tasks-link" href={taskLink} target="_blank" rel="noopener noreferrer">{doc.settings.taskSync?.label} task #{unit.remote} ↗</a>{/if}
+    {#if taskLink}<a class="task-link" data-testid="tasks-link" href={taskLink} target="_blank" rel="noopener noreferrer" title="Open {unit.designation}'s task in {doc.settings.taskSync?.label}">{doc.settings.taskSync?.label} task ↗</a>{/if}
   </div>
 </header>
 
@@ -471,9 +472,9 @@
 </Section>
 
 {#if features.taskSync.length}
-  <Section kind={K} key="tasks" title={doc.settings.taskSync?.label ?? (features.taskSync.length === 1 ? features.taskSync[0].label : 'Task sync')} summary={unit.remote ? `task #${unit.remote}` : 'no task'} open={false}>
+  <Section kind={K} key="tasks" title={doc.settings.taskSync?.label ?? 'Task sync'} summary={taskLink ? 'linked to a task' : doc.settings.taskSync ? 'no task yet' : 'not bound'} open={false}>
     <Field label="Task" cmd={null}>
-      {#if taskLink}<a class="task-link" href={taskLink} target="_blank" rel="noopener noreferrer">Task #{unit.remote} ↗</a>{:else}<span class="muted">Not synced to a task yet.</span>{/if}
+      {#if taskLink}<a class="task-link" data-testid="tasks-task" href={taskLink} target="_blank" rel="noopener noreferrer">Task ↗</a>{:else}<span class="muted">{doc.settings.taskSync ? 'Not synced to a task yet.' : 'This map is not bound to a task service.'}</span>{/if}
     </Field>
     <Field label="Map sync" entry={slot('tasks', 'sync')} cmd="/tasks sync">
       <div class="pair">

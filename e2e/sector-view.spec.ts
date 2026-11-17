@@ -23,8 +23,8 @@ test('a sector name opens its view: new unit and area forms, width, sector HQ, r
   await expect(inspector).toHaveAttribute('data-kind', 'sector');
   await expect(inspector.getByTestId('view-name')).toHaveText('Household');
   await expect(page.locator('path.band.selected')).toHaveCount(1);
-  // No Vikunja on this server: no Vikunja section.
-  await expect(inspector.getByTestId('section-tasks')).toHaveCount(0);
+  // No task service on this server: no task sync section (the in-memory test service adds one).
+  await expect(inspector.getByTestId('section-tasks')).toHaveCount(process.env.OPSMAP_FAKE_PROVIDER === '1' ? 1 : 0);
 
   // + Unit…: the form previews /new with the sector fixed and checks it with the parser.
   await inspector.getByTestId('new-unit-open').click();

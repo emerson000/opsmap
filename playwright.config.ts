@@ -21,8 +21,8 @@ export default defineConfig({
   // Pixel 7 (Chromium), portrait, with touch.
   projects: [
     { name: 'desktop', testIgnore: /mobile\.spec\.ts/, use: { browserName: 'chromium', viewport: { width: 1280, height: 800 } } },
-    { name: 'iphone13', testMatch: /mobile\.spec\.ts/, use: { ...devices['iPhone 13'] } },
-    { name: 'pixel7', testMatch: /mobile\.spec\.ts/, use: { ...devices['Pixel 7'] } },
+    { name: 'iphone13', testMatch: /(mobile|task-sync)\.spec\.ts/, use: { ...devices['iPhone 13'] } },
+    { name: 'pixel7', testMatch: /(mobile|task-sync)\.spec\.ts/, use: { ...devices['Pixel 7'] } },
   ],
   webServer: {
     command: 'npm run build && node dist/server/index.js',
