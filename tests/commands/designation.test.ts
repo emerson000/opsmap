@@ -32,3 +32,40 @@ describe('as ‹designation›: a taken name gets the next number', () => {
     expect(run(doc, '/rename DELTA "One" as DELTA2')).toMatchObject({ error: 'Designation DELTA2 is already taken' });
   });
 });
+
+describe('a title typed as a designation', () => {
+  it('/new "E1" fails when E1 exists, like as E1; a free one is used as typed', () => {
+    let doc = ok(seedDoc(now), '/new "E1" in Work').doc;
+    expect(names(doc)).toContain('E1');
+    expect(run(doc, '/new "E1" in Work')).toMatchObject({ error: 'Designation E1 is already taken' });
+    expect(run(doc, '/new "e1" in Work')).toMatchObject({ error: 'Designation E1 is already taken' });
+    doc = ok(doc, '/new "E2" in Work').doc;
+    expect(names(doc)).toContain('E2');
+  });
+
+  it('a one-word title without a digit is numbered, like as DELTA', () => {
+    const doc = ok(ok(seedDoc(now), '/new "Delta" in Work').doc, '/new "Delta" in Work').doc;
+    expect(names(doc)).toEqual(expect.arrayContaining(['DELTA', 'DELTA2']));
+  });
+
+  it('a longer title is never refused; a base that ends in a digit gets a hyphen before its number', () => {
+    let doc = ok(seedDoc(now), '/new "Plan 2025" in Work').doc;
+    doc = ok(doc, '/new "Plan 2025" in Work').doc;
+    doc = ok(doc, '/new "Plan 2025" in Work').doc;
+    expect(names(doc)).toEqual(expect.arrayContaining(['PLAN2025', 'PLAN2025-2', 'PLAN2025-3']));
+    // An explicit designation still wins over the title.
+    expect(ok(doc, '/new "E1" in Work as E7').log).toContain('CAPTURE E7');
+  });
+});
+
+describe('Vikunja tasks', () => {
+  it('a task titled like a taken designation still syncs, with a free designation', () => {
+    let doc = ok(seedDoc(now), '/new "E1" in Work').doc;
+    const bound = apply(doc, { verb: 'vk', args: { action: 'bound', project: 1, title: 'Main' } }, now);
+    if ('error' in bound) throw new Error(bound.error);
+    doc = bound.doc;
+    const r = apply(doc, { verb: 'vk', args: { action: 'add', task: 9001, title: 'E1', sectorId: 'work' } }, now);
+    if ('error' in r) throw new Error(r.error);
+    expect(r.doc.units.find(u => u.vk === 9001)?.designation).toBe('E1-2');
+  });
+});

@@ -18,13 +18,26 @@ export function freeDesignation(wanted: string, taken: Set<string>): string {
   while (occupied.has(`${wanted}${suffix}`)) suffix++;
   return `${wanted}${suffix}`;
 }
+/**
+ * A title typed as a designation: one word of letters and digits, ending in a digit, that fits a designation
+ * whole (E1, BRAVO2). `/new "E1"` then means the designation E1, with the same rule as `as E1`: never renumbered.
+ */
+export function titleAsDesignation(title: string): string | undefined {
+  const t=title.trim().toUpperCase();
+  return /^[A-Z0-9]{1,8}$/.test(t)&&/[0-9]$/.test(t)?t:undefined;
+}
+/**
+ * A free designation made from a title: its letters and digits, at most 8. When that is taken, the next free
+ * number; after a base that ends in a digit, with a hyphen (PLAN2025-2), so it never reads as another number.
+ */
 export function designationFrom(title: string, taken: Set<string>): string {
   const words=title.normalize('NFKD').replace(/[\u0300-\u036f]/g,'').toUpperCase().match(/[A-Z0-9]+/g) ?? [];
   const base=words.join('').slice(0,8);
   const occupied=new Set([...taken].map(d=>d.toUpperCase()));
   if(!base){let n=1;while(occupied.has(`NEW${n}`))n++;return `NEW${n}`;}
   if (!occupied.has(base)) return base;
+  const sep=/[0-9]$/.test(base)?'-':'';
   let suffix=2;
-  while (occupied.has(`${base}${suffix}`)) suffix++;
-  return `${base}${suffix}`;
+  while (occupied.has(`${base}${sep}${suffix}`)) suffix++;
+  return `${base}${sep}${suffix}`;
 }

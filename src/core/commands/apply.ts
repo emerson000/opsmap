@@ -1,6 +1,6 @@
 import ms from 'milsymbol';
 import type { Affiliation, Command, CommandPost, ControlMeasure, Sector, Doc, Echelon, FunctionKey, Order, Ring, Unit, Touched } from '../model/types';
-import { designationFrom, effectiveCondition, freeDesignation } from '../model/derive';
+import { designationFrom, effectiveCondition, freeDesignation, titleAsDesignation } from '../model/derive';
 import { ECHELONS, echelonIndex } from '../model/echelon';
 import { FUNCTIONS } from '../model/functions';
 import { AO_SIZES, AREA_SIZES, RING_R, RING_ORDER, orderRing, ringIndex, ringName, aoScale, aoSizeName, placementFits, areaShape, freeSpot, polarToXY, resolvePlacement, ringForRadius, normalizeDeg, radiusForDate, sectorAt, snap, xyToPolar, type AreaSize } from '../model/geometry';
@@ -161,7 +161,7 @@ function mutate(original:Doc,cmd:Command,now:Date):MutationResult {
         const affiliation=identities[String(a.affiliation??'pending')],fn=functions[String(a.fn??'inf')],echelon=sizes[String(a.echelon??'sec')];
         requireThat(affiliation&&fn&&echelon,'Invalid identity, function, or echelon');
         const sector=item(doc.sectors,a.sectorId??doc.sectors.find(s=>s.name==='Household')?.id??doc.sectors[0]?.id,'sector');
-        const title=text(a.title??'New unit','title');const taken=new Set(doc.units.map(u=>u.designation)),designation=a.designation===undefined?designationFrom(a.title===undefined?'':title,taken):freeDesignation(text(a.designation,'designation').toUpperCase(),taken);
+        const title=text(a.title??'New unit','title');const taken=new Set(doc.units.map(u=>u.designation)),typed=a.designation!==undefined?text(a.designation,'designation').toUpperCase():a.title!==undefined?titleAsDesignation(title):undefined,designation=typed!==undefined?freeDesignation(typed,taken):designationFrom(a.title===undefined?'':title,taken);
         requireThat(/^[A-Z0-9][A-Z0-9_-]*$/.test(designation),'Designation must use letters, numbers, underscores, or hyphens');requireThat(!taken.has(designation),`Designation ${designation} is already taken`);
         const ring=(a.ring??'far') as Ring;requireThat(rings.includes(ring),'Invalid ring');
         const kind=fn==='person'?'person':fn==='place'?'place':fn==='event'?'event':'unit';
@@ -494,7 +494,8 @@ function vikunja(doc:Doc,cmd:Command,now:Date):MutationResult {
     if(action==='add'){
       const task=positiveId(a.task,'Vikunja task');requireThat(!cur.units.some(u=>u.vk===task),'That Vikunja task is already linked');
       const sector=item(cur.sectors,a.sectorId,'sector');
-      step('new',{title:text(a.title,'title'),sectorId:sector.id,...(typeof a.dueAt==='string'?{dueAt:a.dueAt}:{}),...(typeof a.affiliation==='string'?{affiliation:a.affiliation}:{})});
+      // A task title is never refused as a duplicate designation: sync picks a free one.
+      const title=text(a.title,'title');step('new',{title,designation:designationFrom(title,new Set(cur.units.map(u=>u.designation))),sectorId:sector.id,...(typeof a.dueAt==='string'?{dueAt:a.dueAt}:{}),...(typeof a.affiliation==='string'?{affiliation:a.affiliation}:{})});
       const u=cur.units.at(-1)!;u.vk=task;
       if(typeof a.note==='string'&&a.note.trim())u.note=a.note;
       settle(u.id,a.status as VkStatus|undefined);
